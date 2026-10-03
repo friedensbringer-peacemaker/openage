@@ -6,6 +6,7 @@ References a graphic in the game that has to be converted.
 
 from __future__ import annotations
 
+import posixpath
 import typing
 
 if typing.TYPE_CHECKING:
@@ -15,6 +16,18 @@ if typing.TYPE_CHECKING:
         ConverterObject,
         RawAPIObject,
     )
+
+
+def relative_to_referer(target_path: str, referer_dir: str) -> str:
+    """
+    Return the modpack path target_path relative to the directory referer_dir
+    (both relative to the modpack root), in the "./" notation of nyan files.
+    """
+    path = posixpath.relpath(target_path, referer_dir)
+    if not path.startswith("../"):
+        path = f"./{path}"
+
+    return path
 
 
 class CombinedSprite:
@@ -85,11 +98,20 @@ class CombinedSprite:
         """
         return self.head_sprite_id
 
-    def get_relative_sprite_location(self) -> str | None:
+    def get_relative_sprite_location(self, referer_dir: str | None = None) -> str | None:
         """
         Return the sprite file location relative to where the file
         is expected to be in the modpack.
+
+        :param referer_dir: Directory of the nyan file that references the sprite
+                            (relative to the modpack root). Shared sprites are
+                            stored in data/game_entity/shared/graphics/, which is
+                            not "../shared/graphics/" from data/game_entity/<x>/<y>/,
+                            so the path has to be computed from the referer.
         """
+        if referer_dir is not None and len(self._refs) > 0:
+            return relative_to_referer(f"{self.resolve_sprite_location()}{self.filename}.sprite", referer_dir)
+
         if len(self._refs) > 1:
             return f"../shared/graphics/{self.filename}.sprite"
 

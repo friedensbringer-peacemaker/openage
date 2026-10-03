@@ -613,8 +613,7 @@ class RawAPIObject:
         """
         self._patch_target = target
 
-    @staticmethod
-    def _resolve_raw_value(value) -> NyanObject | str | float:
+    def _resolve_raw_value(self, value) -> NyanObject | str | float:
         """
         Check if a raw member value contains a reference to a resource (nyan
         objects or asset files), resolve the reference to a nyan-compatible value
@@ -629,14 +628,15 @@ class RawAPIObject:
             # Object references
             return value.resolve()
 
+        # Media file paths are relative to the nyan file of this object
         if isinstance(value, CombinedSprite):
-            return value.get_relative_sprite_location()
+            return value.get_relative_sprite_location(self.get_file_location()[0])
 
         if isinstance(value, CombinedTerrain):
-            return value.get_relative_terrain_location()
+            return value.get_relative_terrain_location(self.get_file_location()[0])
 
         if isinstance(value, CombinedSound):
-            return value.get_relative_file_location()
+            return value.get_relative_file_location(self.get_file_location()[0])
 
         if isinstance(value, float):
             # Round floats to 6 decimal places for increased readability

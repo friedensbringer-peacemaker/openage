@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import typing
 
+from .combined_sprite import relative_to_referer
+
 if typing.TYPE_CHECKING:
     from openage.convert.entity_object.conversion.aoc.genie_object_container import GenieObjectContainer
     from openage.convert.entity_object.conversion.converter_object import (
@@ -76,11 +78,18 @@ class CombinedSound:
         """
         return self.head_sound_id
 
-    def get_relative_file_location(self) -> str | None:
+    def get_relative_file_location(self, referer_dir: str | None = None) -> str | None:
         """
         Return the sound file location relative to where the file
         is expected to be in the modpack.
+
+        :param referer_dir: Directory of the nyan file that references the sound
+                            (relative to the modpack root), see
+                            CombinedSprite.get_relative_sprite_location().
         """
+        if referer_dir is not None and len(self._refs) > 0:
+            return relative_to_referer(f"{self.resolve_sound_location()}{self.filename}.opus", referer_dir)
+
         if len(self._refs) > 1:
             return f"../shared/sounds/{self.filename}.opus"
 

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import typing
 
+from .combined_sprite import relative_to_referer
+
 if typing.TYPE_CHECKING:
     from openage.convert.entity_object.conversion.aoc.genie_object_container import GenieObjectContainer
     from openage.convert.entity_object.conversion.aoc.genie_terrain import GenieTerrainObject
@@ -75,11 +77,20 @@ class CombinedTerrain:
         """
         return self.terrain_id
 
-    def get_relative_terrain_location(self) -> str | None:
+    def get_relative_terrain_location(self, referer_dir: str | None = None) -> str | None:
         """
         Return the terrain file location relative to where the file
         is expected to be in the modpack.
+
+        :param referer_dir: Directory of the nyan file that references the terrain
+                            (relative to the modpack root). The terrain file is stored
+                            with the first referer, so other terrains that use the
+                            same graphics (e.g. forest and leaves) need a path into
+                            that directory.
         """
+        if referer_dir is not None and len(self._refs) >= 1:
+            return relative_to_referer(f"{self.resolve_terrain_location()}{self.filename}.terrain", referer_dir)
+
         if len(self._refs) >= 1:
             return f"./graphics/{self.filename}.terrain"
 

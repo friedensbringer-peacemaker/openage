@@ -8,6 +8,7 @@ requests. Subroutine of the main AoC processor.
 
 from __future__ import annotations
 
+import posixpath
 import typing
 
 from ....entity_object.export.formats.sprite_metadata import LayerMode as SpriteLayerMode
@@ -39,45 +40,69 @@ class AoCMediaSubprocessor:
         cls.create_sound_requests(full_data_set)
 
     @staticmethod
-    def create_graphics_requests(full_data_set: GenieObjectContainer) -> None:
+    def create_sprite_requests(full_data_set: GenieObjectContainer) -> None:
         """
-        Create export requests for graphics referenced by CombinedSprite objects.
+        Create export requests and sprite/texture metadata for graphics
+        referenced by CombinedSprite objects.
+
+        A graphic (SLP) is exported only once, even if several sprites use it
+        (e.g. the annexes of a building that appear in its idle and damage
+        sprites, or deltas shared by several civ variants). Every sprite still
+        gets a layer for each of its graphics. The texture reference in the
+        sprite file is relative to the sprite's own directory, because shared
+        graphics are stored in a different folder than the sprite.
         """
         combined_sprites = full_data_set.combined_sprites.values()
-        handled_graphic_ids = set()
+
+        # graphic ID -> (export request, image filename, texture metadata path in the modpack)
+        handled_graphics: dict[int, tuple[MediaExportRequest, str, str]] = {}
 
         for sprite in combined_sprites:
             ref_graphics = sprite.get_graphics()
             graphic_targetdirs = sprite.resolve_graphics_location()
+            sprite_dir = sprite.resolve_sprite_location()
 
             # Animation metadata file definiton
             sprite_meta_filename = f"{sprite.get_filename()}.sprite"
-            sprite_meta_export = SpriteMetadataExport(sprite.resolve_sprite_location(), sprite_meta_filename)
+            sprite_meta_export = SpriteMetadataExport(sprite_dir, sprite_meta_filename)
             full_data_set.metadata_exports.append(sprite_meta_export)
 
+            sprite_graphic_ids = set()
             for graphic in ref_graphics:
                 graphic_id = graphic.get_id()
-                if graphic_id in handled_graphic_ids:
+                if graphic_id in sprite_graphic_ids:
                     continue
 
-                # Texture image file definiton
-                targetdir = graphic_targetdirs[graphic_id]
-                source_filename = f"{graphic['slp_id'].value!s}.slp"
-                target_filename = f"{sprite.get_filename()}_{graphic['slp_id'].value!s}.png"
+                sprite_graphic_ids.add(graphic_id)
 
-                export_request = MediaExportRequest(
-                    MediaType.GRAPHICS, targetdir, source_filename, target_filename
-                )
-                full_data_set.graphics_exports.update({graphic_id: export_request})
+                if graphic_id not in handled_graphics:
+                    # Texture image file definiton
+                    targetdir = graphic_targetdirs[graphic_id]
+                    source_filename = f"{graphic['slp_id'].value!s}.slp"
+                    target_filename = f"{sprite.get_filename()}_{graphic['slp_id'].value!s}.png"
 
-                # Texture metadata file definiton
-                # Same file stem as the image file and same targetdir
-                texture_meta_filename = f"{target_filename[:-4]}.texture"
-                texture_meta_export = TextureMetadataExport(targetdir, texture_meta_filename)
-                full_data_set.metadata_exports.append(texture_meta_export)
+                    export_request = MediaExportRequest(
+                        MediaType.GRAPHICS, targetdir, source_filename, target_filename
+                    )
+                    full_data_set.graphics_exports.update({graphic_id: export_request})
 
-                # Add texture image filename to texture metadata
-                texture_meta_export.add_imagefile(target_filename)
+                    # Texture metadata file definiton
+                    # Same file stem as the image file and same targetdir
+                    texture_meta_filename = f"{target_filename[:-4]}.texture"
+                    texture_meta_export = TextureMetadataExport(targetdir, texture_meta_filename)
+                    full_data_set.metadata_exports.append(texture_meta_export)
+
+                    # Add texture image filename to texture metadata
+                    texture_meta_export.add_imagefile(target_filename)
+                    export_request.add_observer(texture_meta_export)
+
+                    handled_graphics[graphic_id] = (
+                        export_request,
+                        target_filename,
+                        f"{targetdir}{texture_meta_filename}",
+                    )
+
+                export_request, target_filename, texture_meta_path = handled_graphics[graphic_id]
 
                 # Add metadata from graphics to animation metadata
                 sequence_type = graphic["sequence_type"].value
@@ -104,7 +129,7 @@ class AoCMediaSubprocessor:
                 mirror_mode = graphic["mirroring_mode"].value
                 sprite_meta_export.add_graphics_metadata(
                     target_filename,
-                    texture_meta_filename,
+                    posixpath.relpath(texture_meta_path, sprite_dir),
                     layer_mode,
                     layer_pos,
                     frame_rate,
@@ -115,10 +140,14 @@ class AoCMediaSubprocessor:
                 )
 
                 # Notify metadata export about SLP metadata when the file is exported
-                export_request.add_observer(texture_meta_export)
                 export_request.add_observer(sprite_meta_export)
 
-                handled_graphic_ids.add(graphic_id)
+    @staticmethod
+    def create_graphics_requests(full_data_set: GenieObjectContainer) -> None:
+        """
+        Create export requests for graphics referenced by CombinedSprite objects.
+        """
+        AoCMediaSubprocessor.create_sprite_requests(full_data_set)
 
         combined_terrains = full_data_set.combined_terrains.values()
         for texture in combined_terrains:
@@ -131,7 +160,10 @@ class AoCMediaSubprocessor:
             export_request = MediaExportRequest(
                 MediaType.TERRAIN, targetdir, source_filename, target_filename
             )
-            full_data_set.graphics_exports.update({slp_id: export_request})
+            # Key by terrain, not by SLP ID: several terrains can share an SLP ID
+            # and terrain SLP IDs can collide with graphic IDs of sprites. A
+            # colliding key silently drops the other export request.
+            full_data_set.graphics_exports.update({f"terrain_{texture.get_id()}": export_request})
 
             texture_meta_filename = f"{texture.get_filename()}.texture"
             texture_meta_export = TextureMetadataExport(targetdir, texture_meta_filename)

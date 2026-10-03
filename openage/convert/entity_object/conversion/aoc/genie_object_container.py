@@ -148,7 +148,7 @@ class GenieObjectContainer(ConverterObjectContainer):
         self.combined_sounds: dict[int, CombinedSound] = {}
         self.combined_terrains: dict[int, CombinedTerrain] = {}
 
-        self.graphics_exports: dict[int, MediaExportRequest] = {}
+        self.graphics_exports: dict[int | str, MediaExportRequest] = {}
         self.blend_exports: dict[int, MediaExportRequest] = {}
         self.sound_exports: dict[int, MediaExportRequest] = {}
         self.metadata_exports: list[MetadataExport] = []
