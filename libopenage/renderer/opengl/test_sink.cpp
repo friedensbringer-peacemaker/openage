@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <epoxy/egl.h>
+#include <filesystem>
 #include <epoxy/gl.h>
 
 #include "error/error.h"
@@ -302,6 +303,15 @@ bool TestFrameSink::paused() const {
 	return false;
 }
 
+bool TestFrameSink::poll_camera(float &dx, float &dy, float &zoom) {
+	std::lock_guard<std::mutex> lock{this->mutex};
+	dx = this->camera_dx;
+	dy = this->camera_dy;
+	zoom = this->camera_zoom;
+	this->camera_dx = this->camera_dy = this->camera_zoom = 0.0f;
+	return dx != 0.0f or dy != 0.0f or zoom != 0.0f;
+}
+
 bool TestFrameSink::wait_done(std::chrono::milliseconds timeout) {
 	std::unique_lock<std::mutex> lock{this->mutex};
 	this->cv.wait_for(lock, timeout, [this] {
@@ -421,6 +431,15 @@ void TestFrameSink::consumer_loop() {
 					log::log(MSG(info) << "Test sink: request " << step.width << "x" << step.height
 					                   << " at " << elapsed << " s");
 					this->size = pack_size(step.width, step.height);
+				}
+				else if (step.what == Step::kind::camera) {
+					log::log(MSG(info) << "Test sink: camera channel " << step.camera_dx << ", "
+					                   << step.camera_dy << " px, zoom " << step.camera_zoom
+					                   << " at " << elapsed << " s");
+					std::lock_guard<std::mutex> lock{this->mutex};
+					this->camera_dx += step.camera_dx;
+					this->camera_dy += step.camera_dy;
+					this->camera_zoom += step.camera_zoom;
 				}
 				else {
 					int want_width = 0;
@@ -593,6 +612,48 @@ std::vector<TestFrameSink::Step> TestFrameSink::replay_steps(double start, int w
 	add(t + 1.0, E::kMouseMove, cx + width / 4, cy - height / 8, 0, 0, 0, 0);
 	add(t + 1.2, E::kMouseDown, cx + width / 4, cy - height / 8, right, right, 0, 0);
 	add(t + 1.4, E::kMouseUp, cx + width / 4, cy - height / 8, right, 0, 0, 0);
+	t += 2.0;
+
+	// camera channel: capture, move by (width / 8, height / 8) pixels, capture again
+	const std::filesystem::path png{capture_file};
+	const auto sibling = [&](const char *suffix) {
+		return (png.parent_path() / (png.stem().string() + suffix + png.extension().string())).string();
+	};
+	Step before;
+	before.at = start + t;
+	before.what = Step::kind::capture;
+	before.file = sibling("-cam0");
+	steps.push_back(before);
+	Step move;
+	move.at = start + t + 0.5;
+	move.what = Step::kind::camera;
+	move.camera_dx = static_cast<float>(width / 8);
+	move.camera_dy = static_cast<float>(height / 8);
+	steps.push_back(move);
+	Step after;
+	after.at = start + t + 1.0;
+	after.what = Step::kind::capture;
+	after.file = sibling("-cam1");
+	steps.push_back(after);
+	t += 1.5;
+
+	// double click on empty ground (Qt order: press, release, press + double click, release)
+	const int dx = cx - width / 4;
+	const int dy = cy + height / 4;
+	add(t, E::kMouseMove, dx, dy, 0, 0, 0, 0);
+	add(t + 0.1, E::kMouseDown, dx, dy, left, left, 0, 0);
+	add(t + 0.15, E::kMouseUp, dx, dy, left, 0, 0, 0);
+	add(t + 0.25, E::kMouseDown, dx, dy, left, left, 0, 0);
+	add(t + 0.25, E::kMouseDoubleClick, dx, dy, left, left, 0, 0);
+	add(t + 0.3, E::kMouseUp, dx, dy, left, 0, 0, 0);
+	t += 0.5;
+
+	// zoom in by two steps through the camera channel
+	Step zoom;
+	zoom.at = start + t;
+	zoom.what = Step::kind::camera;
+	zoom.camera_zoom = 2.0f;
+	steps.push_back(zoom);
 
 	return steps;
 }

@@ -41,12 +41,15 @@ public:
 			input,
 			resize,
 			capture,
+			/// movement for the camera channel (poll_camera)
+			camera,
 		};
 		double at = 0.0;
 		kind what = kind::input;
 		SinkInputEvent event{};
 		int width = 0, height = 0;
 		std::string file{};
+		float camera_dx = 0.0f, camera_dy = 0.0f, camera_zoom = 0.0f;
 	};
 
 	/// Counters of the run.
@@ -83,6 +86,7 @@ public:
 	size_t poll_input(SinkInputEvent *out, size_t max) override;
 	bool should_close() const override;
 	bool paused() const override;
+	bool poll_camera(float &dx, float &dy, float &zoom) override;
 
 	/**
 	 * Wait until all steps are done and min_frames frames were read,
@@ -101,7 +105,10 @@ public:
 	/**
 	 * Steps for the input replay: Ctrl + left click spawns two entities, a drag
 	 * selects them (captured while the rectangle is visible), a right click
-	 * moves them.
+	 * moves them. Then the camera channel: capture <stem>-cam0.png, move the
+	 * camera by (width / 8, height / 8) pixels, capture <stem>-cam1.png; a
+	 * double click (press, release, press + double click, release) and a zoom
+	 * of 2 steps through the camera channel.
 	 *
 	 * @param start Time of the first step.
 	 * @param width Frame width (positions are relative to the frame size).
@@ -147,6 +154,7 @@ private:
 	uint64_t consumed = 0;
 
 	std::deque<SinkInputEvent> input;
+	float camera_dx = 0.0f, camera_dy = 0.0f, camera_zoom = 0.0f;
 	std::vector<Step> steps;
 	size_t next_step = 0;
 	uint64_t min_frames;
