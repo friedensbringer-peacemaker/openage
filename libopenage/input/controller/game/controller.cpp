@@ -58,8 +58,6 @@ void Controller::set_selected(const std::vector<gamestate::entity_id_t> ids) {
 }
 
 bool Controller::process(const event_arguments &ev_args, const std::shared_ptr<BindingContext> &ctx) {
-	std::unique_lock lock{this->mutex};
-
 	if (not ctx->is_bound(ev_args.e)) {
 		return false;
 	}
@@ -67,8 +65,18 @@ bool Controller::process(const event_arguments &ev_args, const std::shared_ptr<B
 	// TODO: check if action is allowed
 	auto bind = ctx->lookup(ev_args.e);
 	auto controller = this->shared_from_this();
+
+	// XR fork: transform without holding the controller mutex. The bindings
+	// create gamestate events (EventLoop::create_event locks the event loop),
+	// while event handlers run under the event loop lock and call back into the
+	// controller (select callback of game.drag_select -> set_selected()).
+	// Holding the controller mutex here took both locks in opposite order in
+	// the input thread and the simulation thread: a deadlock (two drag
+	// selections in a row, e.g. a double click). The controller methods the
+	// bindings use lock the mutex themselves.
 	auto game_event = bind.transform(ev_args, controller);
 
+	std::unique_lock lock{this->mutex};
 	switch (bind.action_type) {
 	case forward_action_t::SEND:
 		this->outqueue.push_back(game_event);

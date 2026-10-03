@@ -12,21 +12,39 @@
  * - modifier combinations (sweep over Ctrl/Shift/Alt/Meta/Num)
  * - fixed cases incl. config format ("Ctrl x") and invalid strings
  * - all keyboard bindings of cfg/keybinds.oac are parsed
+ * - lock order of the game controller: a binding that creates a gamestate
+ *   event while an event handler calls back into the controller (like
+ *   game.drag_select) must not deadlock (both threads meet inside their
+ *   critical sections, deterministic)
  *
  * Exit code 0 if all checks pass.
  */
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "config.h"
 #include "error/error.h"
+#include "event/event.h"
+#include "event/event_loop.h"
+#include "event/evententity.h"
+#include "event/eventhandler.h"
+#include "event/state.h"
+#include "input/controller/game/binding_context.h"
+#include "input/controller/game/controller.h"
+#include "input/event.h"
 #include "input/keys.h"
 #include "input/text_to_event.h"
+#include "time/time.h"
 
 #if WITH_QT
 	#include <QKeySequence>
@@ -232,6 +250,144 @@ void keybinds_file(const std::string &file) {
 	std::cout << "keyboard bindings parsed from " << file << ": " << parsed << "\n";
 }
 
+
+/// Meeting point of the input thread and the simulation thread (lock order check).
+struct Rendezvous {
+	std::mutex mutex;
+	std::condition_variable cv;
+	/// input thread is inside Controller::process -> binding transform
+	bool binding_entered = false;
+	/// simulation thread is inside an event handler (event loop locked)
+	bool handler_entered = false;
+	bool input_done = false;
+	bool simulation_done = false;
+
+	void set(bool &flag) {
+		{
+			std::lock_guard<std::mutex> lock{this->mutex};
+			flag = true;
+		}
+		this->cv.notify_all();
+	}
+
+	bool wait(const bool &flag, std::chrono::milliseconds limit) {
+		std::unique_lock<std::mutex> lock{this->mutex};
+		return this->cv.wait_for(lock, limit, [&flag] { return flag; });
+	}
+};
+
+class LockCheckEntity : public event::EventEntity {
+public:
+	explicit LockCheckEntity(const std::shared_ptr<event::EventLoop> &loop) :
+		EventEntity{loop} {}
+
+	size_t id() const override {
+		return 1;
+	}
+
+	std::string idstr() const override {
+		return "lock-check";
+	}
+};
+
+/// Like game.drag_select: runs under the event loop lock and calls back into the controller.
+class LockCheckSelectHandler : public event::OnceEventHandler {
+public:
+	LockCheckSelectHandler(Rendezvous &meet, const std::shared_ptr<input::game::Controller> &controller) :
+		OnceEventHandler{"check.select"},
+		meet{meet},
+		controller{controller} {}
+
+	void setup_event(const std::shared_ptr<event::Event> & /*event*/,
+	                 const std::shared_ptr<event::State> & /*state*/) override {}
+
+	void invoke(event::EventLoop & /*loop*/,
+	            const std::shared_ptr<event::EventEntity> & /*target*/,
+	            const std::shared_ptr<event::State> & /*state*/,
+	            const time::time_t & /*time*/,
+	            const param_map & /*params*/) override {
+		this->meet.set(this->meet.handler_entered);
+		// the input thread is inside its binding now
+		this->meet.wait(this->meet.binding_entered, std::chrono::milliseconds(2000));
+		this->controller->set_selected({1, 2});
+	}
+
+	time::time_t predict_invoke_time(const std::shared_ptr<event::EventEntity> & /*target*/,
+	                                 const std::shared_ptr<event::State> & /*state*/,
+	                                 const time::time_t &at) override {
+		return at;
+	}
+
+private:
+	Rendezvous &meet;
+	std::shared_ptr<input::game::Controller> controller;
+};
+
+/**
+ * Input thread: Controller::process() runs a binding that creates a gamestate
+ * event (locks the event loop). Simulation thread: EventLoop::reach_time()
+ * runs a handler that calls Controller::set_selected(). Both threads meet
+ * inside their critical sections, then take the other lock. Until the XR fork
+ * fix, process() held the controller mutex during the binding: deadlock.
+ */
+void controller_lock_order() {
+	using namespace std::chrono_literals;
+	Rendezvous meet;
+
+	auto loop = std::make_shared<event::EventLoop>();
+	auto state = std::make_shared<event::State>(loop);
+	auto entity = std::make_shared<LockCheckEntity>(loop);
+	auto controller = std::make_shared<input::game::Controller>(std::unordered_set<size_t>{0}, 0);
+	loop->add_event_handler(std::make_shared<LockCheckSelectHandler>(meet, controller));
+	loop->create_event("check.select", entity, state, time::time_t::from_double(1));
+
+	auto ctx = std::make_shared<input::game::BindingContext>();
+	const input::Event release{input::event_class::MOUSE_BUTTON,
+	                           input::mouse_button::LeftButton,
+	                           input::modifier::NoModifier,
+	                           input::event_type::MouseButtonRelease};
+	bool created = false;
+	input::game::binding_func_t transform = [&](const input::event_arguments & /*args*/,
+	                                            const std::shared_ptr<input::game::Controller> ctrl) {
+		meet.set(meet.binding_entered);
+		// the simulation thread holds the event loop lock now
+		meet.wait(meet.handler_entered, 2000ms);
+		ctrl->get_controlled();
+		auto ev = loop->create_event("check.select", entity, state, time::time_t::from_double(2));
+		created = ev != nullptr;
+		return ev;
+	};
+	ctx->bind(release, input::game::binding_action{input::game::forward_action_t::CLEAR, transform});
+
+	std::thread simulation{[&] {
+		loop->reach_time(time::time_t::from_double(1.5), state);
+		meet.set(meet.simulation_done);
+	}};
+	std::thread input_thread{[&] {
+		const input::event_arguments args{release, coord::input{0, 0}, coord::input_delta{0, 0}};
+		controller->process(args, ctx);
+		meet.set(meet.input_done);
+	}};
+
+	const bool simulation_ok = meet.wait(meet.simulation_done, 5000ms);
+	const bool input_ok = meet.wait(meet.input_done, 5000ms);
+	if (not simulation_ok or not input_ok) {
+		// the threads are stuck in each other's locks and cannot be joined
+		std::cerr << "FAIL: controller lock order: deadlock between Controller::process (binding -> "
+		             "EventLoop::create_event) and an event handler (-> Controller::set_selected)\n"
+		          << std::flush;
+		std::_Exit(EXIT_FAILURE);
+	}
+	simulation.join();
+	input_thread.join();
+
+	check(meet.binding_entered and meet.handler_entered, "controller lock order: threads met");
+	check(created, "controller lock order: binding created its event");
+	check(controller->get_selected() == std::vector<gamestate::entity_id_t>{1, 2},
+	      "controller lock order: selection from the event handler");
+	std::cout << "controller lock order: binding and event handler ran concurrently without deadlock\n";
+}
+
 } // namespace
 
 
@@ -246,6 +402,7 @@ int main(int argc, char **argv) {
 	if (argc > 1) {
 		keybinds_file(argv[1]);
 	}
+	controller_lock_order();
 
 	std::cout << "input check: " << checks << " checks, " << failures << " failed\n";
 	return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
