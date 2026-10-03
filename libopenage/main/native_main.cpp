@@ -11,7 +11,7 @@
  *   openage-native --root <dir> [--modpack hd_base] [--headless]
  *                  [--seconds N] [--width W --height H] [--check]
  *                  [--gles] [--render-check <png>] [--shader-check]
- *                  [--egl-sink-check <png> [--replay] [--frames N]]
+ *                  [--egl-sink-check <png> [--replay | --stop-in-resize] [--frames N]]
  *                  [--map test|random [--map-seed N] [--map-size N]
  *                   [--map-trees N] [--map-elevation H] [--map-view ne,se[,zoom[,height]]]]
  *
@@ -29,7 +29,13 @@
  * Engine::stop() after at least --frames (default 1000) frames. --replay
  * plays input instead of the first plain capture: Ctrl+click spawns two
  * entities, a drag selects them (captured into <png> while the rectangle is
- * visible), a right click moves them.
+ * visible), a right click moves them. --stop-in-resize (regression check)
+ * captures <png>, requests 1920x1080 and lets the consumer thread call
+ * Engine::stop() while the presenter is inside acquire_target() for the new
+ * size; the engine has to stop within 2 s (no second capture).
+ * A hanging engine fails the check instead of blocking: no new frame for
+ * 60 s stops it, and if it did not stop 10 s after Engine::stop(), the
+ * process exits with an error.
  *
  * --map random uses the random map generator (gamestate/map_generator.h) instead
  * of the fixed test map: deterministic per --map-seed, --map-size tiles (multiple
@@ -46,11 +52,13 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -88,6 +96,7 @@ struct native_args {
 	bool shader_check = false;
 	std::string egl_sink_check;
 	bool replay = false;
+	bool stop_in_resize = false;
 	uint64_t frames = 1000;
 	int seconds = 0;
 	size_t width = 1024;
@@ -100,7 +109,7 @@ void usage(const char *argv0) {
 	          << " --root <dir> [--modpack <id>]... [--headless] [--seconds <n>]"
 	             " [--width <w> --height <h>] [--check]"
 	             " [--gles] [--render-check <png>] [--shader-check]"
-	             " [--egl-sink-check <png> [--replay] [--frames <n>]]"
+	             " [--egl-sink-check <png> [--replay | --stop-in-resize] [--frames <n>]]"
 	             " [--map test|random [--map-seed <n>] [--map-size <n>] [--map-trees <n>]"
 	             " [--map-elevation <h>] [--map-view <ne,se[,zoom[,height]]>]]\n";
 }
@@ -141,6 +150,9 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		}
 		else if (arg == "--replay") {
 			args.replay = true;
+		}
+		else if (arg == "--stop-in-resize") {
+			args.stop_in_resize = true;
 		}
 		else if (arg == "--frames") {
 			args.frames = std::stoull(value());
@@ -340,7 +352,7 @@ bool egl_sink_check(const native_args &args,
 	std::filesystem::remove(png_resized);
 
 	std::vector<TestFrameSink::Step> steps;
-	if (args.replay) {
+	if (args.replay and not args.stop_in_resize) {
 		steps = TestFrameSink::replay_steps(start, width, height, png.string());
 	}
 	else {
@@ -358,11 +370,13 @@ bool egl_sink_check(const native_args &args,
 	resize.width = 1920;
 	resize.height = 1080;
 	steps.push_back(resize);
-	TestFrameSink::Step shot;
-	shot.at = last + 4.0;
-	shot.what = TestFrameSink::Step::kind::capture;
-	shot.file = png_resized.string();
-	steps.push_back(shot);
+	if (not args.stop_in_resize) {
+		TestFrameSink::Step shot;
+		shot.at = last + 4.0;
+		shot.what = TestFrameSink::Step::kind::capture;
+		shot.file = png_resized.string();
+		steps.push_back(shot);
+	}
 
 	// declared before the engine: destroyed after the engine threads are joined
 	auto sink = std::make_shared<TestFrameSink>(width, height, steps, args.frames);
@@ -370,24 +384,77 @@ bool egl_sink_check(const native_args &args,
 
 	auto engine = std::make_unique<engine::Engine>(engine::Engine::mode::FULL, root, args.modpacks, settings, args.map);
 
-	// stop the engine once the sink is done (or failed, or after a generous timeout)
+	// written before the engine is stopped, read after its threads are joined
+	clock::time_point sink_stop_time{};
+	clock::time_point watcher_stop_time{};
+	std::atomic<bool> stopped_by_sink{false};
+	if (args.stop_in_resize) {
+		// called from the consumer thread while the presenter waits inside acquire_target()
+		sink->stop_during_resize([&]() {
+			sink_stop_time = clock::now();
+			stopped_by_sink = true;
+			log::log(INFO << "egl sink check: stopping engine (consumer thread, during the resize)");
+			engine->stop();
+		});
+	}
+
+	// shutdown handshake between the main thread and the watcher, every wait is bounded
+	constexpr auto stop_limit = std::chrono::seconds(10);
+	constexpr auto stall_limit = std::chrono::seconds(60);
+	std::mutex shutdown_mutex;
+	std::condition_variable shutdown_cv;
+	bool stop_sent = false;
+	bool engine_gone = false;
+
+	// stop the engine once the sink is done (or failed, stalled, or after a generous timeout)
 	std::atomic<bool> loop_finished{false};
 	bool sink_done = false;
-	clock::time_point stop_time{};
 	std::thread watcher{[&]() {
 		const auto deadline = clock::now() + std::chrono::seconds(static_cast<int>(last) + 900);
+		uint64_t published = 0;
+		auto last_progress = clock::now();
 		while (not loop_finished and clock::now() < deadline) {
 			if (sink->wait_done(std::chrono::milliseconds(100))) {
-				sink_done = true;
-				break;
+				if (not args.stop_in_resize) {
+					sink_done = true;
+					break;
+				}
+				// the consumer stops the engine itself, wait_done() returns at once from now on
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			}
 			if (not sink->get_error().empty()) {
 				break;
 			}
+			// a hanging presenter (e.g. a deadlock) publishes no more frames
+			const auto stats = sink->get_stats();
+			if (stats.published != published) {
+				published = stats.published;
+				last_progress = clock::now();
+			}
+			else if (published > 0 and not stopped_by_sink and clock::now() - last_progress > stall_limit) {
+				log::log(ERR << "egl sink check: no new frame for "
+				             << std::chrono::duration<double>(clock::now() - last_progress).count()
+				             << " s, presenter stalled");
+				break;
+			}
 		}
-		stop_time = clock::now();
+		if (not stopped_by_sink) {
+			watcher_stop_time = clock::now();
+		}
 		log::log(INFO << "egl sink check: stopping engine");
 		engine->stop();
+
+		std::unique_lock<std::mutex> lock{shutdown_mutex};
+		stop_sent = true;
+		shutdown_cv.notify_all();
+		// a deadlocked engine never returns from loop() or the thread joins: fail instead of hanging
+		if (not shutdown_cv.wait_for(lock, stop_limit, [&] { return engine_gone; })) {
+			log::log(ERR << "egl sink check: engine did not stop within "
+			             << std::chrono::duration<double>(stop_limit).count()
+			             << " s after Engine::stop() (deadlock?)");
+			log::log(INFO << "egl sink check FAILED");
+			std::_Exit(EXIT_FAILURE);
+		}
 	}};
 
 	// an exception in the simulation must not destroy the joinable watcher (std::terminate)
@@ -401,14 +468,27 @@ bool egl_sink_check(const native_args &args,
 		engine->stop();
 	}
 	loop_finished = true;
-	watcher.join();
-	if (not loop_error.empty()) {
-		engine.reset();
-		return false;
+	{
+		// the watcher calls engine->stop() once more: destroy the engine only after that
+		std::unique_lock<std::mutex> lock{shutdown_mutex};
+		if (not shutdown_cv.wait_for(lock, stop_limit, [&] { return stop_sent; })) {
+			log::log(ERR << "egl sink check: watcher did not stop the engine");
+			std::_Exit(EXIT_FAILURE);
+		}
 	}
 	// joins the time loop and presenter threads
 	engine.reset();
+	const auto stop_time = stopped_by_sink ? sink_stop_time : watcher_stop_time;
 	const double stop_seconds = std::chrono::duration<double>(clock::now() - stop_time).count();
+	{
+		std::lock_guard<std::mutex> lock{shutdown_mutex};
+		engine_gone = true;
+	}
+	shutdown_cv.notify_all();
+	watcher.join();
+	if (not loop_error.empty()) {
+		return false;
+	}
 
 	auto stats = sink->get_stats();
 	auto error = sink->get_error();
@@ -428,18 +508,30 @@ bool egl_sink_check(const native_args &args,
 		log::log(ERR << "egl sink check: " << error);
 		ok = false;
 	}
-	if (not sink_done) {
+	if (args.stop_in_resize) {
+		if (not stats.stopped_in_resize) {
+			log::log(ERR << "egl sink check: engine was not stopped during the resize");
+			ok = false;
+		}
+	}
+	else if (not sink_done) {
 		log::log(ERR << "egl sink check: sink not done (frames or steps missing)");
 		ok = false;
 	}
 	if (stats.gl_errors != 0) {
 		ok = false;
 	}
-	if (stop_seconds >= 1.0) {
-		log::log(ERR << "egl sink check: stop took " << stop_seconds << " s (limit 1 s)");
+	const double stop_limit_seconds = args.stop_in_resize ? 2.0 : 1.0;
+	if (stop_seconds >= stop_limit_seconds) {
+		log::log(ERR << "egl sink check: stop took " << stop_seconds << " s (limit "
+		             << stop_limit_seconds << " s)");
 		ok = false;
 	}
-	for (const auto &file : {png, png_resized}) {
+	std::vector<std::filesystem::path> expected{png};
+	if (not args.stop_in_resize) {
+		expected.push_back(png_resized);
+	}
+	for (const auto &file : expected) {
 		if (not std::filesystem::exists(file)) {
 			log::log(ERR << "egl sink check: missing " << file.string());
 			ok = false;

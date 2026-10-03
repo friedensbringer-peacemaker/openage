@@ -23,6 +23,9 @@ constexpr auto pace_timeout = std::chrono::milliseconds(100);
 /// Consumer rate (like a 90 Hz headset).
 constexpr auto consumer_period = std::chrono::microseconds(11111);
 
+/// Longest wait of the producer for the consumer to stop the engine (stop_during_resize).
+constexpr auto resize_stop_timeout = std::chrono::milliseconds(2000);
+
 std::string egl_hex(EGLint code) {
 	char text[16];
 	std::snprintf(text, sizeof(text), "0x%04x", static_cast<unsigned>(code));
@@ -219,6 +222,9 @@ unsigned TestFrameSink::acquire_target(int width, int height) {
 
 	Slot &slot = this->frame_slots[index];
 	if (slot.texture == 0 or slot.width != width or slot.height != height) {
+		if (slot.texture != 0) {
+			this->resize_begins(width, height);
+		}
 		if (slot.producer_fbo != 0) {
 			glDeleteFramebuffers(1, &slot.producer_fbo);
 		}
@@ -330,6 +336,47 @@ TestFrameSink::Stats TestFrameSink::get_stats() const {
 	return this->stats;
 }
 
+void TestFrameSink::stop_during_resize(std::function<void()> stop) {
+	std::lock_guard<std::mutex> lock{this->mutex};
+	this->resize_stop = std::move(stop);
+}
+
+void TestFrameSink::resize_begins(int width, int height) {
+	std::unique_lock<std::mutex> lock{this->mutex};
+	if (not this->resize_stop or this->resize_stop_pending) {
+		return;
+	}
+	this->resize_stop_pending = true;
+	log::log(MSG(info) << "Test sink: resize to " << width << "x" << height
+	                   << " begins, consumer stops the engine");
+	this->cv.notify_all();
+	// bounded, and the destructor of the sink (stop) ends it as well
+	if (not this->cv.wait_for(lock, resize_stop_timeout, [this] {
+			return this->resize_stop_sent or this->stop;
+		})) {
+		log::log(MSG(warn) << "Test sink: consumer did not stop the engine in time");
+	}
+}
+
+void TestFrameSink::run_resize_stop() {
+	std::function<void()> stop_engine;
+	{
+		std::lock_guard<std::mutex> lock{this->mutex};
+		if (not this->resize_stop_pending or this->resize_stop_sent) {
+			return;
+		}
+		stop_engine = this->resize_stop;
+	}
+	log::log(MSG(info) << "Test sink: stopping the engine during the resize");
+	stop_engine();
+	{
+		std::lock_guard<std::mutex> lock{this->mutex};
+		this->resize_stop_sent = true;
+		this->stats.stopped_in_resize = true;
+	}
+	this->cv.notify_all();
+}
+
 void TestFrameSink::fail(const std::string &text) {
 	log::log(MSG(err) << "Test sink: " << text);
 	std::lock_guard<std::mutex> lock{this->mutex};
@@ -370,6 +417,8 @@ void TestFrameSink::consumer_loop() {
 	uint64_t last_sequence = 0;
 
 	while (not this->stop) {
+		this->run_resize_stop();
+
 		// newest frame (or the last one again if there is no new frame)
 		int index = -1;
 		void *wait_before_read = nullptr;

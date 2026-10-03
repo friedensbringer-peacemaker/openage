@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -60,6 +61,8 @@ public:
 		uint64_t gl_errors = 0;
 		size_t steps_done = 0;
 		std::vector<std::string> captures{};
+		/// stop_during_resize(): the consumer stopped the engine while the producer was resizing
+		bool stopped_in_resize = false;
 	};
 
 	/**
@@ -103,6 +106,17 @@ public:
 	Stats get_stats() const;
 
 	/**
+	 * Regression check: stop the engine in the middle of a size change. The
+	 * first acquire_target() that re-creates a slot in a new size hands the
+	 * stop over to the consumer thread, which calls stop(); the producer
+	 * continues once the call returned (bounded wait). The target of that
+	 * acquire_target() may never be published.
+	 *
+	 * @param stop Called once from the consumer thread (e.g. Engine::stop()).
+	 */
+	void stop_during_resize(std::function<void()> stop);
+
+	/**
 	 * Steps for the input replay: Ctrl + left click spawns two entities, a drag
 	 * selects them (captured while the rectangle is visible), a right click
 	 * moves them. Then the camera channel: capture <stem>-cam0.png, move the
@@ -137,6 +151,10 @@ private:
 	void consumer_cleanup();
 	bool capture(const Slot &slot, const std::string &file);
 	void fail(const std::string &text);
+	/// producer: resize of a slot begins (stop_during_resize)
+	void resize_begins(int width, int height);
+	/// consumer: run a pending stop of stop_during_resize
+	void run_resize_stop();
 
 	void *display = nullptr;
 	void *config = nullptr;
@@ -161,6 +179,9 @@ private:
 	Stats stats{};
 	std::string error{};
 	bool done = false;
+	std::function<void()> resize_stop{};
+	bool resize_stop_pending = false;
+	bool resize_stop_sent = false;
 
 	std::atomic<uint64_t> size;
 	std::atomic<bool> stop{false};
