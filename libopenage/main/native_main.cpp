@@ -14,6 +14,7 @@
  *                  [--egl-sink-check <png> [--replay | --stop-in-resize] [--frames N]]
  *                  [--map test|random [--map-seed N] [--map-size N]
  *                   [--map-trees N] [--map-elevation H] [--map-view ne,se[,zoom[,height]]]]
+ *                  [--background r,g,b,a [--background-switch r,g,b,a]]
  *
  * --gles selects an OpenGL ES 3.x context (like OPENAGE_GLES=1).
  * --render-check renders the game for --seconds (default 10) in a hidden
@@ -43,6 +44,11 @@
  * camera looks at the first start position, or at --map-view (tile ne,se, zoom,
  * camera height; for render checks).
  *
+ * --background sets the color behind the map (RGBA 0..1, window_settings::background;
+ * alpha 0 = transparent around the map). With --egl-sink-check,
+ * --background-switch changes it at runtime through the frame sink
+ * (FrameSink::poll_background) before the second capture (<png stem>-1920x1080.png).
+ *
  * <dir> must contain assets/ (with shaders and converted/{engine,<modpack>})
  * and cfg/. The converted modpacks (including the "engine" API modpack) are
  * produced offline with `python -m openage convert` and
@@ -50,6 +56,7 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -59,6 +66,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -102,7 +110,26 @@ struct native_args {
 	size_t width = 1024;
 	size_t height = 768;
 	openage::gamestate::MapSettings map{};
+	std::optional<std::array<float, 4>> background{};
+	std::optional<std::array<float, 4>> background_switch{};
 };
+
+/**
+ * Parse "r,g,b,a" (each 0..1).
+ */
+std::array<float, 4> parse_rgba(const std::string &text, const std::string &option) {
+	std::array<float, 4> rgba{};
+	std::istringstream in{text};
+	char sep = 0;
+	in >> rgba[0] >> sep >> rgba[1] >> sep >> rgba[2] >> sep >> rgba[3];
+	if (in.fail()) {
+		throw std::runtime_error(option + ": r,g,b,a (0..1)");
+	}
+	for (float &c : rgba) {
+		c = std::clamp(c, 0.0f, 1.0f);
+	}
+	return rgba;
+}
 
 void usage(const char *argv0) {
 	std::cerr << "usage: " << argv0
@@ -111,7 +138,8 @@ void usage(const char *argv0) {
 	             " [--gles] [--render-check <png>] [--shader-check]"
 	             " [--egl-sink-check <png> [--replay | --stop-in-resize] [--frames <n>]]"
 	             " [--map test|random [--map-seed <n>] [--map-size <n>] [--map-trees <n>]"
-	             " [--map-elevation <h>] [--map-view <ne,se[,zoom[,height]]>]]\n";
+	             " [--map-elevation <h>] [--map-view <ne,se[,zoom[,height]]>]]"
+	             " [--background <r,g,b,a> [--background-switch <r,g,b,a>]]\n";
 }
 
 bool parse_args(int argc, char **argv, native_args &args) {
@@ -206,6 +234,12 @@ bool parse_args(int argc, char **argv, native_args &args) {
 				throw std::runtime_error("--map-view: ne,se[,zoom[,height]]");
 			}
 			args.map.view = view;
+		}
+		else if (arg == "--background") {
+			args.background = parse_rgba(value(), arg);
+		}
+		else if (arg == "--background-switch") {
+			args.background_switch = parse_rgba(value(), arg);
 		}
 		else if (arg == "--help" or arg == "-h") {
 			return false;
@@ -364,6 +398,14 @@ bool egl_sink_check(const native_args &args,
 	}
 	// size change while running, captured in the new size
 	const double last = steps.back().at;
+	if (args.background_switch) {
+		// background change through the sink, visible in the second capture
+		TestFrameSink::Step bg;
+		bg.at = last + 0.5;
+		bg.what = TestFrameSink::Step::kind::background;
+		bg.background = *args.background_switch;
+		steps.push_back(bg);
+	}
 	TestFrameSink::Step resize;
 	resize.at = last + 1.0;
 	resize.what = TestFrameSink::Step::kind::resize;
@@ -573,6 +615,9 @@ int main(int argc, char **argv) {
 		win_settings.height = args.height;
 		if (args.gles) {
 			win_settings.backend = renderer::graphics_api_t::OPENGL_ES;
+		}
+		if (args.background) {
+			win_settings.background = *args.background;
 		}
 
 		if (args.shader_check) {

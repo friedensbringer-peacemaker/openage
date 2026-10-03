@@ -44,6 +44,8 @@ public:
 			capture,
 			/// movement for the camera channel (poll_camera)
 			camera,
+			/// new background color (poll_background)
+			background,
 		};
 		double at = 0.0;
 		kind what = kind::input;
@@ -51,6 +53,7 @@ public:
 		int width = 0, height = 0;
 		std::string file{};
 		float camera_dx = 0.0f, camera_dy = 0.0f, camera_zoom = 0.0f;
+		std::array<float, 4> background{0.0f, 0.0f, 0.0f, 0.0f};
 	};
 
 	/// Counters of the run.
@@ -90,6 +93,7 @@ public:
 	bool should_close() const override;
 	bool paused() const override;
 	bool poll_camera(float &dx, float &dy, float &zoom) override;
+	bool poll_background(float rgba[4]) override;
 
 	/**
 	 * Wait until all steps are done and min_frames frames were read,
@@ -173,6 +177,8 @@ private:
 
 	std::deque<SinkInputEvent> input;
 	float camera_dx = 0.0f, camera_dy = 0.0f, camera_zoom = 0.0f;
+	std::array<float, 4> background{0.0f, 0.0f, 0.0f, 0.0f};
+	bool background_pending = false;
 	std::vector<Step> steps;
 	size_t next_step = 0;
 	uint64_t min_frames;

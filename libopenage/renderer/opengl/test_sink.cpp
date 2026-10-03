@@ -318,6 +318,18 @@ bool TestFrameSink::poll_camera(float &dx, float &dy, float &zoom) {
 	return dx != 0.0f or dy != 0.0f or zoom != 0.0f;
 }
 
+bool TestFrameSink::poll_background(float rgba[4]) {
+	std::lock_guard<std::mutex> lock{this->mutex};
+	if (not this->background_pending) {
+		return false;
+	}
+	for (size_t i = 0; i < 4; ++i) {
+		rgba[i] = this->background[i];
+	}
+	this->background_pending = false;
+	return true;
+}
+
 bool TestFrameSink::wait_done(std::chrono::milliseconds timeout) {
 	std::unique_lock<std::mutex> lock{this->mutex};
 	this->cv.wait_for(lock, timeout, [this] {
@@ -489,6 +501,14 @@ void TestFrameSink::consumer_loop() {
 					this->camera_dx += step.camera_dx;
 					this->camera_dy += step.camera_dy;
 					this->camera_zoom += step.camera_zoom;
+				}
+				else if (step.what == Step::kind::background) {
+					log::log(MSG(info) << "Test sink: background (" << step.background[0] << ", "
+					                   << step.background[1] << ", " << step.background[2] << "), alpha "
+					                   << step.background[3] << " at " << elapsed << " s");
+					std::lock_guard<std::mutex> lock{this->mutex};
+					this->background = step.background;
+					this->background_pending = true;
 				}
 				else {
 					int want_width = 0;
