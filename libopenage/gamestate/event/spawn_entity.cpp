@@ -168,7 +168,7 @@ void SpawnEntityHandler::invoke(openage::event::EventLoop & /* loop */,
 		// Do nothing if the spawn position is not on the map
 		// (XR fork: INFO, embedders diagnose taps on headsets from the log)
 		log::log(INFO << "Entity spawn failed: "
-		             << "Spawn position " << pos
+		             << "Spawn position (" << pos.ne.to_float() << ", " << pos.se.to_float() << ")"
 		             << " is not inside the map area "
 		             << "(map size: " << map_size << ")");
 		return;
@@ -217,7 +217,7 @@ void SpawnEntityHandler::invoke(openage::event::EventLoop & /* loop */,
 
 	gstate->add_game_entity(entity);
 	log::log(INFO << "Entity spawned: " << nyan_entity << " (id " << entity->get_id() << ", owner "
-	              << static_cast<size_t>(owner_id) << ") at " << pos);
+	              << static_cast<size_t>(owner_id) << ") at tile (" << pos.ne.to_float() << ", " << pos.se.to_float() << ")");
 }
 
 time::time_t SpawnEntityHandler::predict_invoke_time(const std::shared_ptr<openage::event::EventEntity> & /* target */,

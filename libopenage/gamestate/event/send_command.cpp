@@ -64,7 +64,7 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 	                                                     std::vector<gamestate::entity_id_t>{});
 	// XR fork: INFO, embedders diagnose taps on headsets from the log
 	log::log(INFO << "Command " << static_cast<int>(command_type) << " for " << ids.size()
-	              << " entities, target " << target);
+	              << " entities, target tile (" << target.ne.to_float() << ", " << target.se.to_float() << ")");
 	for (auto id : ids) {
 		auto entity = gstate->get_game_entity(id);
 		auto command_queue = std::dynamic_pointer_cast<component::CommandQueue>(

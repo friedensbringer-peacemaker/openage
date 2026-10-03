@@ -133,7 +133,7 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 		auto mouse_pos = args.mouse.to_phys3(camera);
 		// XR fork: INFO, embedders diagnose taps on headsets from the log
 		log::log(INFO << "Input: Ctrl + left click at pixel (" << args.mouse.x << ", " << args.mouse.y
-		              << ") -> spawn at " << mouse_pos);
+		              << ") -> spawn at tile (" << mouse_pos.ne.to_float() << ", " << mouse_pos.se.to_float() << ")");
 		event::EventHandler::param_map::map_t params{
 			{"position", mouse_pos},
 			{"owner", controller->get_controlled()},
