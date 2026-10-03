@@ -59,6 +59,10 @@ const std::shared_ptr<Player> &GameState::get_player(player_id_t id) const {
 	return this->players.at(id);
 }
 
+bool GameState::has_player(player_id_t id) const {
+	return this->players.contains(id);
+}
+
 const std::shared_ptr<Map> &GameState::get_map() const {
 	return this->map;
 }

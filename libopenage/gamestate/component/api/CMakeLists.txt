@@ -4,4 +4,7 @@ add_sources(libopenage
     move.cpp
     selectable.cpp
     turn.cpp
+    drop_site.cpp
+    gather.cpp
+    harvestable.cpp
 )

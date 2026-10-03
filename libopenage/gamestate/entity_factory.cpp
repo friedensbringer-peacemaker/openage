@@ -33,6 +33,7 @@
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
 #include "gamestate/component/types.h"
+#include "gamestate/econ.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/manager.h"
@@ -210,7 +211,12 @@ void EntityFactory::init_components(const std::shared_ptr<openage::event::EventL
 		}
 	}
 
-	if (activity_ability) {
+	// XR fork (economy): Gather, Harvestable, DropSite; gatherers get the gather activity
+	econ::init_components(loop, owner_db_view, entity, nyan_entity);
+	if (entity->has_component(component::component_t::GATHER)) {
+		entity->add_component(std::make_shared<component::Activity>(loop, econ::gather_activity()));
+	}
+	else if (activity_ability) {
 		init_activity(loop, owner_db_view, entity, activity_ability.value());
 	}
 	else {

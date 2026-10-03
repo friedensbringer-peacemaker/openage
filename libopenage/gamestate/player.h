@@ -4,6 +4,7 @@
 
 #include <memory>
 
+#include "gamestate/resources.h"
 #include "gamestate/types.h"
 
 
@@ -55,6 +56,16 @@ public:
 	 */
 	const std::shared_ptr<nyan::View> &get_db_view() const;
 
+	/**
+	 * Resource stockpile of the player (XR fork, economy).
+	 *
+	 * Thread-safe: the simulation changes it, presenters (HUD) read snapshots.
+	 *
+	 * @return Resource stockpile.
+	 */
+	ResourceStock &get_resources();
+	const ResourceStock &get_resources() const;
+
 protected:
 	/**
 	 * A player cannot be default copied because of their unique ID.
@@ -83,6 +94,11 @@ private:
 	 * Player view of the nyan game data database.
 	 */
 	std::shared_ptr<nyan::View> db_view;
+
+	/**
+	 * Resource stockpile (XR fork, economy).
+	 */
+	ResourceStock resources;
 };
 
 } // namespace openage::gamestate

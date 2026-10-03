@@ -216,6 +216,8 @@ GeneratedMap generate_map(const MapSettings &settings) {
 		double se = std::floor(base[1] + jitter * rng.signed_uniform() + 0.5);
 		map.starts.push_back({ne, se});
 	}
+	// neutral owner of trees and resources (gaia): the player after the last start
+	const size_t gaia = map.starts.size();
 	const double start_r = std::max(7.0, 0.12 * n);
 	auto start_dist = [&](double ne, double se) {
 		double best = 1e9;
@@ -457,7 +459,7 @@ GeneratedMap generate_map(const MapSettings &settings) {
 			size_t i = tile_index(x, y);
 			blocked[i] = 1;
 			reserve_around(x, y, 1);
-			map.objects.push_back({cluster.kind, static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5, 0, 0});
+			map.objects.push_back({cluster.kind, static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5, 0, gaia});
 			placed += 1;
 		}
 		return placed;
@@ -658,7 +660,7 @@ GeneratedMap generate_map(const MapSettings &settings) {
 			int angle = 40 * static_cast<int>(rng.below(9));
 			// pine forests; broadleaf/palm trees ("jungle") only close to the water
 			auto kind = dist_water[i] <= 3 ? map_object_t::TREE_JUNGLE : map_object_t::TREE_PINE;
-			trees.push_back({kind, x + jx, y + jy, angle, 0});
+			trees.push_back({kind, x + jx, y + jy, angle, gaia});
 		}
 		if (trees.size() > settings.max_trees) {
 			// deterministic thinning, the forest floor stays

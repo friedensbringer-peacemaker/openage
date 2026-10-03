@@ -102,6 +102,15 @@ public:
 	const std::shared_ptr<Player> &get_player(player_id_t id) const;
 
 	/**
+	 * Check if a player exists (XR fork).
+	 *
+	 * @param id ID of the player.
+	 *
+	 * @return true if the player was added.
+	 */
+	bool has_player(player_id_t id) const;
+
+	/**
 	 * Get the map of the current game.
 	 *
 	 * @return Map object.

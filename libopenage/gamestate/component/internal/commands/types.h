@@ -14,6 +14,9 @@ enum class command_t {
 	CUSTOM,
 	IDLE,
 	MOVE,
+
+	// economy (XR fork)
+	GATHER,
 };
 
 } // namespace openage::gamestate::component::command

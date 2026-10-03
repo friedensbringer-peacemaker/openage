@@ -26,6 +26,7 @@
 #include "gamestate/manager.h"
 #include "gamestate/map.h"
 #include "gamestate/map_generator.h"
+#include "gamestate/player.h"
 #include "gamestate/terrain.h"
 #include "gamestate/terrain_chunk.h"
 #include "gamestate/terrain_factory.h"
@@ -75,6 +76,13 @@ const std::shared_ptr<GameState> &Game::get_state() const {
 
 const std::optional<MapView> &Game::get_start_view() const {
 	return this->start_view;
+}
+
+std::optional<resource_amounts_t> Game::get_player_resources(player_id_t player) const {
+	if (not this->state->has_player(player)) {
+		return std::nullopt;
+	}
+	return this->state->get_player(player)->get_resources().get();
 }
 
 void Game::attach_renderer(const std::shared_ptr<renderer::RenderFactory> &render_factory) {
@@ -317,7 +325,20 @@ bool Game::generate_random_map(const std::shared_ptr<openage::event::EventLoop> 
 	this->state->set_map(map);
 	auto t2 = std::chrono::steady_clock::now();
 
-	// objects as entities (no game logic yet: trees and mines cannot be harvested)
+	// XR fork (economy): trees and resources belong to gaia, the neutral player after the
+	// players (map_generator.h); create it (and missing players) before spawning
+	for (const auto &object : generated.objects) {
+		auto owner = static_cast<player_id_t>(object.owner);
+		while (not this->state->has_player(owner)) {
+			auto player = entity_factory->add_player(event_loop, this->state, "");
+			this->state->add_player(player);
+			if (player->get_id() >= owner) {
+				break;
+			}
+		}
+	}
+
+	// objects as entities (villagers gather from trees, mines and bushes, see econ.h)
 	const auto time = time::TIME_ZERO;
 	for (const auto &object : generated.objects) {
 		const auto &fqon = names->objects[static_cast<size_t>(object.kind)];

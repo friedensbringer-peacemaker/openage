@@ -57,7 +57,8 @@ struct MapObject {
 	double se;
 	/// facing in degrees (for trees: selects the sprite variant)
 	int angle;
-	/// owning player (resources and trees: player 0, see game.cpp)
+	/// owning player (town centres, villagers: the start's player; trees and resources:
+	/// gaia = number of starts, the neutral player after the players, see game.cpp)
 	size_t owner;
 };
 

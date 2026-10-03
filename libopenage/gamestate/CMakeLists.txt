@@ -1,5 +1,6 @@
 add_sources(libopenage
     definitions.cpp
+    econ.cpp
     entity_factory.cpp
 	game_entity.cpp
     game_state.cpp

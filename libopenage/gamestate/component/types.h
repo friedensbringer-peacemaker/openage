@@ -20,7 +20,12 @@ enum class component_t {
 	TURN,
 	MOVE,
 	SELECTABLE,
-	LIVE
+	LIVE,
+
+	// API, economy (XR fork)
+	GATHER,
+	HARVESTABLE,
+	DROP_SITE,
 };
 
 } // namespace openage::gamestate::component

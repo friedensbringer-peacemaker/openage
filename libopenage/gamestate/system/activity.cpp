@@ -19,6 +19,7 @@
 #include "gamestate/component/internal/activity.h"
 #include "gamestate/component/types.h"
 #include "gamestate/game_entity.h"
+#include "gamestate/system/gather.h"
 #include "gamestate/system/idle.h"
 #include "gamestate/system/move.h"
 #include "util/fixed_point.h"
@@ -134,6 +135,13 @@ const time::time_t Activity::handle_subsystem(const time::time_t &start_time,
 	case system_id_t::MOVE_DEFAULT:
 		// TODO: replace destination value with a parameter
 		return Move::move_default(entity, state, {1, 1, 1}, start_time);
+		break;
+	// XR fork (economy)
+	case system_id_t::GATHER_COMMAND:
+		return Gather::gather_command(entity, state, start_time);
+		break;
+	case system_id_t::GATHER_STEP:
+		return Gather::gather_step(entity, state, start_time);
 		break;
 	default:
 		throw Error{ERR << "Unhandled subsystem " << static_cast<int>(system_id)};
