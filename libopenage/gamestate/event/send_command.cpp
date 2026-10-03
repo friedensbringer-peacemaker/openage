@@ -13,6 +13,7 @@
 #include "gamestate/game_state.h"
 #include "gamestate/map.h"
 #include "gamestate/types.h"
+#include "log/log.h"
 
 
 namespace openage::gamestate {
@@ -61,6 +62,9 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 	auto target = gstate->get_map()->pick_terrain(params.get("target", coord::phys3{0, 0, 0}));
 	std::vector<gamestate::entity_id_t> ids = params.get("entity_ids",
 	                                                     std::vector<gamestate::entity_id_t>{});
+	// XR fork: INFO, embedders diagnose taps on headsets from the log
+	log::log(INFO << "Command " << static_cast<int>(command_type) << " for " << ids.size()
+	              << " entities, target " << target);
 	for (auto id : ids) {
 		auto entity = gstate->get_game_entity(id);
 		auto command_queue = std::dynamic_pointer_cast<component::CommandQueue>(

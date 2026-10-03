@@ -103,6 +103,12 @@ public:
 	 */
 	bool wait_done(std::chrono::milliseconds timeout);
 
+	/**
+	 * Queue an input event from any thread, like the input of an embedder
+	 * (e.g. the controller logic of the Quest app in an end-to-end check).
+	 */
+	void push_input(const SinkInputEvent &event);
+
 	/// Error text of the consumer thread (empty if none).
 	std::string get_error() const;
 

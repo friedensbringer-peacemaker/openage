@@ -131,6 +131,9 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	binding_func_t create_entity_event{[&](const event_arguments &args,
 	                                       const std::shared_ptr<Controller> controller) {
 		auto mouse_pos = args.mouse.to_phys3(camera);
+		// XR fork: INFO, embedders diagnose taps on headsets from the log
+		log::log(INFO << "Input: Ctrl + left click at pixel (" << args.mouse.x << ", " << args.mouse.y
+		              << ") -> spawn at " << mouse_pos);
 		event::EventHandler::param_map::map_t params{
 			{"position", mouse_pos},
 			{"owner", controller->get_controlled()},
@@ -157,6 +160,8 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	binding_func_t move_entity{[&](const event_arguments &args,
 	                               const std::shared_ptr<Controller> controller) {
 		auto mouse_pos = args.mouse.to_phys3(camera);
+		log::log(INFO << "Input: right click at pixel (" << args.mouse.x << ", " << args.mouse.y
+		              << ") -> move " << controller->get_selected().size() << " entities");
 		event::EventHandler::param_map::map_t params{
 			{"type", gamestate::component::command::command_t::MOVE},
 			{"target", mouse_pos},

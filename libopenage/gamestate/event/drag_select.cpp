@@ -88,6 +88,9 @@ void DragSelectHandler::invoke(openage::event::EventLoop & /* loop */,
 	                            std::function<void(const std::vector<entity_id_t> ids)>{
 									[](const std::vector<entity_id_t> /* ids */) {}});
 	select_cb(selected);
+	// XR fork: INFO, embedders diagnose taps on headsets from the log
+	log::log(INFO << "Drag select (NDC x " << left << ".." << right << ", y " << bottom << ".." << top
+	              << "): " << selected.size() << " entities of player " << controlled_id);
 }
 
 time::time_t DragSelectHandler::predict_invoke_time(const std::shared_ptr<openage::event::EventEntity> & /* target */,

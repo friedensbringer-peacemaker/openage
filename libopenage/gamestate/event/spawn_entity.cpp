@@ -166,7 +166,8 @@ void SpawnEntityHandler::invoke(openage::event::EventLoop & /* loop */,
 	        and pos.se >= 0
 	        and pos.se < map_size[1])) {
 		// Do nothing if the spawn position is not on the map
-		log::log(DBG << "Entity spawn failed: "
+		// (XR fork: INFO, embedders diagnose taps on headsets from the log)
+		log::log(INFO << "Entity spawn failed: "
 		             << "Spawn position " << pos
 		             << " is not inside the map area "
 		             << "(map size: " << map_size << ")");
@@ -182,6 +183,7 @@ void SpawnEntityHandler::invoke(openage::event::EventLoop & /* loop */,
 
 		// Do nothing if there are no test entities
 		if (test_entities.empty()) {
+			log::log(INFO << "Entity spawn failed: no test entities for the loaded modpacks");
 			return;
 		}
 	}
@@ -214,6 +216,8 @@ void SpawnEntityHandler::invoke(openage::event::EventLoop & /* loop */,
 	entity->get_manager()->run_activity_system(time);
 
 	gstate->add_game_entity(entity);
+	log::log(INFO << "Entity spawned: " << nyan_entity << " (id " << entity->get_id() << ", owner "
+	              << static_cast<size_t>(owner_id) << ") at " << pos);
 }
 
 time::time_t SpawnEntityHandler::predict_invoke_time(const std::shared_ptr<openage::event::EventEntity> & /* target */,

@@ -318,6 +318,11 @@ bool TestFrameSink::poll_camera(float &dx, float &dy, float &zoom) {
 	return dx != 0.0f or dy != 0.0f or zoom != 0.0f;
 }
 
+void TestFrameSink::push_input(const SinkInputEvent &event) {
+	std::lock_guard<std::mutex> lock{this->mutex};
+	this->input.push_back(event);
+}
+
 bool TestFrameSink::poll_background(float rgba[4]) {
 	std::lock_guard<std::mutex> lock{this->mutex};
 	if (not this->background_pending) {
