@@ -84,6 +84,29 @@ void Camera::move_rel(Eigen::Vector3f direction, float delta, const CameraBounda
 	this->move_to(this->scene_pos + (direction * delta), camera_boundaries);
 }
 
+void Camera::move_screen(float dx, float dy, const CameraBoundaries &camera_boundaries) {
+	// camera plane: right (s) and up (u) vectors, as in get_view_matrix()
+	Eigen::Vector3f f = CAM_DIRECTION.normalized();
+	Eigen::Vector3f s = f.cross(CAM_UP).normalized();
+	Eigen::Vector3f u = s.cross(f).normalized();
+
+	// ground direction that appears as "up" on screen; moving the camera by
+	// one unit along it shifts the view by dot(u, ground_up) units on screen
+	Eigen::Vector3f ground_up{f[0], 0.0f, f[2]};
+	ground_up.normalize();
+	const float up_per_unit = u.dot(ground_up);
+
+	// one viewport pixel covers real_zoom scene units (ortho projection)
+	const float units = this->get_real_zoom_factor();
+	Eigen::Vector3f move = s * (dx * units) + ground_up * (-dy * units / up_per_unit);
+	move[1] = 0.0f;
+	this->move_to(this->scene_pos + move, camera_boundaries);
+}
+
+const Eigen::Vector3f &Camera::get_scene_pos() const {
+	return this->scene_pos;
+}
+
 void Camera::set_zoom(float zoom) {
 	if (zoom < Camera::MAX_ZOOM_IN) {
 		zoom = Camera::MAX_ZOOM_IN;

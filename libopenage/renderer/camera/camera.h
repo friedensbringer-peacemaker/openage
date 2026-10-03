@@ -103,6 +103,24 @@ public:
 	void move_rel(Eigen::Vector3f direction, float delta = 1.0f, const CameraBoundaries &camera_boundaries = DEFAULT_CAM_BOUNDARIES);
 
 	/**
+	 * Move the camera over the ground plane so that the view shifts by the
+	 * given number of viewport pixels at the current zoom (XR fork: analog
+	 * camera channel of a frame sink). Height stays unchanged.
+	 *
+	 * @param dx Pixels, + = view moves right (content moves left).
+	 * @param dy Pixels, + = view moves down (content moves up).
+	 * @param camera_boundaries 3D boundaries for the camera.
+	 */
+	void move_screen(float dx, float dy, const CameraBoundaries &camera_boundaries = DEFAULT_CAM_BOUNDARIES);
+
+	/**
+	 * Get the current position of the camera in the scene.
+	 *
+	 * @return Position in the 3D scene.
+	 */
+	const Eigen::Vector3f &get_scene_pos() const;
+
+	/**
 	 * Set the zoom level of the camera. Values smaller than 1.0f let the
 	 * camera zoom in, values greater than 1.0f let the camera zoom out.
 	 *

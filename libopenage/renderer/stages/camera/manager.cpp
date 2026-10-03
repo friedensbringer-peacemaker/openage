@@ -72,6 +72,10 @@ void CameraManager::set_camera_boundaries(const CameraBoundaries &camera_boundar
 	this->camera_boundaries = camera_boundaries;
 }
 
+const CameraBoundaries &CameraManager::get_camera_boundaries() const {
+	return this->camera_boundaries;
+}
+
 void CameraManager::update_motion() {
 	if (this->move_motion_directions != static_cast<int>(MoveDirection::NONE)) {
 		Eigen::Vector3f move_dir{0.0f, 0.0f, 0.0f};

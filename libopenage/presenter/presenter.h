@@ -164,6 +164,11 @@ protected:
 	// void init_audio();
 
 	/**
+	 * Apply the analog camera channel of the frame sink (XR fork), once per frame.
+	 */
+	void apply_sink_camera();
+
+	/**
 	 * Render all configured render passes in sequence.
 	 */
 	void render();
@@ -256,6 +261,20 @@ protected:
 	 * Input manager.
 	 */
 	std::shared_ptr<input::InputManager> input_manager;
+
+	/**
+	 * Frame sink of the embedder (XR fork, null without one): analog camera channel.
+	 */
+	std::shared_ptr<renderer::FrameSink> sink;
+
+	/**
+	 * Camera channel activity for the log (movement summed while active).
+	 */
+	bool sink_camera_active = false;
+	float sink_camera_dx = 0.0f;
+	float sink_camera_dy = 0.0f;
+	float sink_camera_zoom = 0.0f;
+	size_t sink_camera_frames = 0;
 };
 
 } // namespace presenter

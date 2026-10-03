@@ -50,10 +50,13 @@ public:
  * @param ctx Binding context the actions are added to.
  * @param cam Controlled camera.
  * @param cam_manager Camera manager for persistent movements.
+ * @param edge_move Bind the edge movement (XR fork: off if the embedder of a
+ *                  frame sink scrolls through its camera channel).
  */
 void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
                     const std::shared_ptr<renderer::camera::Camera> &cam,
-                    const std::shared_ptr<renderer::camera::CameraManager> &cam_manager);
+                    const std::shared_ptr<renderer::camera::CameraManager> &cam_manager,
+                    bool edge_move = true);
 
 } // namespace input::camera
 } // namespace openage

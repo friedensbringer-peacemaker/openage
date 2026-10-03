@@ -198,9 +198,12 @@ void EglSinkWindow::update() {
 					cb(ev);
 				}
 				break;
+			case input::event_type::MouseButtonDblClick:
+				log::log(MSG(info) << "EGL sink window: double click (button " << ev.button
+				                   << ") at " << ev.x << "," << ev.y);
+				[[fallthrough]];
 			case input::event_type::MouseButtonPress:
 			case input::event_type::MouseButtonRelease:
-			case input::event_type::MouseButtonDblClick:
 				for (auto &cb : this->on_mouse_button) {
 					cb(ev);
 				}

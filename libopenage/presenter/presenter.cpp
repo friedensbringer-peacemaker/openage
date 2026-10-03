@@ -25,6 +25,7 @@
 	#include "renderer/gui/gui.h"
 	#include "renderer/gui/integration/public/gui_application_with_logger.h"
 #endif
+#include "renderer/frame_sink.h"
 #include "renderer/render_factory.h"
 #include "renderer/render_pass.h"
 #include "renderer/render_target.h"
@@ -45,6 +46,11 @@
 
 
 namespace openage::presenter {
+
+namespace {
+/// zoom of one wheel notch (input/controller/camera/controller.cpp)
+constexpr float zoom_step = 0.05f;
+} // namespace
 
 Presenter::Presenter(const util::Path &root_dir,
                      const std::shared_ptr<gamestate::GameSimulation> &simulation,
@@ -139,6 +145,7 @@ void Presenter::init_graphics(const renderer::window_settings &window_settings) 
 	if (not window_settings.sink) {
 		this->gui_app = this->init_window_system();
 	}
+	this->sink = window_settings.sink;
 
 	// Window and renderer
 	this->window = renderer::Window::create("openage presenter test", window_settings);
@@ -324,7 +331,8 @@ void Presenter::init_input() {
 		log::log(INFO << "Loading camera controls");
 		auto camera_controller = std::make_shared<input::camera::Controller>();
 		auto camera_context = std::make_shared<input::camera::BindingContext>();
-		input::camera::setup_defaults(camera_context, this->camera, this->camera_manager);
+		// a frame sink embedder scrolls at the edges through its camera channel
+		input::camera::setup_defaults(camera_context, this->camera, this->camera_manager, not this->sink);
 		this->input_manager->set_camera_controller(camera_controller);
 		input_ctx->set_camera_bindings(camera_context);
 	}
@@ -393,7 +401,47 @@ void Presenter::capture_frame(const std::string &file) {
 	log::log(INFO << "Presenter: stored frame " << size[0] << "x" << size[1] << " to " << file);
 }
 
+void Presenter::apply_sink_camera() {
+	float dx = 0.0f;
+	float dy = 0.0f;
+	float zoom = 0.0f;
+	const bool moving = this->sink and this->sink->poll_camera(dx, dy, zoom)
+	                    and (dx != 0.0f or dy != 0.0f or zoom != 0.0f);
+	if (moving) {
+		this->camera->move_screen(dx, dy, this->camera_manager->get_camera_boundaries());
+		if (zoom > 0.0f) {
+			this->camera_manager->zoom_frame(renderer::camera::ZoomDirection::IN, zoom * zoom_step);
+		}
+		else if (zoom < 0.0f) {
+			this->camera_manager->zoom_frame(renderer::camera::ZoomDirection::OUT, -zoom * zoom_step);
+		}
+		if (not this->sink_camera_active) {
+			const auto &pos = this->camera->get_scene_pos();
+			log::log(INFO << "Presenter: camera channel active at scene (" << pos[0] << ", "
+			              << pos[1] << ", " << pos[2] << "), zoom " << this->camera->get_zoom());
+		}
+		this->sink_camera_active = true;
+		this->sink_camera_dx += dx;
+		this->sink_camera_dy += dy;
+		this->sink_camera_zoom += zoom;
+		this->sink_camera_frames += 1;
+	}
+	else if (this->sink_camera_active) {
+		// summary once the channel is idle again (no log line per frame)
+		const auto &pos = this->camera->get_scene_pos();
+		log::log(INFO << "Presenter: camera channel idle after " << this->sink_camera_frames
+		              << " frames: moved " << this->sink_camera_dx << ", " << this->sink_camera_dy
+		              << " px, zoom " << this->sink_camera_zoom << " steps -> scene (" << pos[0]
+		              << ", " << pos[1] << ", " << pos[2] << "), zoom " << this->camera->get_zoom());
+		this->sink_camera_active = false;
+		this->sink_camera_dx = this->sink_camera_dy = this->sink_camera_zoom = 0.0f;
+		this->sink_camera_frames = 0;
+	}
+}
+
 void Presenter::render() {
+	this->apply_sink_camera();
+
 	// TODO: Pass current time to update() instead of fetching it in renderer
 	this->camera_manager->update();
 	this->terrain_renderer->update();

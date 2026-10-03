@@ -29,6 +29,9 @@ struct SinkInputEvent {
 		kFocus = 6,
 		/// pointer left the image (no more hover)
 		kLeave = 7,
+		/// second press of a double click, sent after its kMouseDown
+		/// (like Qt: press, release, press + double click, release)
+		kMouseDoubleClick = 8,
 	};
 
 	// Qt::MouseButton
@@ -101,6 +104,24 @@ public:
 
 	virtual bool should_close() const = 0;
 	virtual bool paused() const = 0;
+
+	/**
+	 * Analog camera channel (optional, e.g. a thumbstick of the embedder).
+	 * Called once per presented frame from the producer thread; returns the
+	 * movement accumulated since the last call and resets it. Embedders with
+	 * a frame sink also scroll at the frame edges through this channel: the
+	 * built-in edge scrolling of the camera controls is not installed.
+	 *
+	 * @param dx Camera movement in frame pixels, + = right (content moves left).
+	 * @param dy Camera movement in frame pixels, + = down (content moves up).
+	 * @param zoom Zoom steps, + = zoom in (one step = one wheel notch).
+	 *
+	 * @return false if there is no movement (default: the sink has no channel).
+	 */
+	virtual bool poll_camera(float &dx, float &dy, float &zoom) {
+		dx = dy = zoom = 0.0f;
+		return false;
+	}
 };
 
 

@@ -26,7 +26,8 @@ bool Controller::process(const event_arguments &ev_args,
 
 void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
                     const std::shared_ptr<renderer::camera::Camera> &cam,
-                    const std::shared_ptr<renderer::camera::CameraManager> &cam_manager) {
+                    const std::shared_ptr<renderer::camera::CameraManager> &cam_manager,
+                    bool edge_move) {
 	// arrow movements
 	binding_func_t move_left{[&](const event_arguments & /*args*/) {
 		cam_manager->move_frame(renderer::camera::MoveDirection::LEFT, 0.5f);
@@ -75,8 +76,12 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	ctx->bind(ev_wheel_up, zoom_in_action);
 	ctx->bind(ev_wheel_down, zoom_out_action);
 
+	if (not edge_move) {
+		return;
+	}
+
 	// edge movement
-	binding_func_t edge_move{[&](const event_arguments &args) {
+	binding_func_t edge_move_func{[&](const event_arguments &args) {
 		// mouse position of the triggering move event (set by the presenter
 		// before the event is processed)
 		auto pos_x = static_cast<double>(args.mouse.x);
@@ -100,7 +105,7 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 		cam_manager->set_move_motion_dirs(move_directions);
 	}};
 
-	binding_action edge_move_action{edge_move};
+	binding_action edge_move_action{edge_move_func};
 	ctx->bind(event_class::MOUSE_MOVE, edge_move_action);
 }
 

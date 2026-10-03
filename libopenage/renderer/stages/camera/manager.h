@@ -114,6 +114,13 @@ public:
 	 */
 	void set_camera_boundaries(const CameraBoundaries &camera_boundaries);
 
+	/**
+	 * Get the boundaries for camera movement in the scene.
+	 *
+	 * @return XYZ boundaries for the camera movement.
+	 */
+	const CameraBoundaries &get_camera_boundaries() const;
+
 private:
 	/**
 	 * Update the camera parameters.

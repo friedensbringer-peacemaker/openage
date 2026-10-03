@@ -16,6 +16,7 @@ static_assert(SinkInputEvent::kMiddleButton == input::mouse_button::MiddleButton
 static_assert(SinkInputEvent::kKeyEscape == input::key::Key_Escape);
 static_assert(SinkInputEvent::kKeyControl == input::key::Key_Control);
 static_assert(SinkInputEvent::kControlModifier == input::modifier::ControlModifier);
+static_assert(input::event_type::MouseButtonDblClick == 4);
 
 bool to_window_event(const SinkInputEvent &in, WindowEvent &out) {
 	out = WindowEvent{};
@@ -36,6 +37,10 @@ bool to_window_event(const SinkInputEvent &in, WindowEvent &out) {
 		return true;
 	case SinkInputEvent::kMouseUp:
 		out.type = input::event_type::MouseButtonRelease;
+		out.button = in.button;
+		return true;
+	case SinkInputEvent::kMouseDoubleClick:
+		out.type = input::event_type::MouseButtonDblClick;
 		out.button = in.button;
 		return true;
 	case SinkInputEvent::kWheel:
