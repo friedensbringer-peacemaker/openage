@@ -390,9 +390,22 @@ bool egl_sink_check(const native_args &args,
 		engine->stop();
 	}};
 
-	engine->loop();
+	// an exception in the simulation must not destroy the joinable watcher (std::terminate)
+	std::string loop_error;
+	try {
+		engine->loop();
+	}
+	catch (std::exception &exc) {
+		loop_error = exc.what();
+		log::log(ERR << "egl sink check: simulation failed: " << loop_error);
+		engine->stop();
+	}
 	loop_finished = true;
 	watcher.join();
+	if (not loop_error.empty()) {
+		engine.reset();
+		return false;
+	}
 	// joins the time loop and presenter threads
 	engine.reset();
 	const double stop_seconds = std::chrono::duration<double>(clock::now() - stop_time).count();
