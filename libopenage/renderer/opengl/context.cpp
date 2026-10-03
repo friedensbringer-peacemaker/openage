@@ -1,6 +1,8 @@
 // Copyright 2015-2026 the openage authors. See copying.md for legal info.
 
 #include <array>
+#include <cstdlib>
+#include <string>
 #include <epoxy/gl.h>
 
 #include "context.h"
@@ -20,31 +22,49 @@ namespace openage::renderer::opengl {
 /// The first element is the lowest version we need, last is highest version we support.
 static constexpr std::array<std::pair<int, int>, 1> gl_versions = {{{3, 3}}}; // for now we don't need any higher versions
 
+/// Same for OpenGL ES. 3.0 has everything the renderer uses (UBOs, MRT, integer
+/// textures, texture arrays); 3.2 is what the Meta Quest offers.
+static constexpr std::array<std::pair<int, int>, 3> gles_versions = {{{3, 0}, {3, 1}, {3, 2}}};
+
+bool GlContext::gles_requested_by_env() {
+	const char *env = std::getenv("OPENAGE_GLES");
+	return env != nullptr and std::string{env} == "1";
+}
+
 /// Finds out the supported graphics functions and OpenGL version of the device.
-gl_context_spec GlContext::find_spec() {
+gl_context_spec GlContext::find_spec(bool gles) {
 	QSurfaceFormat test_format{};
-	test_format.setProfile(QSurfaceFormat::OpenGLContextProfile::CoreProfile);
+	if (gles) {
+		test_format.setRenderableType(QSurfaceFormat::RenderableType::OpenGLES);
+	}
+	else {
+		test_format.setProfile(QSurfaceFormat::OpenGLContextProfile::CoreProfile);
+	}
 	test_format.setSwapBehavior(QSurfaceFormat::SwapBehavior::DoubleBuffer);
 	test_format.setDepthBufferSize(24);
 
-	for (size_t i_ver = 0; i_ver < gl_versions.size(); ++i_ver) {
+	const std::pair<int, int> *versions = gles ? gles_versions.data() : gl_versions.data();
+	const size_t version_count = gles ? gles_versions.size() : gl_versions.size();
+	const char *api_name = gles ? "OpenGL ES" : "OpenGL";
+
+	for (size_t i_ver = 0; i_ver < version_count; ++i_ver) {
 		QOpenGLContext test_context{};
 
-		test_format.setMajorVersion(gl_versions[i_ver].first);
-		test_format.setMinorVersion(gl_versions[i_ver].second);
+		test_format.setMajorVersion(versions[i_ver].first);
+		test_format.setMinorVersion(versions[i_ver].second);
 
 		test_context.setFormat(test_format);
 		test_context.create();
 
 		if (!test_context.isValid()) {
 			if (i_ver == 0) {
-				throw Error(MSG(err) << "OpenGL version "
-				                     << gl_versions[0].first << "." << gl_versions[0].second
+				throw Error(MSG(err) << api_name << " version "
+				                     << versions[0].first << "." << versions[0].second
 				                     << " is not available. It is the minimal required version.");
 			}
 
-			test_format.setMajorVersion(gl_versions[i_ver - 1].first);
-			test_format.setMinorVersion(gl_versions[i_ver - 1].second);
+			test_format.setMajorVersion(versions[i_ver - 1].first);
+			test_format.setMinorVersion(versions[i_ver - 1].second);
 			break;
 		}
 	}
@@ -54,6 +74,10 @@ gl_context_spec GlContext::find_spec() {
 	test_context.create();
 	if (!test_context.isValid()) {
 		throw Error(MSG(err) << "Failed to create OpenGL context which previously succeeded. This should not happen!");
+	}
+	if (test_context.isOpenGLES() != gles) {
+		throw Error(MSG(err) << "Requested " << api_name << " context, but got a "
+		                     << (test_context.isOpenGLES() ? "OpenGL ES" : "desktop OpenGL") << " context.");
 	}
 
 	QOffscreenSurface test_surface{};
@@ -74,7 +98,13 @@ gl_context_spec GlContext::find_spec() {
 	caps.max_texture_slots = temp;
 	glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &temp);
 	caps.max_vertex_attributes = temp;
-	glGetIntegerv(GL_MAX_UNIFORM_LOCATIONS, &temp);
+	if (gles and test_context.format().majorVersion() == 3 and test_context.format().minorVersion() == 0) {
+		// GL_MAX_UNIFORM_LOCATIONS (explicit uniform locations) needs OpenGL ES 3.1
+		glGetIntegerv(GL_MAX_VERTEX_UNIFORM_VECTORS, &temp);
+	}
+	else {
+		glGetIntegerv(GL_MAX_UNIFORM_LOCATIONS, &temp);
+	}
 	caps.max_uniform_locations = temp;
 	glGetIntegerv(GL_MAX_UNIFORM_BUFFER_BINDINGS, &temp);
 	caps.max_uniform_buffer_bindings = temp;
@@ -82,6 +112,7 @@ gl_context_spec GlContext::find_spec() {
 	// OpenGL version
 	glGetIntegerv(GL_MAJOR_VERSION, &caps.major_version);
 	glGetIntegerv(GL_MINOR_VERSION, &caps.minor_version);
+	caps.gles = gles;
 
 	return caps;
 }
@@ -90,7 +121,8 @@ GlContext::GlContext(const std::shared_ptr<QWindow> &window,
                      bool debug) :
 	window{window},
 	log_handler{} {
-	this->specs = find_spec();
+	const bool gles = window->requestedFormat().renderableType() == QSurfaceFormat::RenderableType::OpenGLES;
+	this->specs = find_spec(gles);
 	auto const &specs = this->specs;
 
 	this->uniform_buffer_bindings = std::vector<bool>(specs.max_uniform_buffer_bindings);
@@ -116,12 +148,13 @@ GlContext::GlContext(const std::shared_ptr<QWindow> &window,
 
 	// We still have to verify that our version of libepoxy supports this version of OpenGL.
 	int epoxy_glv = specs.major_version * 10 + specs.minor_version;
-	if (not epoxy_is_desktop_gl() or epoxy_gl_version() < epoxy_glv) {
-		throw Error(MSG(err) << "The used version of libepoxy does not support OpenGL version "
+	if (epoxy_is_desktop_gl() == specs.gles or epoxy_gl_version() < epoxy_glv) {
+		throw Error(MSG(err) << "The used version of libepoxy does not support "
+		                     << (specs.gles ? "OpenGL ES" : "OpenGL") << " version "
 		                     << specs.major_version << "." << specs.minor_version);
 	}
 
-	log::log(MSG(info) << "Created OpenGL context version " << specs.major_version << "." << specs.minor_version);
+	log::log(MSG(info) << "Created " << (specs.gles ? "OpenGL ES" : "OpenGL") << " context version " << specs.major_version << "." << specs.minor_version);
 
 	// To quote the standard doc: 'The value gives a rough estimate of the
 	// largest texture that the GL can handle'

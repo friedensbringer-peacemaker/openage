@@ -39,6 +39,8 @@ struct window_settings {
 	// Height of the window in pixels.
 	size_t height = 768;
 	// Graphics API to use in the window's renderer.
+	// OPENGL_ES selects an OpenGL ES 3.x context (also forced by the environment
+	// variable OPENAGE_GLES=1), everything else desktop OpenGL.
 	graphics_api_t backend = graphics_api_t::DEFAULT;
 	// If true, enable vsync.
 	bool vsync = true;
@@ -46,6 +48,8 @@ struct window_settings {
 	bool debug = false;
 	// Display mode for the window.
 	window_mode mode = window_mode::WINDOWED;
+	// If false, the window is created but never shown (offscreen checks).
+	bool visible = true;
 };
 
 

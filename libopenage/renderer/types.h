@@ -18,6 +18,8 @@ using uniform_id_t = uint32_t;
 enum class graphics_api_t {
 	DEFAULT,
 	OPENGL,
+	// OpenGL ES 3.x (Android/XR), uses the OpenGL renderer
+	OPENGL_ES,
 	VULKAN,
 };
 

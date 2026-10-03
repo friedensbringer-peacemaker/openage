@@ -33,9 +33,16 @@ GlWindow::GlWindow(const std::string &title,
 
 	this->window->setSurfaceType(QSurface::OpenGLSurface);
 
-	auto gl_specs = GlContext::find_spec();
+	const bool gles = settings.backend == graphics_api_t::OPENGL_ES
+	                  or GlContext::gles_requested_by_env();
+	auto gl_specs = GlContext::find_spec(gles);
 	QSurfaceFormat format{};
-	format.setProfile(QSurfaceFormat::OpenGLContextProfile::CoreProfile);
+	if (gles) {
+		format.setRenderableType(QSurfaceFormat::RenderableType::OpenGLES);
+	}
+	else {
+		format.setProfile(QSurfaceFormat::OpenGLContextProfile::CoreProfile);
+	}
 	format.setSwapBehavior(QSurfaceFormat::SwapBehavior::DoubleBuffer);
 
 	if (not settings.vsync) {
@@ -81,8 +88,12 @@ GlWindow::GlWindow(const std::string &title,
 
 	this->window->installEventFilter(this->event_handler.get());
 
-	this->window->setVisible(true);
-	log::log(MSG(info) << "Created Qt window with OpenGL context.");
+	if (settings.visible) {
+		this->window->setVisible(true);
+	}
+	log::log(MSG(info) << "Created Qt window with "
+	                   << (gles ? "OpenGL ES" : "OpenGL") << " context"
+	                   << (settings.visible ? "." : " (hidden)."));
 
 	// Scaling factor if highDPI
 	this->scale_dpr = this->window->devicePixelRatio();

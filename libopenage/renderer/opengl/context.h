@@ -32,6 +32,9 @@ struct gl_context_spec {
 
 	int major_version;
 	int minor_version;
+
+	/// True for an OpenGL ES context (mobile/XR), false for desktop OpenGL.
+	bool gles = false;
 };
 
 /**
@@ -41,6 +44,9 @@ class GlContext {
 public:
 	/**
 	 * Create a GL context for the given Qt window.
+	 *
+	 * The API (desktop OpenGL or OpenGL ES) is taken from the requested
+	 * surface format of the window.
 	 *
 	 * @param window Window for the context. The context is made current to this window.
 	 * @param debug If true, enable OpenGL debug logging.
@@ -151,8 +157,17 @@ public:
 
 	/**
 	 * Find out the supported graphics functions and OpenGL version of the device.
+	 *
+	 * @param gles If true, probe OpenGL ES 3.x (3.0 minimum, up to 3.2) instead
+	 *             of desktop OpenGL 3.3 Core.
 	 */
-	static gl_context_spec find_spec();
+	static gl_context_spec find_spec(bool gles = false);
+
+	/**
+	 * Check if OpenGL ES was requested with the environment variable
+	 * OPENAGE_GLES=1 (lets desktop builds run the mobile code path).
+	 */
+	static bool gles_requested_by_env();
 
 private:
 	/**
