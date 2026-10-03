@@ -3,6 +3,7 @@ add_sources(libopenage
     frame_timing.cpp
 	mesh_data.cpp
 	palette_info.cpp
+	png_io.cpp
 	shader_source.cpp
     shader_template.cpp
 	texture_data.cpp

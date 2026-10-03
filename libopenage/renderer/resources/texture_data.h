@@ -26,13 +26,12 @@ public:
 	/// Create a texture from an image file.
 	/// @param path Path to the image file.
 	///
-	/// Uses QImage internally.
+	/// Loads PNG files with libpng (XR fork, formerly QImage).
 	Texture2dData(const util::Path &path);
 
 	/// Create a texture from info.
 	///
-	/// Uses QImage internally. For supported image file types,
-	/// see the QImage initialization in the engine.
+	/// Loads PNG files with libpng (XR fork, formerly QImage).
 	Texture2dData(Texture2dInfo const &info);
 
 	/// Construct by moving the information and raw texture data from somewhere else.
