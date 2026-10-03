@@ -357,3 +357,12 @@ add_subdirectory("testing")
 add_subdirectory("time")
 add_subdirectory("util")
 add_subdirectory("versions")
+
+##################################################
+# XR fork: native C++ entry point without Python (openage-native)
+option(OPENAGE_NATIVE_ENTRY "build the native C++ entry point openage-native" ON)
+if(OPENAGE_NATIVE_ENTRY)
+	add_executable(openage-native main/native_main.cpp)
+	target_include_directories(openage-native PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	target_link_libraries(openage-native PRIVATE libopenage nyan::nyan Eigen3::Eigen Qt6::Core Qt6::Gui Threads::Threads)
+endif()

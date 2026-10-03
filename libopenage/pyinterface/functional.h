@@ -105,6 +105,15 @@ public:
 	}
 
 	/**
+	 * true if a function has been bound (e.g. from Python).
+	 * Allows callers to skip Python-only features when running
+	 * from the native C++ entry point.
+	 */
+	inline bool is_bound() const {
+		return static_cast<bool>(this->fptr);
+	}
+
+	/**
 	 * raises an Error if this->fptr is still uninitialized.
 	 */
 	inline void check_fptr() const {

@@ -42,6 +42,13 @@ void CVarManager::set(const std::string &name, const std::string &value) const {
 
 
 void CVarManager::load_config(const util::Path &path) {
+	// The config parser lives in Python. The native entry point
+	// (openage-native) has no Python, so the config is skipped there.
+	// No cvars are registered at the moment, so nothing is lost.
+	if (not pyx_load_config_file.is_bound()) {
+		log::log(INFO << "no python config loader bound, skipping " << path);
+		return;
+	}
 	pyx_load_config_file.call(this, path);
 }
 

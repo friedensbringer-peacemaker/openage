@@ -94,6 +94,13 @@ public:
 	void loop();
 
 	/**
+	 * Ask the engine to shut down: stops the game simulation
+	 * (which ends loop()) and the time loop thread.
+	 * Safe to call from any thread.
+	 */
+	void stop();
+
+	/**
 	 * current simulation state variable.
 	 * to be set to false to stop the simulation loop.
 	 */
@@ -134,6 +141,11 @@ private:
 	 * Video/audio/input management. Can be nullptr in headless mode.
 	 */
 	std::shared_ptr<presenter::Presenter> presenter;
+
+	// never reassigned after construction, so stop() can read them from any
+	// thread while the owning threads reset the shared_ptrs above
+	std::weak_ptr<gamestate::GameSimulation> stop_simulation;
+	std::weak_ptr<time::TimeLoop> stop_time_loop;
 };
 
 } // namespace engine

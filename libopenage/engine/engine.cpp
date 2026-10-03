@@ -39,6 +39,9 @@ Engine::Engine(mode mode,
 	                                                               this->time_loop);
 	this->simulation->set_modpacks(mods);
 
+	this->stop_simulation = this->simulation;
+	this->stop_time_loop = this->time_loop;
+
 	// presenter (optional)
 	if (this->run_mode == mode::FULL) {
 		this->presenter = std::make_shared<presenter::Presenter>(this->root_dir,
@@ -67,6 +70,15 @@ Engine::Engine(mode mode,
 
 	log::log(INFO << "Using " << this->threads.size() + 1 << " threads "
 	              << "(" << std::jthread::hardware_concurrency() << " available)");
+}
+
+void Engine::stop() {
+	if (auto simulation = this->stop_simulation.lock()) {
+		simulation->stop();
+	}
+	if (auto time_loop = this->stop_time_loop.lock()) {
+		time_loop->stop();
+	}
 }
 
 void Engine::loop() {
