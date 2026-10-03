@@ -51,6 +51,7 @@ class Presenter;
 } // namespace presenter
 
 namespace time {
+class Clock;
 class TimeLoop;
 } // namespace time
 
@@ -105,6 +106,15 @@ public:
 	 * Safe to call from any thread.
 	 */
 	void stop();
+
+	/**
+	 * Clock of the time loop (XR fork), e.g. for an embedder that pauses the
+	 * game while its own menu is open or the headset is taken off.
+	 * Safe to call from any thread.
+	 *
+	 * @return The clock, nullptr after the time loop has finished.
+	 */
+	std::shared_ptr<time::Clock> get_clock() const;
 
 	/**
 	 * current simulation state variable.

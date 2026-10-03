@@ -8,6 +8,7 @@
 #include "cvar/cvar.h"
 #include "gamestate/simulation.h"
 #include "presenter/presenter.h"
+#include "time/clock.h"
 #include "time/time_loop.h"
 
 
@@ -95,6 +96,13 @@ void Engine::stop() {
 	if (this->stop_presenter) {
 		*this->stop_presenter = true;
 	}
+}
+
+std::shared_ptr<time::Clock> Engine::get_clock() const {
+	if (auto time_loop = this->stop_time_loop.lock()) {
+		return time_loop->get_clock();
+	}
+	return nullptr;
 }
 
 void Engine::loop() {
