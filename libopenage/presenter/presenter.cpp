@@ -185,7 +185,9 @@ void Presenter::init_graphics(const renderer::window_settings &window_settings) 
 		this->window,
 		this->renderer,
 		this->root_dir["assets"]["shaders"]);
-	this->skybox_renderer->set_color(1.0f, 0.5f, 0.0f, 1.0f);
+	// XR fork: configurable, alpha 0 = transparent around the map
+	const auto &bg = window_settings.background;
+	this->skybox_renderer->set_color(bg[0], bg[1], bg[2], bg[3]);
 	this->render_passes.push_back(this->skybox_renderer->get_render_pass());
 
 	// Terrain
@@ -442,6 +444,15 @@ void Presenter::apply_sink_camera() {
 	}
 }
 
+void Presenter::apply_sink_background() {
+	float rgba[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+	if (this->sink and this->sink->poll_background(rgba)) {
+		this->skybox_renderer->set_color(rgba[0], rgba[1], rgba[2], rgba[3]);
+		log::log(INFO << "Presenter: background (" << rgba[0] << ", " << rgba[1] << ", " << rgba[2]
+		              << "), alpha " << rgba[3]);
+	}
+}
+
 void Presenter::apply_map_view() {
 	if (this->map_view_done or not this->simulation) {
 		return;
@@ -485,6 +496,7 @@ void Presenter::render() {
 	// initial camera for the generated map first, then camera input of an embedder
 	this->apply_map_view();
 	this->apply_sink_camera();
+	this->apply_sink_background();
 
 	// TODO: Pass current time to update() instead of fetching it in renderer
 	this->camera_manager->update();

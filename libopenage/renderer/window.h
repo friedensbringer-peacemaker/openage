@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <string>
@@ -68,6 +69,12 @@ struct window_settings {
 	// the shared_ptr keeps it alive (embedders that own the sink can pass a
 	// shared_ptr with a no-op deleter).
 	std::shared_ptr<FrameSink> sink{};
+	// Color behind the map (skybox, RGBA 0..1; XR fork). The default is the
+	// orange of upstream openage. Alpha 0 leaves the area around the map
+	// transparent in the final frame, which is then premultiplied (rgb = 0
+	// where alpha = 0), e.g. for an XR compositor layer in front of
+	// passthrough. A frame sink can change it at runtime (poll_background()).
+	std::array<float, 4> background{1.0f, 0.5f, 0.0f, 1.0f};
 };
 
 

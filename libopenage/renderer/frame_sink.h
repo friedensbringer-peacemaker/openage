@@ -122,6 +122,20 @@ public:
 		dx = dy = zoom = 0.0f;
 		return false;
 	}
+
+	/**
+	 * New background color behind the map (optional). Called once per
+	 * presented frame from the producer thread; see
+	 * window_settings::background for the meaning of alpha.
+	 *
+	 * @param rgba Set to the new color (0..1) if the function returns true.
+	 *
+	 * @return true if the color changed since the last call (default: never).
+	 */
+	virtual bool poll_background(float rgba[4]) {
+		(void)rgba;
+		return false;
+	}
 };
 
 

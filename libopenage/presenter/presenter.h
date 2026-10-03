@@ -175,6 +175,12 @@ protected:
 	void apply_sink_camera();
 
 	/**
+	 * Background color requested by a frame sink embedder (XR fork,
+	 * FrameSink::poll_background), once per frame.
+	 */
+	void apply_sink_background();
+
+	/**
 	 * Render all configured render passes in sequence.
 	 */
 	void render();
