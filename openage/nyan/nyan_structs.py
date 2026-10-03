@@ -597,15 +597,15 @@ class NyanMemberType:
         """
         return self._member_type
 
-    def get_real_type(self) -> MemberType:
+    def get_real_type(self) -> MemberType | NyanObject:
         """
         Returns the member type without wrapping modifiers.
+
+        For object members this is the NyanObject itself; callers compare
+        against MemberType values, so object types simply never match.
         """
         if self.is_modifier():
             return self._element_types[0].get_real_type()
-
-        if not isinstance(self._member_type, MemberType):
-            raise TypeError(f"{self!r}: member type is not a primitive or collection type")
 
         return self._member_type
 
