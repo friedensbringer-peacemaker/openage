@@ -5,6 +5,7 @@
 #include <atomic>
 #include <shared_mutex>
 
+#include "gamestate/map_settings.h"
 #include "util/path.h"
 
 namespace openage {
@@ -138,6 +139,13 @@ public:
 	void set_modpacks(const std::vector<std::string> &modpacks);
 
 	/**
+	 * Set the map of the game (XR fork). Must be called before run()/start().
+	 *
+	 * @param settings Map settings (default: fixed test map).
+	 */
+	void set_map_settings(const MapSettings &settings);
+
+	/**
 	 * current simulation state variable.
 	 * to be set to false to stop the simulation loop.
 	 */
@@ -202,6 +210,16 @@ private:
 
 	// TODO: The game run by the engine
 	std::shared_ptr<gamestate::Game> game;
+
+	/**
+	 * Map of the next game (XR fork).
+	 */
+	MapSettings map_settings;
+
+	/**
+	 * Renderer attached before the game was created (XR fork); attached in start().
+	 */
+	std::shared_ptr<renderer::RenderFactory> pending_render_factory;
 
 	/**
 	 * Mutex for thread-safe access to the simulation.

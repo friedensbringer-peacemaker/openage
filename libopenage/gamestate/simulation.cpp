@@ -73,7 +73,16 @@ void GameSimulation::start() {
 	this->game = std::make_shared<gamestate::Game>(event_loop,
 	                                               this->mod_manager,
 	                                               this->entity_factory,
-	                                               this->terrain_factory);
+	                                               this->terrain_factory,
+	                                               this->map_settings);
+
+	// XR fork: the presenter may attach its renderer before the game exists
+	if (this->pending_render_factory) {
+		this->game->attach_renderer(this->pending_render_factory);
+		this->entity_factory->attach_renderer(this->pending_render_factory);
+		this->terrain_factory->attach_renderer(this->pending_render_factory);
+		this->pending_render_factory = nullptr;
+	}
 
 	this->running = not this->stop_requested;
 
@@ -130,6 +139,13 @@ const std::shared_ptr<gamestate::event::Commander> GameSimulation::get_commander
 void GameSimulation::attach_renderer(const std::shared_ptr<renderer::RenderFactory> &render_factory) {
 	std::unique_lock lock{this->mutex};
 
+	// XR fork: before start() there is no game yet; start() attaches the renderer
+	// (the factories too, so that the map objects get exactly one render entity)
+	if (not this->game) {
+		this->pending_render_factory = render_factory;
+		return;
+	}
+
 	this->game->attach_renderer(render_factory);
 	this->entity_factory->attach_renderer(render_factory);
 	this->terrain_factory->attach_renderer(render_factory);
@@ -144,6 +160,12 @@ void GameSimulation::set_modpacks(const std::vector<std::string> &modpacks) {
 	this->mod_manager->activate_modpacks(mods);
 
 	// TODO: Prevent setting modpacks if a game is already running
+}
+
+void GameSimulation::set_map_settings(const MapSettings &settings) {
+	std::unique_lock lock{this->mutex};
+
+	this->map_settings = settings;
 }
 
 void GameSimulation::init_event_handlers() {

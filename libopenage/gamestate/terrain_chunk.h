@@ -25,6 +25,20 @@ public:
 	TerrainChunk(const util::Vector2s size,
 	             const coord::tile_delta offset,
 	             const std::vector<TerrainTile> &&tiles);
+
+	/**
+	 * Create a chunk with explicit vertex heights (XR fork, random maps).
+	 *
+	 * @param size Size of the chunk.
+	 * @param offset Offset of the chunk.
+	 * @param tiles Tiles (row-major, index ne + se * width).
+	 * @param corner_heights (width + 1) * (height + 1) vertex heights,
+	 *                       index ne + se * (width + 1), shared with the neighbour chunks.
+	 */
+	TerrainChunk(const util::Vector2s size,
+	             const coord::tile_delta offset,
+	             const std::vector<TerrainTile> &&tiles,
+	             std::vector<float> &&corner_heights);
 	~TerrainChunk() = default;
 
 	/**
@@ -99,6 +113,11 @@ private:
 	 * Layout is row-major.
 	 */
 	std::vector<TerrainTile> tiles;
+
+	/**
+	 * Vertex heights of the chunk (empty: derived from the tile elevations by the renderer).
+	 */
+	std::vector<float> corner_heights;
 
 	/**
 	 * Render entity for pushing updates to the renderer. Can be \p nullptr.

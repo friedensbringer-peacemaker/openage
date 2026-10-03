@@ -59,6 +59,24 @@ public:
 	            const time::time_t time = 0.0);
 
 	/**
+	 * Update the full grid of the displayed terrain (chunk) with explicit vertex
+	 * heights (XR fork).
+	 *
+	 * The heights of the chunk border vertices come from the whole map, so
+	 * neighbouring chunks share them and the mesh has no cracks (the overload
+	 * above derives them from the tiles of this chunk only).
+	 *
+	 * @param size Size of the terrain in tiles (width x length)
+	 * @param tiles Animation data for each tile (elevation, terrain path).
+	 * @param corner_heights (width + 1) * (length + 1) vertex heights, index ne + se * (width + 1).
+	 * @param time Simulation time of the update.
+	 */
+	void update(const util::Vector2s size,
+	            const tiles_t tiles,
+	            const std::vector<float> &corner_heights,
+	            const time::time_t time = 0.0);
+
+	/**
 	 * Get the vertices of the terrain.
 	 *
 	 * Accessing the terrain vertices is thread-safe.

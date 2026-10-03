@@ -105,6 +105,44 @@ void RenderEntity::update(const util::Vector2s size,
 	this->changed = true;
 }
 
+void RenderEntity::update(const util::Vector2s size,
+                          const tiles_t tiles,
+                          const std::vector<float> &corner_heights,
+                          const time::time_t time) {
+	if (corner_heights.size() != (size[0] + 1) * (size[1] + 1)) {
+		this->update(size, tiles, time);
+		return;
+	}
+
+	std::unique_lock lock{this->mutex};
+
+	this->size = util::Vector2s{size[0] + 1, size[1] + 1};
+
+	// same vertex order as update() above: vertex (i = ne, j = se) at index i + j * (width + 1)
+	auto vert_count = this->size[0] * this->size[1];
+	this->vertices.clear();
+	this->vertices.reserve(vert_count);
+	for (size_t j = 0; j < this->size[1]; ++j) {
+		for (size_t i = 0; i < this->size[0]; ++i) {
+			coord::scene3 v{
+				static_cast<float>(i),
+				static_cast<float>(j),
+				corner_heights[i + j * this->size[0]],
+			};
+			this->vertices.push_back(v);
+		}
+	}
+
+	this->tiles = tiles;
+	this->last_update = time;
+	this->terrain_paths.clear();
+	for (const auto &tile : this->tiles) {
+		this->terrain_paths.insert(tile.second);
+	}
+
+	this->changed = true;
+}
+
 const std::vector<coord::scene3> RenderEntity::get_vertices() {
 	std::shared_lock lock{this->mutex};
 

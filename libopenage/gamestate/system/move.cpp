@@ -26,8 +26,12 @@
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/map.h"
+#include "pathfinding/cost_field.h"
+#include "pathfinding/definitions.h"
+#include "pathfinding/grid.h"
 #include "pathfinding/path.h"
 #include "pathfinding/pathfinder.h"
+#include "pathfinding/sector.h"
 #include "util/fixed_point.h"
 
 
@@ -41,6 +45,25 @@ std::vector<coord::phys3> find_path(const std::shared_ptr<path::Pathfinder> &pat
                                     const time::time_t &start_time) {
 	auto start_tile = start.to_tile();
 	auto end_tile = end.to_tile();
+
+	// XR fork: the flow field has no direction on impassable tiles; a unit standing
+	// on one (e.g. spawned on a tree, mine or building) would walk off the field
+	// (out-of-range access). No path instead.
+	auto grid = pathfinder->get_grid(grid_id);
+	auto sector_size = static_cast<coord::tile_t>(grid->get_sector_size());
+	auto grid_size = grid->get_size();
+	if (start_tile.ne < 0 or start_tile.se < 0
+	    or start_tile.ne >= static_cast<coord::tile_t>(grid_size[0]) * sector_size
+	    or start_tile.se >= static_cast<coord::tile_t>(grid_size[1]) * sector_size) {
+		return {};
+	}
+	auto start_sector = grid->get_sector(static_cast<size_t>(start_tile.ne / sector_size),
+	                                     static_cast<size_t>(start_tile.se / sector_size));
+	auto start_in_sector = start_tile - start_sector->get_position().to_tile(sector_size);
+	if (start_sector->get_cost_field()->get_cost(start_in_sector) == path::COST_IMPASSABLE) {
+		log::log(DBG << "Path not found: start " << start_tile << " is impassable");
+		return {};
+	}
 
 	// Search for a path between the start and end tiles
 	path::PathRequest request{
@@ -125,6 +148,8 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 	auto pathfinder = map->get_pathfinder();
 	auto grid_id = map->get_grid_id(move_path_grid->get_name());
 	auto waypoints = find_path(pathfinder, grid_id, current_pos, destination, start_time);
+	// XR fork: follow the terrain elevation (hills), no change on flat maps
+	waypoints = map->follow_terrain(waypoints);
 
 	// use waypoints for movement
 	double total_time = 0;

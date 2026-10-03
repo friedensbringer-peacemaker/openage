@@ -440,4 +440,9 @@ if(OPENAGE_NATIVE_ENTRY)
 	endif()
 	add_test(NAME openage-input-check
 		COMMAND openage-input-check "${CMAKE_SOURCE_DIR}/cfg/keybinds.oac")
+
+	# host test: random map generator and heightmap (dependency-free, parameter sweep)
+	add_executable(openage-mapgen-check gamestate/map_generator_check.cpp gamestate/map_generator.cpp)
+	target_include_directories(openage-mapgen-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-mapgen-check COMMAND openage-mapgen-check)
 endif()

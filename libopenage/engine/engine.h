@@ -8,6 +8,7 @@
 #include <thread>
 #include <vector>
 
+#include "gamestate/map_settings.h"
 #include "renderer/window.h"
 #include "util/path.h"
 
@@ -76,11 +77,13 @@ public:
 	 * @param root_dir openage root directory.
 	 * @param mods The mods to load.
 	 * @param window_settings The settings to customize the display window (e.g. size, display mode, vsync).
+	 * @param map_settings Map of the game (XR fork; default: fixed test map).
 	 */
 	Engine(mode mode,
 	       const util::Path &root_dir,
 	       const std::vector<std::string> &mods,
-	       const renderer::window_settings &window_settings = {});
+	       const renderer::window_settings &window_settings = {},
+	       const gamestate::MapSettings &map_settings = {});
 
 	// engine should not be copied or moved
 	Engine(const Engine &) = delete;

@@ -3,7 +3,10 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
+
+#include "gamestate/map_settings.h"
 
 namespace nyan {
 class Database;
@@ -51,17 +54,28 @@ public:
 	 * @param event_loop Event simulation loop for the gamestate.
 	 * @param mod_manager Mod manager.
 	 * @param entity_factory Factory for creating entities. Used for creating the players.
+	 * @param terrain_factory Factory for creating terrain objects.
+	 * @param map_settings Map of the game (XR fork; default: fixed test map).
 	 */
 	Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 	     const std::shared_ptr<assets::ModManager> &mod_manager,
 	     const std::shared_ptr<EntityFactory> &entity_factory,
-	     const std::shared_ptr<TerrainFactory> &terrain_factory);
+	     const std::shared_ptr<TerrainFactory> &terrain_factory,
+	     const MapSettings &map_settings = {});
 	~Game() = default;
 
 	/**
 	 * Get the current game state.
 	 */
 	const std::shared_ptr<GameState> &get_state() const;
+
+	/**
+	 * Initial camera view for the map (XR fork).
+	 *
+	 * @return View for random maps (settings or first start position), nothing
+	 *         for the test map (the presenter keeps its default camera).
+	 */
+	const std::optional<MapView> &get_start_view() const;
 
 	/**
 	 * Attach a renderer to the game which enables graphical display options for
@@ -103,6 +117,28 @@ private:
 	 * @param terrain_factory Factory for creating terrain objects.
 	 */
 	void generate_terrain(const std::shared_ptr<TerrainFactory> &terrain_factory);
+
+	/**
+	 * Generate a random map (gamestate/map_generator.h): terrain, elevation and
+	 * the objects (trees, resources, town centers, villagers) as entities
+	 * without game logic.
+	 *
+	 * @param event_loop Event loop of the game state.
+	 * @param entity_factory Factory for the map objects.
+	 * @param terrain_factory Factory for creating terrain objects.
+	 * @param settings Map settings.
+	 *
+	 * @return false if the modpack lacks the required terrain/objects (nothing created).
+	 */
+	bool generate_random_map(const std::shared_ptr<openage::event::EventLoop> &event_loop,
+	                         const std::shared_ptr<EntityFactory> &entity_factory,
+	                         const std::shared_ptr<TerrainFactory> &terrain_factory,
+	                         const MapSettings &settings);
+
+	/**
+	 * Initial camera view (random maps only).
+	 */
+	std::optional<MapView> start_view;
 
 	/**
 	 * Nyan game data database.

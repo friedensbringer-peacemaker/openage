@@ -12,6 +12,8 @@
  *                  [--seconds N] [--width W --height H] [--check]
  *                  [--gles] [--render-check <png>] [--shader-check]
  *                  [--egl-sink-check <png> [--replay] [--frames N]]
+ *                  [--map test|random [--map-seed N] [--map-size N]
+ *                   [--map-trees N] [--map-elevation H] [--map-view ne,se[,zoom[,height]]]]
  *
  * --gles selects an OpenGL ES 3.x context (like OPENAGE_GLES=1).
  * --render-check renders the game for --seconds (default 10) in a hidden
@@ -28,6 +30,12 @@
  * plays input instead of the first plain capture: Ctrl+click spawns two
  * entities, a drag selects them (captured into <png> while the rectangle is
  * visible), a right click moves them.
+ *
+ * --map random uses the random map generator (gamestate/map_generator.h) instead
+ * of the fixed test map: deterministic per --map-seed, --map-size tiles (multiple
+ * of 16), at most --map-trees tree entities, hills up to --map-elevation. The
+ * camera looks at the first start position, or at --map-view (tile ne,se, zoom,
+ * camera height; for render checks).
  *
  * <dir> must contain assets/ (with shaders and converted/{engine,<modpack>})
  * and cfg/. The converted modpacks (including the "engine" API modpack) are
@@ -53,6 +61,7 @@
 #include "engine/check_root.h"
 #include "engine/engine.h"
 #include "error/error.h"
+#include "gamestate/map_settings.h"
 #include "log/log.h"
 #if WITH_QT
 	#include "renderer/gui/integration/public/gui_application_with_logger.h"
@@ -83,6 +92,7 @@ struct native_args {
 	int seconds = 0;
 	size_t width = 1024;
 	size_t height = 768;
+	openage::gamestate::MapSettings map{};
 };
 
 void usage(const char *argv0) {
@@ -90,7 +100,9 @@ void usage(const char *argv0) {
 	          << " --root <dir> [--modpack <id>]... [--headless] [--seconds <n>]"
 	             " [--width <w> --height <h>] [--check]"
 	             " [--gles] [--render-check <png>] [--shader-check]"
-	             " [--egl-sink-check <png> [--replay] [--frames <n>]]\n";
+	             " [--egl-sink-check <png> [--replay] [--frames <n>]]"
+	             " [--map test|random [--map-seed <n>] [--map-size <n>] [--map-trees <n>]"
+	             " [--map-elevation <h>] [--map-view <ne,se[,zoom[,height]]>]]\n";
 }
 
 bool parse_args(int argc, char **argv, native_args &args) {
@@ -141,6 +153,47 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		}
 		else if (arg == "--height") {
 			args.height = std::stoul(value());
+		}
+		else if (arg == "--map") {
+			auto type = value();
+			if (type == "test") {
+				args.map.type = openage::gamestate::map_type_t::TEST;
+			}
+			else if (type == "random") {
+				args.map.type = openage::gamestate::map_type_t::RANDOM;
+			}
+			else {
+				throw std::runtime_error("--map: test or random, not " + type);
+			}
+		}
+		else if (arg == "--map-seed") {
+			args.map.seed = static_cast<uint32_t>(std::stoul(value()));
+		}
+		else if (arg == "--map-size") {
+			args.map.size = std::stoul(value());
+		}
+		else if (arg == "--map-trees") {
+			args.map.max_trees = std::stoul(value());
+		}
+		else if (arg == "--map-elevation") {
+			args.map.max_elevation = std::stof(value());
+		}
+		else if (arg == "--map-view") {
+			// ne,se[,zoom[,height]]
+			std::istringstream in{value()};
+			openage::gamestate::MapView view;
+			char sep = 0;
+			in >> view.ne >> sep >> view.se;
+			if (in >> sep) {
+				in >> view.zoom;
+			}
+			if (in >> sep) {
+				in >> view.height;
+			}
+			if (in.fail()) {
+				throw std::runtime_error("--map-view: ne,se[,zoom[,height]]");
+			}
+			args.map.view = view;
 		}
 		else if (arg == "--help" or arg == "-h") {
 			return false;
@@ -315,7 +368,7 @@ bool egl_sink_check(const native_args &args,
 	auto sink = std::make_shared<TestFrameSink>(width, height, steps, args.frames);
 	settings.sink = sink;
 
-	auto engine = std::make_unique<engine::Engine>(engine::Engine::mode::FULL, root, args.modpacks, settings);
+	auto engine = std::make_unique<engine::Engine>(engine::Engine::mode::FULL, root, args.modpacks, settings, args.map);
 
 	// stop the engine once the sink is done (or failed, or after a generous timeout)
 	std::atomic<bool> loop_finished{false};
@@ -337,9 +390,22 @@ bool egl_sink_check(const native_args &args,
 		engine->stop();
 	}};
 
-	engine->loop();
+	// an exception in the simulation must not destroy the joinable watcher (std::terminate)
+	std::string loop_error;
+	try {
+		engine->loop();
+	}
+	catch (std::exception &exc) {
+		loop_error = exc.what();
+		log::log(ERR << "egl sink check: simulation failed: " << loop_error);
+		engine->stop();
+	}
 	loop_finished = true;
 	watcher.join();
+	if (not loop_error.empty()) {
+		engine.reset();
+		return false;
+	}
 	// joins the time loop and presenter threads
 	engine.reset();
 	const double stop_seconds = std::chrono::duration<double>(clock::now() - stop_time).count();
@@ -451,7 +517,7 @@ int main(int argc, char **argv) {
 
 		auto mode = args.headless ? engine::Engine::mode::HEADLESS
 		                          : engine::Engine::mode::FULL;
-		engine::Engine engine{mode, root, args.modpacks, win_settings};
+		engine::Engine engine{mode, root, args.modpacks, win_settings, args.map};
 
 		std::jthread timer;
 		if (args.seconds > 0 and not render_check) {

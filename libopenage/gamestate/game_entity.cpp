@@ -34,6 +34,11 @@ void GameEntity::set_render_entity(const std::shared_ptr<renderer::world::Render
 	// TODO: Transfer state from old render entity to new one?
 
 	this->render_entity = entity;
+
+	// XR fork: show entities that were updated before the renderer was attached
+	if (this->render_entity != nullptr and not this->last_animation_path.empty()) {
+		this->render_update(this->last_render_time, this->last_animation_path);
+	}
 }
 
 void GameEntity::set_manager(const std::shared_ptr<GameEntityManager> &manager) {
@@ -58,6 +63,8 @@ bool GameEntity::has_component(component::component_t type) {
 
 void GameEntity::render_update(const time::time_t &time,
                                const std::string &animation_path) {
+	this->last_animation_path = animation_path;
+	this->last_render_time = time;
 	if (this->render_entity != nullptr) {
 		const auto &pos = dynamic_pointer_cast<component::Position>(
 							  this->components.at(component::component_t::POSITION))
