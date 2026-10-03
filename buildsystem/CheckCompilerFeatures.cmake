@@ -1,4 +1,4 @@
-# Copyright 2015-2021 the openage authors. See copying.md for legal info.
+# Copyright 2015-2026 the openage authors. See copying.md for legal info.
 
 include(CheckCXXSourceRuns)
 
@@ -8,7 +8,7 @@ else()
 	set(HAVE_THREAD_LOCAL_STORAGE false)
 endif()
 
-check_cxx_source_runs("
+set(CXX20_TEST_SOURCE "
 #include <compare>
 #include <concepts>
 
@@ -37,9 +37,15 @@ int main() {
 	Cat rrarrr{};
 	return meow(mrr) > meow(rrarrr) ? 0 : 1;
 }
-"
-HAVE_REQUIRED_CXX20_SUPPORT
-)
+")
+
+# XR fork: a cross build (e.g. Android) cannot run the test program, compiling it is enough
+if(CMAKE_CROSSCOMPILING)
+	include(CheckCXXSourceCompiles)
+	check_cxx_source_compiles("${CXX20_TEST_SOURCE}" HAVE_REQUIRED_CXX20_SUPPORT)
+else()
+	check_cxx_source_runs("${CXX20_TEST_SOURCE}" HAVE_REQUIRED_CXX20_SUPPORT)
+endif()
 
 if(NOT HAVE_REQUIRED_CXX20_SUPPORT)
 	message("
