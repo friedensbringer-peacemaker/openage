@@ -2,8 +2,6 @@
 
 #include "demo_0.h"
 
-#include <QKeyEvent>
-#include <QMouseEvent>
 
 #include "coord/tile.h"
 #include "pathfinding/cost_field.h"
@@ -82,10 +80,10 @@ void path_demo_0(const util::Path &path) {
 	auto vectors_visible = false;
 
 	// Enable mouse button callbacks
-	window->add_mouse_button_callback([&](const QMouseEvent &ev) {
-		if (ev.type() == QEvent::MouseButtonRelease) {
-			if (ev.button() == Qt::RightButton) { // Set target cell
-				auto tile_pos = render_manager->select_tile(ev.position().x(), ev.position().y());
+	window->add_mouse_button_callback([&](const renderer::WindowEvent &ev) {
+		if (ev.type == input::event_type::MouseButtonRelease) {
+			if (ev.button == input::mouse_button::RightButton) { // Set target cell
+				auto tile_pos = render_manager->select_tile(ev.x, ev.y);
 				auto grid_x = tile_pos.first;
 				auto grid_y = tile_pos.second;
 
@@ -126,24 +124,24 @@ void path_demo_0(const util::Path &path) {
 	});
 
 	// Enable key callbacks
-	window->add_key_callback([&](const QKeyEvent &ev) {
-		if (ev.type() == QEvent::KeyRelease) {
-			if (ev.key() == Qt::Key_F1) { // Show cost field
+	window->add_key_callback([&](const renderer::WindowEvent &ev) {
+		if (ev.type == input::event_type::KeyRelease) {
+			if (ev.key == input::key::Key_F1) { // Show cost field
 				render_manager->show_cost_field(cost_field);
 				current_field = RenderManager0::field_t::COST;
 				log::log(INFO << "Showing cost field");
 			}
-			else if (ev.key() == Qt::Key_F2) { // Show integration field
+			else if (ev.key == input::key::Key_F2) { // Show integration field
 				render_manager->show_integration_field(integration_field);
 				current_field = RenderManager0::field_t::INTEGRATION;
 				log::log(INFO << "Showing integration field");
 			}
-			else if (ev.key() == Qt::Key_F3) { // Show flow field
+			else if (ev.key == input::key::Key_F3) { // Show flow field
 				render_manager->show_flow_field(flow_field, integration_field);
 				current_field = RenderManager0::field_t::FLOW;
 				log::log(INFO << "Showing flow field");
 			}
-			else if (ev.key() == Qt::Key_F4) { // Show steering vectors
+			else if (ev.key == input::key::Key_F4) { // Show steering vectors
 				if (vectors_visible) {
 					render_manager->hide_vectors();
 					vectors_visible = false;

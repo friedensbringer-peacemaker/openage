@@ -7,24 +7,96 @@
 
 #include "context.h"
 
-#include <QOffscreenSurface>
-#include <QOpenGLContext>
-#include <QOpenGLDebugLogger>
-#include <QWindow>
-
 #include "error/error.h"
 #include "log/log.h"
-#include "renderer/opengl/debug.h"
+
+#if WITH_QT
+	#include <QOffscreenSurface>
+	#include <QOpenGLContext>
+	#include <QOpenGLDebugLogger>
+	#include <QWindow>
+
+	#include "renderer/opengl/debug.h"
+#endif
 
 
 namespace openage::renderer::opengl {
 
+#if WITH_QT
 /// The first element is the lowest version we need, last is highest version we support.
 static constexpr std::array<std::pair<int, int>, 1> gl_versions = {{{3, 3}}}; // for now we don't need any higher versions
 
 /// Same for OpenGL ES. 3.0 has everything the renderer uses (UBOs, MRT, integer
 /// textures, texture arrays); 3.2 is what the Meta Quest offers.
 static constexpr std::array<std::pair<int, int>, 3> gles_versions = {{{3, 0}, {3, 1}, {3, 2}}};
+#endif
+
+namespace {
+
+/// Read the limits and the version of the context that is current on this thread.
+gl_context_spec query_current_spec(bool gles) {
+	gl_context_spec caps{};
+
+	// OpenGL version
+	glGetIntegerv(GL_MAJOR_VERSION, &caps.major_version);
+	glGetIntegerv(GL_MINOR_VERSION, &caps.minor_version);
+	caps.gles = gles;
+
+	// Texture parameters
+	GLint temp;
+	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &temp);
+	caps.max_texture_size = temp;
+	// TODO maybe GL_MAX_TEXTURE_IMAGE_UNITS or maybe GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS
+	// lol opengl
+	glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &temp);
+	caps.max_texture_slots = temp;
+	glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &temp);
+	caps.max_vertex_attributes = temp;
+	if (gles and caps.major_version == 3 and caps.minor_version == 0) {
+		// GL_MAX_UNIFORM_LOCATIONS (explicit uniform locations) needs OpenGL ES 3.1
+		glGetIntegerv(GL_MAX_VERTEX_UNIFORM_VECTORS, &temp);
+	}
+	else {
+		glGetIntegerv(GL_MAX_UNIFORM_LOCATIONS, &temp);
+	}
+	caps.max_uniform_locations = temp;
+	glGetIntegerv(GL_MAX_UNIFORM_BUFFER_BINDINGS, &temp);
+	caps.max_uniform_buffer_bindings = temp;
+
+	return caps;
+}
+
+/// Verify that the context and libepoxy are usable for the renderer.
+void check_context(const gl_context_spec &specs) {
+	// We still have to verify that our version of libepoxy supports this version of OpenGL.
+	int epoxy_glv = specs.major_version * 10 + specs.minor_version;
+	if (epoxy_is_desktop_gl() == specs.gles or epoxy_gl_version() < epoxy_glv) {
+		throw Error(MSG(err) << "The used version of libepoxy does not support "
+		                     << (specs.gles ? "OpenGL ES" : "OpenGL") << " version "
+		                     << specs.major_version << "." << specs.minor_version);
+	}
+
+	log::log(MSG(info) << "Created " << (specs.gles ? "OpenGL ES" : "OpenGL") << " context version " << specs.major_version << "." << specs.minor_version);
+
+	// To quote the standard doc: 'The value gives a rough estimate of the
+	// largest texture that the GL can handle'
+	// -> wat?  anyways, we need at least 1024x1024.
+	log::log(MSG(dbg) << "Maximum supported texture size: "
+	                  << specs.max_texture_size);
+	if (specs.max_texture_size < 1024) {
+		throw Error(MSG(err) << "Maximum supported texture size is too small: "
+		                     << specs.max_texture_size);
+	}
+
+	log::log(MSG(dbg) << "Maximum supported texture units: "
+	                  << specs.max_texture_slots);
+	if (specs.max_texture_slots < 2) {
+		throw Error(MSG(err) << "Your GPU doesn't have enough texture units: "
+		                     << specs.max_texture_slots);
+	}
+}
+
+} // namespace
 
 bool GlContext::gles_requested_by_env() {
 	const char *env = std::getenv("OPENAGE_GLES");
@@ -33,6 +105,10 @@ bool GlContext::gles_requested_by_env() {
 
 /// Finds out the supported graphics functions and OpenGL version of the device.
 gl_context_spec GlContext::find_spec(bool gles) {
+#if !WITH_QT
+	// XR fork: without Qt, the embedder provides a current context
+	return query_current_spec(gles);
+#else
 	QSurfaceFormat test_format{};
 	if (gles) {
 		test_format.setRenderableType(QSurfaceFormat::RenderableType::OpenGLES);
@@ -86,37 +162,11 @@ gl_context_spec GlContext::find_spec(bool gles) {
 
 	test_context.makeCurrent(&test_surface);
 
-	gl_context_spec caps{};
-
-	// Texture parameters
-	GLint temp;
-	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &temp);
-	caps.max_texture_size = temp;
-	// TODO maybe GL_MAX_TEXTURE_IMAGE_UNITS or maybe GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS
-	// lol opengl
-	glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &temp);
-	caps.max_texture_slots = temp;
-	glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &temp);
-	caps.max_vertex_attributes = temp;
-	if (gles and test_context.format().majorVersion() == 3 and test_context.format().minorVersion() == 0) {
-		// GL_MAX_UNIFORM_LOCATIONS (explicit uniform locations) needs OpenGL ES 3.1
-		glGetIntegerv(GL_MAX_VERTEX_UNIFORM_VECTORS, &temp);
-	}
-	else {
-		glGetIntegerv(GL_MAX_UNIFORM_LOCATIONS, &temp);
-	}
-	caps.max_uniform_locations = temp;
-	glGetIntegerv(GL_MAX_UNIFORM_BUFFER_BINDINGS, &temp);
-	caps.max_uniform_buffer_bindings = temp;
-
-	// OpenGL version
-	glGetIntegerv(GL_MAJOR_VERSION, &caps.major_version);
-	glGetIntegerv(GL_MINOR_VERSION, &caps.minor_version);
-	caps.gles = gles;
-
-	return caps;
+	return query_current_spec(gles);
+#endif
 }
 
+#if WITH_QT
 GlContext::GlContext(const std::shared_ptr<QWindow> &window,
                      bool debug) :
 	window{window},
@@ -146,34 +196,19 @@ GlContext::GlContext(const std::shared_ptr<QWindow> &window,
 		this->log_handler->start();
 	}
 
-	// We still have to verify that our version of libepoxy supports this version of OpenGL.
-	int epoxy_glv = specs.major_version * 10 + specs.minor_version;
-	if (epoxy_is_desktop_gl() == specs.gles or epoxy_gl_version() < epoxy_glv) {
-		throw Error(MSG(err) << "The used version of libepoxy does not support "
-		                     << (specs.gles ? "OpenGL ES" : "OpenGL") << " version "
-		                     << specs.major_version << "." << specs.minor_version);
-	}
-
-	log::log(MSG(info) << "Created " << (specs.gles ? "OpenGL ES" : "OpenGL") << " context version " << specs.major_version << "." << specs.minor_version);
-
-	// To quote the standard doc: 'The value gives a rough estimate of the
-	// largest texture that the GL can handle'
-	// -> wat?  anyways, we need at least 1024x1024.
-	log::log(MSG(dbg) << "Maximum supported texture size: "
-	                  << specs.max_texture_size);
-	if (specs.max_texture_size < 1024) {
-		throw Error(MSG(err) << "Maximum supported texture size is too small: "
-		                     << specs.max_texture_size);
-	}
-
-	log::log(MSG(dbg) << "Maximum supported texture units: "
-	                  << specs.max_texture_slots);
-	if (specs.max_texture_slots < 2) {
-		throw Error(MSG(err) << "Your GPU doesn't have enough texture units: "
-		                     << specs.max_texture_slots);
-	}
+	check_context(specs);
 }
+#else
+GlContext::GlContext(bool gles, unsigned int default_framebuffer) :
+	default_framebuffer{default_framebuffer} {
+	this->specs = find_spec(gles);
+	this->uniform_buffer_bindings = std::vector<bool>(this->specs.max_uniform_buffer_bindings);
 
+	check_context(this->specs);
+}
+#endif
+
+#if WITH_QT
 GlContext::GlContext(GlContext &&other) :
 	gl_context(other.gl_context), specs(other.specs) {
 	other.gl_context = nullptr;
@@ -194,6 +229,22 @@ std::shared_ptr<QOpenGLContext> GlContext::get_raw_context() const {
 GLuint GlContext::get_default_framebuffer_id() {
 	return this->gl_context->defaultFramebufferObject();
 }
+#else
+GlContext::GlContext(GlContext &&other) :
+	default_framebuffer(other.default_framebuffer), specs(other.specs) {
+}
+
+GlContext &GlContext::operator=(GlContext &&other) {
+	this->default_framebuffer = other.default_framebuffer;
+	this->specs = other.specs;
+
+	return *this;
+}
+
+GLuint GlContext::get_default_framebuffer_id() {
+	return this->default_framebuffer;
+}
+#endif
 
 gl_context_spec GlContext::get_specs() const {
 	return this->specs;
@@ -251,12 +302,17 @@ void GlContext::check_error() {
 }
 
 void GlContext::set_vsync(bool on) {
+#if WITH_QT
 	if (on) {
 		this->gl_context->format().setSwapInterval(1);
 	}
 	else {
 		this->gl_context->format().setSwapInterval(0);
 	}
+#else
+	// the embedder controls the swap interval
+	(void)on;
+#endif
 }
 
 

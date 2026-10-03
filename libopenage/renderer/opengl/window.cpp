@@ -1,4 +1,4 @@
-// Copyright 2018-2024 the openage authors. See copying.md for legal info.
+// Copyright 2018-2026 the openage authors. See copying.md for legal info.
 
 #include "window.h"
 
@@ -13,6 +13,7 @@
 #include "renderer/opengl/context.h"
 #include "renderer/opengl/renderer.h"
 #include "renderer/window_event_handler.h"
+#include "renderer/window_events_qt.h"
 
 
 namespace openage::renderer::opengl {
@@ -143,29 +144,29 @@ void GlWindow::update() {
 
 		case QEvent::KeyPress:
 		case QEvent::KeyRelease: {
-			auto const ev = std::dynamic_pointer_cast<QKeyEvent>(event);
+			auto const ev = from_qt_event(*event);
 			for (auto &cb : this->on_key) {
-				cb(*ev);
+				cb(ev);
 			}
 		} break;
 		case QEvent::MouseButtonPress:
 		case QEvent::MouseButtonRelease:
 		case QEvent::MouseButtonDblClick: {
-			auto const ev = std::dynamic_pointer_cast<QMouseEvent>(event);
+			auto const ev = from_qt_event(*event);
 			for (auto &cb : this->on_mouse_button) {
-				cb(*ev);
+				cb(ev);
 			}
 		} break;
 		case QEvent::MouseMove: {
-			auto const ev = std::dynamic_pointer_cast<QMouseEvent>(event);
+			auto const ev = from_qt_event(*event);
 			for (auto &cb : this->on_mouse_move) {
-				cb(*ev);
+				cb(ev);
 			}
 		} break;
 		case QEvent::Wheel: {
-			auto const ev = std::dynamic_pointer_cast<QWheelEvent>(event);
+			auto const ev = from_qt_event(*event);
 			for (auto &cb : this->on_mouse_wheel) {
-				cb(*ev);
+				cb(ev);
 			}
 		} break;
 		default:

@@ -1,26 +1,43 @@
-// Copyright 2015-2024 the openage authors. See copying.md for legal info.
+// Copyright 2015-2026 the openage authors. See copying.md for legal info.
 
 #include "window.h"
 
-#include <QWindow>
+#include "error/error.h"
 
-#include "opengl/window.h"
-#include "window_event_handler.h"
+#if WITH_QT
+	#include <QWindow>
+
+	#include "opengl/window.h"
+	#include "window_event_handler.h"
+#endif
 
 
 namespace openage::renderer {
 
 std::shared_ptr<Window> Window::create(const std::string &title,
                                        window_settings settings) {
+#if WITH_QT
 	// currently we only have a functional GL window
 	// TODO: support other renderer windows
 	//       and add some selection mechanism.
 	return std::make_shared<opengl::GlWindow>(title, settings);
+#else
+	// XR fork: builds without Qt get their window from the embedder (EGL sink)
+	(void)settings;
+	throw Error{MSG(err) << "Cannot create window '" << title
+	                     << "': no window backend in this build (built with OPENAGE_QT=OFF)."};
+#endif
 }
 
 
 Window::Window(size_t width, size_t height) :
-	size{width, height}, event_handler{std::make_shared<WindowEventHandler>()} {}
+	size{width, height}
+#if WITH_QT
+	,
+	event_handler{std::make_shared<WindowEventHandler>()}
+#endif
+{
+}
 
 
 const util::Vector2s &Window::get_size() const {
@@ -55,12 +72,18 @@ void Window::add_resize_callback(const resize_cb_t &cb) {
 	this->on_resize.push_back(cb);
 }
 
+#if WITH_QT
 const std::shared_ptr<QWindow> &Window::get_qt_window() const {
 	return this->window;
 }
+#endif
 
 void Window::close() {
+#if WITH_QT
 	this->window->close();
+#else
+	this->should_be_closed = true;
+#endif
 }
 
 

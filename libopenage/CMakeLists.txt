@@ -12,15 +12,21 @@ declare_binary(libopenage openage library allow_no_undefined)
 # set basic library settings
 set_target_properties(libopenage PROPERTIES
 	VERSION 0
-	AUTOMOC ON
-	AUTOGEN_TARGET_DEPENDS "cppgen"
 )
+if(OPENAGE_QT)
+	set_target_properties(libopenage PROPERTIES
+		AUTOMOC ON
+		AUTOGEN_TARGET_DEPENDS "cppgen"
+	)
+endif()
 
 ##################################################
 # library dependency specification
 
 # freetype includedir hint for ubuntu...
-find_path(FREETYPE_INCLUDE_DIRS freetype/freetype.h HINTS /usr/include/freetype2)
+if(OPENAGE_WITH_FONT)
+	find_path(FREETYPE_INCLUDE_DIRS freetype/freetype.h HINTS /usr/include/freetype2)
+endif()
 
 # provide apple qt location
 if(APPLE)
@@ -48,14 +54,17 @@ if(NOT APPLE AND NOT WIN32)
 	endif()
 endif()
 
-find_library(FONTCONFIG_LIB fontconfig)
-
 find_package(toml11 REQUIRED)
-find_package(Freetype REQUIRED)
 find_package(PNG REQUIRED)
 find_package(Opusfile REQUIRED)
 find_package(Epoxy REQUIRED)
-find_package(HarfBuzz 1.0.0 REQUIRED)
+
+# XR fork: font rendering is optional (OPENAGE_WITH_FONT)
+if(OPENAGE_WITH_FONT)
+	find_library(FONTCONFIG_LIB fontconfig)
+	find_package(Freetype REQUIRED)
+	find_package(HarfBuzz 1.0.0 REQUIRED)
+endif()
 # Eigen dropped strict config-version compatibility across its 3 to 5 major
 # bump, so pinning "3.3" here makes find_package reject Eigen 5 (shipped by
 # Arch and Homebrew) even though openage only uses the stable core/geometry
@@ -66,8 +75,24 @@ find_package(Eigen3 REQUIRED NO_MODULE)
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 find_package(Threads REQUIRED)
 
-set(QT_VERSION_REQ "6.2")
-find_package(Qt6 ${QT_VERSION_REQ} REQUIRED COMPONENTS Core Quick Multimedia)
+# XR fork: Qt is optional (OPENAGE_QT)
+if(OPENAGE_QT)
+	set(QT_VERSION_REQ "6.2")
+	find_package(Qt6 ${QT_VERSION_REQ} REQUIRED COMPONENTS Core Quick Multimedia)
+endif()
+# config.h: WITH_QT and WITH_FONT (true/false for the preprocessor)
+if(OPENAGE_QT)
+	set(WANT_QT true)
+else()
+	set(WANT_QT false)
+endif()
+have_config_option(qt QT ${WANT_QT})
+if(OPENAGE_WITH_FONT)
+	set(WANT_FONT true)
+else()
+	set(WANT_FONT false)
+endif()
+have_config_option(font FONT ${WANT_FONT})
 
 if(WANT_BACKTRACE)
 	find_package(GCCBacktrace)
@@ -221,8 +246,8 @@ if(WANT_OPENGL)
 	find_package(OpenGL)
 endif()
 
-# vulkan support
-if(WANT_VULKAN)
+# vulkan support (the Vulkan window needs Qt)
+if(WANT_VULKAN AND OPENAGE_QT)
 	find_package(Vulkan)
 endif()
 
@@ -253,10 +278,12 @@ configure_file(config.cpp.in config.cpp)
 configure_file(version.h.in version.h)
 configure_file(version.cpp.in version.cpp)
 
-configure_file(
-	"${CMAKE_SOURCE_DIR}/openage/config.py.in"
-	"${CMAKE_BINARY_DIR}/openage/config.py"
-)
+if(OPENAGE_PYTHON)
+	configure_file(
+		"${CMAKE_SOURCE_DIR}/openage/config.py.in"
+		"${CMAKE_BINARY_DIR}/openage/config.py"
+	)
+endif()
 
 ##################################################
 # directories for header inclusion
@@ -288,18 +315,24 @@ target_link_libraries(libopenage
 		${OGG_LIB}
 
 		${CMAKE_DL_LIBS}
-		${FONTCONFIG_LIB}
-		${FREETYPE_LIBRARIES}
 		${EPOXY_LIBRARIES}
 		${MATH_LIB}
-		${UTIL_LIB}
-		${HarfBuzz_LIBRARIES}
-		${RT_LIB}
 		${EXECINFO_LIB}
-		Qt6::Core
-		Qt6::Quick
-		Qt6::Multimedia
 )
+
+# XR fork: optional libraries, linked only if enabled or found
+# (Android has no separate libutil/librt and no fontconfig)
+foreach(lib UTIL_LIB RT_LIB FONTCONFIG_LIB)
+	if(${lib})
+		target_link_libraries(libopenage PRIVATE "${${lib}}")
+	endif()
+endforeach()
+if(OPENAGE_WITH_FONT)
+	target_link_libraries(libopenage PRIVATE ${FREETYPE_LIBRARIES} ${HarfBuzz_LIBRARIES})
+endif()
+if(OPENAGE_QT)
+	target_link_libraries(libopenage PRIVATE Qt6::Core Qt6::Quick Qt6::Multimedia)
+endif()
 
 ##################################################
 # installation of the library
@@ -334,8 +367,13 @@ pxdgen(
 
 # add subsystem folders
 add_subdirectory("assets")
-add_subdirectory("audio")
-add_subdirectory("console")
+# XR fork: audio needs Qt Multimedia, the console needs fonts
+if(OPENAGE_QT)
+	add_subdirectory("audio")
+endif()
+if(OPENAGE_WITH_FONT)
+	add_subdirectory("console")
+endif()
 add_subdirectory("coord")
 add_subdirectory("curve")
 add_subdirectory("cvar")
@@ -364,5 +402,20 @@ option(OPENAGE_NATIVE_ENTRY "build the native C++ entry point openage-native" ON
 if(OPENAGE_NATIVE_ENTRY)
 	add_executable(openage-native main/native_main.cpp)
 	target_include_directories(openage-native PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-	target_link_libraries(openage-native PRIVATE libopenage nyan::nyan Eigen3::Eigen Qt6::Core Qt6::Gui Threads::Threads)
+	target_link_libraries(openage-native PRIVATE libopenage nyan::nyan Eigen3::Eigen Threads::Threads)
+	if(OPENAGE_QT)
+		target_link_libraries(openage-native PRIVATE Qt6::Core Qt6::Gui)
+	endif()
+
+	# host test: Qt-free input constants and key parser (compared with Qt in Qt builds)
+	add_executable(openage-input-check input/input_check.cpp)
+	# same include directories as the library (generated coord headers, eigen3/...)
+	target_include_directories(openage-input-check PRIVATE $<TARGET_PROPERTY:libopenage,INCLUDE_DIRECTORIES>)
+	add_dependencies(openage-input-check cppgen)
+	target_link_libraries(openage-input-check PRIVATE libopenage nyan::nyan Eigen3::Eigen)
+	if(OPENAGE_QT)
+		target_link_libraries(openage-input-check PRIVATE Qt6::Core Qt6::Gui)
+	endif()
+	add_test(NAME openage-input-check
+		COMMAND openage-input-check "${CMAKE_SOURCE_DIR}/cfg/keybinds.oac")
 endif()

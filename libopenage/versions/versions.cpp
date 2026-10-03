@@ -1,17 +1,24 @@
-// Copyright 2020-2024 the openage authors. See copying.md for legal info.
+// Copyright 2020-2026 the openage authors. See copying.md for legal info.
 
 #include "versions.h"
 
-#ifdef __linux__
+#include "config.h"
+
+#if defined(__linux__) && !defined(__ANDROID__)
 	#include <gnu/libc-version.h>
 #endif
 
 #include <eigen3/Eigen/Dense>
 #include <epoxy/gl.h>
-#include <harfbuzz/hb.h>
 #include <opus_defines.h>
-#include <QtGlobal>
 #include <sstream>
+
+#if WITH_FONT
+	#include <harfbuzz/hb.h>
+#endif
+#if WITH_QT
+	#include <QtGlobal>
+#endif
 
 #include "../util/strings.h"
 #include "versions/compiletime.h"
@@ -24,11 +31,15 @@ std::map<std::string, std::string> get_version_numbers() {
 	// Eigen compiletime version number
 	version_numbers.emplace("Eigen", util::sformat("%d.%d.%d", EIGEN_WORLD_VERSION, EIGEN_MAJOR_VERSION, EIGEN_MINOR_VERSION));
 
+#if WITH_FONT
 	// Harfbuzz compiletime version number
 	version_numbers.emplace("Harfbuzz", util::sformat("%d.%d.%d", HB_VERSION_MAJOR, HB_VERSION_MINOR, HB_VERSION_MICRO));
+#endif
 
+#if WITH_QT
 	// Add Qt version number
 	version_numbers.emplace("Qt", QT_VERSION_STR);
+#endif
 
 	// Add nyan version number
 	version_numbers.emplace("nyan", nyan_version);
@@ -39,11 +50,15 @@ std::map<std::string, std::string> get_version_numbers() {
 
 	// TODO: Add OpenGL version number
 
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
 	// Add libc version number if not MacOSX
 	version_numbers.emplace("libc-runtime", gnu_get_libc_version());
 
 	version_numbers.emplace("libc-compile", util::sformat("%d.%d", __GLIBC__, __GLIBC_MINOR__));
+#endif
+
+#ifdef __ANDROID__
+	version_numbers.emplace("libc-runtime", util::sformat("Bionic (API %d)", __ANDROID_API__));
 #endif
 
 #ifdef __APPLE__

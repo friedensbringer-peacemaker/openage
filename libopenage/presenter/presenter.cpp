@@ -1,15 +1,14 @@
-// Copyright 2019-2024 the openage authors. See copying.md for legal info.
+// Copyright 2019-2026 the openage authors. See copying.md for legal info.
 
 #include "presenter.h"
+
+#include "config.h"
 
 #include <chrono>
 #include <eigen3/Eigen/Dense>
 #include <iostream>
 #include <string>
 #include <vector>
-
-#include <QImage>
-#include <QString>
 
 #include "gamestate/simulation.h"
 #include "input/controller/camera/binding_context.h"
@@ -22,12 +21,15 @@
 #include "input/input_manager.h"
 #include "log/log.h"
 #include "renderer/camera/camera.h"
-#include "renderer/gui/gui.h"
-#include "renderer/gui/integration/public/gui_application_with_logger.h"
+#if WITH_QT
+	#include "renderer/gui/gui.h"
+	#include "renderer/gui/integration/public/gui_application_with_logger.h"
+#endif
 #include "renderer/render_factory.h"
 #include "renderer/render_pass.h"
 #include "renderer/render_target.h"
 #include "renderer/resources/assets/asset_manager.h"
+#include "renderer/resources/png_io.h"
 #include "renderer/resources/shader_source.h"
 #include "renderer/resources/texture_data.h"
 #include "renderer/resources/texture_info.h"
@@ -72,7 +74,11 @@ void Presenter::run(const renderer::window_settings window_settings) {
 	size_t frames = 0;
 
 	while (not this->window->should_close() and not *this->stop_requested) {
-		this->gui_app->process_events();
+#if WITH_QT
+		if (this->gui_app) {
+			this->gui_app->process_events();
+		}
+#endif
 		// TODO: pass button presses and events from GUI to controller
 
 		this->render();
@@ -117,7 +123,12 @@ void Presenter::set_time_loop(const std::shared_ptr<time::TimeLoop> &time_loop) 
 }
 
 std::shared_ptr<qtgui::GuiApplication> Presenter::init_window_system() {
+#if WITH_QT
 	return std::make_shared<renderer::gui::GuiApplicationWithLogger>();
+#else
+	// XR fork: without Qt, the window system belongs to the embedder
+	return nullptr;
+#endif
 }
 
 void Presenter::init_graphics(const renderer::window_settings &window_settings) {
@@ -194,7 +205,20 @@ void Presenter::init_graphics(const renderer::window_settings &window_settings) 
 		this->time_loop->get_clock());
 	this->render_passes.push_back(this->hud_renderer->get_render_pass());
 
-	this->init_gui();
+	// the GUI is optional (XR fork): builds without Qt have none, and a
+	// missing QML setup only disables it
+	if (this->gui_app) {
+		try {
+			this->init_gui();
+		}
+		catch (Error &err) {
+			log::log(WARN << "Presenter: GUI disabled: " << err.what());
+			this->gui = nullptr;
+		}
+	}
+	else {
+		log::log(INFO << "Presenter: no GUI (no window system application)");
+	}
 	this->init_final_render_pass();
 
 	if (this->simulation) {
@@ -206,6 +230,7 @@ void Presenter::init_graphics(const renderer::window_settings &window_settings) 
 }
 
 void Presenter::init_gui() {
+#if WITH_QT
 	log::log(INFO << "Presenter: Initializing GUI with Qt backend");
 
 	//// -- gui initialization
@@ -243,6 +268,9 @@ void Presenter::init_gui() {
 
 	auto gui_pass = this->gui->get_render_pass();
 	this->render_passes.push_back(gui_pass);
+#else
+	throw Error{ERR << "no GUI in builds without Qt"};
+#endif
 }
 
 void Presenter::init_input() {
@@ -250,18 +278,18 @@ void Presenter::init_input() {
 
 	this->input_manager = std::make_shared<input::InputManager>();
 
-	this->window->add_key_callback([&](const QKeyEvent &ev) {
-		this->input_manager->process(ev);
+	this->window->add_key_callback([&](const renderer::WindowEvent &ev) {
+		this->input_manager->process(input::Event{ev});
 	});
-	this->window->add_mouse_button_callback([&](const QMouseEvent &ev) {
-		this->input_manager->process(ev);
+	this->window->add_mouse_button_callback([&](const renderer::WindowEvent &ev) {
+		this->input_manager->process(input::Event{ev});
 	});
-	this->window->add_mouse_move_callback([&](const QMouseEvent &ev) {
-		this->input_manager->set_mouse(ev.position().x(), ev.position().y());
-		this->input_manager->process(ev);
+	this->window->add_mouse_move_callback([&](const renderer::WindowEvent &ev) {
+		this->input_manager->set_mouse(static_cast<int>(ev.x), static_cast<int>(ev.y));
+		this->input_manager->process(input::Event{ev});
 	});
-	this->window->add_mouse_wheel_callback([&](const QWheelEvent &ev) {
-		this->input_manager->process(ev);
+	this->window->add_mouse_wheel_callback([&](const renderer::WindowEvent &ev) {
+		this->input_manager->process(input::Event{ev});
 	});
 
 	auto input_ctx = this->input_manager->get_global_context();
@@ -280,11 +308,13 @@ void Presenter::init_input() {
 		input_ctx->set_game_bindings(engine_context);
 	}
 
+#if WITH_QT
 	// attach GUI if it's initialized
 	if (this->gui) {
 		log::log(INFO << "Loading GUI controls");
 		this->input_manager->set_gui(this->gui->get_input_handler());
 	}
+#endif
 
 	// setup camera controls
 	if (this->camera) {
@@ -353,12 +383,10 @@ void Presenter::capture_frame(const std::string &file) {
 
 	// OpenGL rows start at the bottom
 	auto image = texture->into_data().flip_y();
-	// saved with Qt directly: Texture2dData::store() needs a writable util::Path,
+	// stored directly: Texture2dData::store() needs a writable util::Path,
 	// which a plain fslike::Directory does not provide
-	QImage png{image.get_data(), int(size[0]), int(size[1]), QImage::Format_RGBA8888};
-	if (not png.save(QString::fromStdString(file))) {
-		throw Error{ERR << "Presenter: could not store frame to " << file};
-	}
+	renderer::resources::store_png_rgba8(file, image.get_data(), size[0], size[1],
+	                                     image.get_info().get_row_size());
 	log::log(INFO << "Presenter: stored frame " << size[0] << "x" << size[1] << " to " << file);
 }
 
@@ -368,7 +396,11 @@ void Presenter::render() {
 	this->terrain_renderer->update();
 	this->world_renderer->update();
 	this->hud_renderer->update();
-	this->gui->render();
+#if WITH_QT
+	if (this->gui) {
+		this->gui->render();
+	}
+#endif
 
 	for (auto &pass : this->render_passes) {
 		this->renderer->render(pass);

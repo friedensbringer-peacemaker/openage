@@ -3,7 +3,6 @@
 #include "demo_3.h"
 
 #include <eigen3/Eigen/Dense>
-#include <QKeyEvent>
 
 #include "coord/tile.h"
 #include "renderer/camera/camera.h"
@@ -176,8 +175,8 @@ void renderer_demo_3(const util::Path &path) {
 	world2->update(2, coord::phys3(1.0f, 3.0f, 0.0f), "./textures/test_missing.sprite");
 
 	// Zoom in/out with mouse wheel
-	window->add_mouse_wheel_callback([&](const QWheelEvent &ev) {
-		auto delta = ev.angleDelta().y() / 120;
+	window->add_mouse_wheel_callback([&](const renderer::WindowEvent &ev) {
+		auto delta = ev.angle_delta_y / 120;
 
 		// zoom_frame updates the camera zoom level in the next drawn frame
 		if (delta < 0) {
@@ -189,22 +188,22 @@ void renderer_demo_3(const util::Path &path) {
 	});
 
 	// Move around the scene with WASD
-	window->add_key_callback([&](const QKeyEvent &ev) {
-		if (ev.type() == QEvent::KeyPress) {
-			auto key = ev.key();
+	window->add_key_callback([&](const renderer::WindowEvent &ev) {
+		if (ev.type == input::event_type::KeyPress) {
+			auto key = ev.key;
 
 			// move_frame moves the camera in the specified direction in the next drawn frame
 			switch (key) {
-			case Qt::Key_W: { // forward
+			case input::key::Key_W: { // forward
 				cam_manager->move_frame(renderer::camera::MoveDirection::FORWARD, 0.5f);
 			} break;
-			case Qt::Key_A: { // left
+			case input::key::Key_A: { // left
 				cam_manager->move_frame(renderer::camera::MoveDirection::LEFT, 0.5f);
 			} break;
-			case Qt::Key_S: { // back
+			case input::key::Key_S: { // back
 				cam_manager->move_frame(renderer::camera::MoveDirection::BACKWARD, 0.5f);
 			} break;
-			case Qt::Key_D: { // right
+			case input::key::Key_D: { // right
 				cam_manager->move_frame(renderer::camera::MoveDirection::RIGHT, 0.5f);
 			} break;
 			default:

@@ -16,7 +16,6 @@
 #include "renderer/opengl/uniform_buffer.h"
 #include "renderer/opengl/uniform_input.h"
 #include "renderer/opengl/vertex_array.h"
-#include "renderer/opengl/window.h"
 #include "renderer/resources/buffer_info.h"
 
 

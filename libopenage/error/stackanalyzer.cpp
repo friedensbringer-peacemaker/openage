@@ -1,4 +1,4 @@
-// Copyright 2015-2024 the openage authors. See copying.md for legal info.
+// Copyright 2015-2026 the openage authors. See copying.md for legal info.
 
 #include "stackanalyzer.h"
 
@@ -208,6 +208,49 @@ void StackAnalyzer::analyze() {
 } // namespace error
 } // namespace openage
 
+	#elif defined(__ANDROID__)
+
+		// XR fork: bionic has <execinfo.h> only from API level 33,
+		// the unwinder of the NDK works on all API levels.
+		#include <unwind.h>
+
+namespace openage::error {
+
+namespace {
+
+_Unwind_Reason_Code unwind_callback(struct _Unwind_Context *context, void *arg) {
+	auto *addrs = static_cast<std::vector<void *> *>(arg);
+	uintptr_t pc = _Unwind_GetIP(context);
+	if (pc != 0) {
+		addrs->push_back(reinterpret_cast<void *>(pc));
+	}
+	return _URC_NO_REASON;
+}
+
+} // namespace
+
+
+void StackAnalyzer::analyze() {
+	std::vector<void *> buffer;
+	_Unwind_Backtrace(unwind_callback, &buffer);
+
+	// skip the first few frames, like the execinfo variant
+	size_t idx = 0;
+	for (void *element : buffer) {
+		if (idx >= base_skip_frames) {
+			this->stack_addrs.push_back(element);
+		}
+		idx += 1;
+	}
+
+	// remove some libc-garbage-frames (least-recent-call)
+	for (uint64_t i = 0; i < skip_entry_frames and not this->stack_addrs.empty(); i++) {
+		this->stack_addrs.pop_back();
+	}
+}
+
+} // namespace openage::error
+
 	#else // not _MSC_VER
 
 		// use GNU's <execinfo.h>
@@ -256,7 +299,7 @@ void StackAnalyzer::analyze() {
 
 } // namespace openage::error
 
-	#endif // for _MSC_VER or GNU execinfo
+	#endif // for _MSC_VER, Android unwind or GNU execinfo
 
 namespace openage::error {
 

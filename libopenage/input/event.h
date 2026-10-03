@@ -2,16 +2,15 @@
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
-#include <QKeyCombination>
-#include <QMouseEvent>
-#include <QWheelEvent>
-
 #include "coord/pixel.h"
+#include "input/keys.h"
+#include "renderer/window_events.h"
 
 namespace openage {
 namespace input {
@@ -138,9 +137,9 @@ public:
 	/**
 	 * Create a new input event from a window event.
 	 *
-	 * @param ev Qt input event.
+	 * @param ev Window input event (key, mouse button, mouse move or wheel).
 	 */
-	Event(const QEvent &ev);
+	Event(const renderer::WindowEvent &ev);
 
 	/**
 	 * Create a new input event from custom values.
@@ -160,14 +159,15 @@ public:
 	~Event() = default;
 
 	/**
-	 * Get the associated Qt input event from the window manager.
+	 * Get the window event this event was created from (position, pressed
+	 * buttons, wheel rotation, text).
 	 *
-	 * This may return \p nullptr if this event was not created from a
-	 * Qt input event.
+	 * Events created from custom values return an event of type
+	 * input::event_type::NoEvent.
 	 *
-	 * @return Qt input event, or \p nullptr.
+	 * @return Window input event.
 	 */
-	const std::shared_ptr<QEvent> &get_event() const;
+	const renderer::WindowEvent &get_window_event() const;
 
 	/**
 	 * Check whether two events are equal.
@@ -199,10 +199,11 @@ public:
 
 private:
 	/**
-	 * Associated Qt event from the window manager. May be \p nullptr
-	 * if this event is not generated from a window event.
+	 * Window event this event was created from (type NoEvent for events
+	 * created from custom values). Stores plain values instead of a cloned
+	 * window system event, so events work without Qt.
 	 */
-	const std::shared_ptr<QEvent> event;
+	renderer::WindowEvent window_event;
 };
 
 

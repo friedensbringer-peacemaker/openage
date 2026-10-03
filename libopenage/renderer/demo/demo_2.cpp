@@ -4,7 +4,6 @@
 
 #include <eigen3/Eigen/Dense>
 #include <epoxy/gl.h>
-#include <QMouseEvent>
 
 #include "renderer/demo/util.h"
 #include "renderer/gui/integration/public/gui_application_with_logger.h"
@@ -241,11 +240,10 @@ void renderer_demo_2(const util::Path &path) {
 	/* Register callbacks */
 	log::log(INFO << "Register callbacks...");
 
-	window.add_mouse_button_callback([&](const QMouseEvent &ev) {
-		if (ev.type() == QEvent::MouseButtonRelease) {
-			auto qpos = ev.position();
-			ssize_t x = qpos.x();
-			ssize_t y = qpos.y();
+	window.add_mouse_button_callback([&](const renderer::WindowEvent &ev) {
+		if (ev.type == input::event_type::MouseButtonRelease) {
+			ssize_t x = ev.x;
+			ssize_t y = ev.y;
 
 			log::log(INFO << "Clicked at location (" << x << ", " << y << ")");
 			if (not texture_data_valid) {
@@ -289,9 +287,9 @@ void renderer_demo_2(const util::Path &path) {
 	});
 
 	/* Iterate through subtextures with left/right arrows */
-	window.add_key_callback([&](const QKeyEvent &ev) {
-		if (ev.type() == QEvent::KeyRelease) {
-			if (ev.key() == Qt::Key_Right) {
+	window.add_key_callback([&](const renderer::WindowEvent &ev) {
+		if (ev.type == input::event_type::KeyRelease) {
+			if (ev.key == input::key::Key_Right) {
 				log::log(INFO << "Key pressed (Right arrow)");
 
 				++subtexture_index;
@@ -299,7 +297,7 @@ void renderer_demo_2(const util::Path &path) {
 					subtexture_index = 0;
 				}
 			}
-			else if (ev.key() == Qt::Key_Left) {
+			else if (ev.key == input::key::Key_Left) {
 				log::log(INFO << "Key pressed (Left arrow)");
 				if (subtexture_index == 0) {
 					subtexture_index = tex.get_info().get_subtex_count() - 1;

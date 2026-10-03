@@ -4,7 +4,6 @@
 
 #include <eigen3/Eigen/Dense>
 #include <epoxy/gl.h>
-#include <QMouseEvent>
 
 #include "renderer/camera/camera.h"
 #include "renderer/demo/util.h"
@@ -140,19 +139,19 @@ void renderer_demo_5(const util::Path &path) {
 	}
 
 	// Move around the scene with WASD
-	window.add_key_callback([&](const QKeyEvent &ev) {
+	window.add_key_callback([&](const renderer::WindowEvent &ev) {
 		bool cam_update = false;
-		if (ev.type() == QEvent::KeyPress) {
-			auto key = ev.key();
+		if (ev.type == input::event_type::KeyPress) {
+			auto key = ev.key;
 
 			switch (key) {
-			case Qt::Key_W: { // forward
+			case input::key::Key_W: { // forward
 				camera->move_rel(Eigen::Vector3f(-1.0f, 0.0f, -1.0f), 0.5f);
 				cam_update = true;
 
 				log::log(INFO << "Camera moved forward.");
 			} break;
-			case Qt::Key_A: { // left
+			case input::key::Key_A: { // left
 				// half the speed because the relationship between forward/back and
 				// left/right is 1:2 in our ortho projection.
 				camera->move_rel(Eigen::Vector3f(-1.0f, 0.0f, 1.0f), 0.25f);
@@ -160,13 +159,13 @@ void renderer_demo_5(const util::Path &path) {
 
 				log::log(INFO << "Camera moved left.");
 			} break;
-			case Qt::Key_S: { // back
+			case input::key::Key_S: { // back
 				camera->move_rel(Eigen::Vector3f(1.0f, 0.0f, 1.0f), 0.5f);
 				cam_update = true;
 
 				log::log(INFO << "Camera moved back.");
 			} break;
-			case Qt::Key_D: { // right
+			case input::key::Key_D: { // right
 				// half the speed because the relationship between forward/back and
 				// left/right is 1:2 in our ortho projection.
 				camera->move_rel(Eigen::Vector3f(1.0f, 0.0f, -1.0f), 0.25f);

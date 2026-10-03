@@ -1,13 +1,20 @@
-// Copyright 2015-2024 the openage authors. See copying.md for legal info.
+// Copyright 2015-2026 the openage authors. See copying.md for legal info.
 
 #include "input_manager.h"
+
+#include "config.h"
 
 #include "input/controller/camera/controller.h"
 #include "input/controller/game/controller.h"
 #include "input/controller/hud/controller.h"
 #include "input/event.h"
 #include "input/input_context.h"
-#include "renderer/gui/guisys/public/gui_input.h"
+#include "input/keys.h"
+
+#if WITH_QT
+	#include "renderer/gui/guisys/public/gui_input.h"
+	#include "renderer/window_events_qt.h"
+#endif
 
 
 namespace openage::input {
@@ -128,8 +135,7 @@ void InputManager::set_motion(int x, int y) {
 	this->mouse_motion.y = y;
 }
 
-bool InputManager::process(const QEvent &ev) {
-	input::Event input_ev{ev};
+bool InputManager::process(const Event &input_ev) {
 
 	// Check context list on top of the stack (most recent bound first)
 	for (size_t i = this->active_contexts.size(); i > 0; --i) {
@@ -195,9 +201,15 @@ void InputManager::process_action(const input::Event &ev,
 			this->hud_controller->process(args, ctx->get_hud_bindings());
 			break;
 
-		case input_action_t::GUI:
-			this->gui_input->process(args.e.get_event());
+		case input_action_t::GUI: {
+#if WITH_QT
+			auto qt_event = renderer::to_qt_event(args.e.get_window_event());
+			if (this->gui_input and qt_event) {
+				this->gui_input->process(std::shared_ptr<QEvent>{std::move(qt_event)});
+			}
+#endif
 			break;
+		}
 
 		case input_action_t::CUSTOM:
 			throw Error{MSG(err) << "CUSTOM action type has no default action."};
@@ -216,12 +228,12 @@ void setup_defaults(const std::shared_ptr<InputContext> &ctx) {
 	// camera
 	input_action camera_action{input_action_t::CAMERA};
 
-	Event ev_left{event_class::KEYBOARD, Qt::Key_Left, Qt::NoModifier, QEvent::KeyPress};
-	Event ev_right{event_class::KEYBOARD, Qt::Key_Right, Qt::NoModifier, QEvent::KeyPress};
-	Event ev_up{event_class::KEYBOARD, Qt::Key_Up, Qt::NoModifier, QEvent::KeyPress};
-	Event ev_down{event_class::KEYBOARD, Qt::Key_Down, Qt::NoModifier, QEvent::KeyPress};
-	Event ev_wheel_up{event_class::WHEEL, 1, Qt::NoModifier, QEvent::Wheel};
-	Event ev_wheel_down{event_class::WHEEL, -1, Qt::NoModifier, QEvent::Wheel};
+	Event ev_left{event_class::KEYBOARD, key::Key_Left, modifier::NoModifier, event_type::KeyPress};
+	Event ev_right{event_class::KEYBOARD, key::Key_Right, modifier::NoModifier, event_type::KeyPress};
+	Event ev_up{event_class::KEYBOARD, key::Key_Up, modifier::NoModifier, event_type::KeyPress};
+	Event ev_down{event_class::KEYBOARD, key::Key_Down, modifier::NoModifier, event_type::KeyPress};
+	Event ev_wheel_up{event_class::WHEEL, 1, modifier::NoModifier, event_type::Wheel};
+	Event ev_wheel_down{event_class::WHEEL, -1, modifier::NoModifier, event_type::Wheel};
 
 	ctx->bind(ev_left, camera_action);
 	ctx->bind(ev_right, camera_action);
@@ -234,8 +246,8 @@ void setup_defaults(const std::shared_ptr<InputContext> &ctx) {
 	// game
 	input_action game_action{input_action_t::GAME};
 
-	Event ev_mouse_lmb{event_class::MOUSE_BUTTON, Qt::LeftButton, Qt::NoModifier, QEvent::MouseButtonRelease};
-	Event ev_mouse_rmb{event_class::MOUSE_BUTTON, Qt::RightButton, Qt::NoModifier, QEvent::MouseButtonRelease};
+	Event ev_mouse_lmb{event_class::MOUSE_BUTTON, mouse_button::LeftButton, modifier::NoModifier, event_type::MouseButtonRelease};
+	Event ev_mouse_rmb{event_class::MOUSE_BUTTON, mouse_button::RightButton, modifier::NoModifier, event_type::MouseButtonRelease};
 
 	ctx->bind(ev_mouse_lmb, {game_action, hud_action});
 	ctx->bind(ev_mouse_rmb, {game_action, hud_action});

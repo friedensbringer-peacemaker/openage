@@ -2,7 +2,6 @@
 
 #include "demo_1.h"
 
-#include <QMouseEvent>
 
 #include "pathfinding/cost_field.h"
 #include "pathfinding/grid.h"
@@ -131,8 +130,8 @@ void path_demo_1(const util::Path &path) {
 
 	// Callbacks for mouse button events
 	// Used to set the start and target cells for pathfinding
-	window->add_mouse_button_callback([&](const QMouseEvent &ev) {
-		if (ev.type() == QEvent::MouseButtonRelease) {
+	window->add_mouse_button_callback([&](const renderer::WindowEvent &ev) {
+		if (ev.type == input::event_type::MouseButtonRelease) {
 			// From the mouse position, calculate the position/cell on the grid
 			auto cell_count_x = grid->get_size()[0] * grid->get_sector_size();
 			auto cell_count_y = grid->get_size()[1] * grid->get_sector_size();
@@ -141,10 +140,10 @@ void path_demo_1(const util::Path &path) {
 			double cell_size_x = static_cast<double>(window_size[0]) / cell_count_x;
 			double cell_size_y = static_cast<double>(window_size[1]) / cell_count_y;
 
-			coord::tile_t grid_x = ev.position().x() / cell_size_x;
-			coord::tile_t grid_y = ev.position().y() / cell_size_y;
+			coord::tile_t grid_x = ev.x / cell_size_x;
+			coord::tile_t grid_y = ev.y / cell_size_y;
 
-			if (ev.button() == Qt::RightButton) { // Set target cell
+			if (ev.button == input::mouse_button::RightButton) { // Set target cell
 				target = coord::tile{grid_x, grid_y};
 				PathRequest new_path_request{
 					grid->get_id(),
@@ -165,7 +164,7 @@ void path_demo_1(const util::Path &path) {
 					render_manager->create_waypoint_tiles(path_result);
 				}
 			}
-			else if (ev.button() == Qt::LeftButton) { // Set start cell
+			else if (ev.button == input::mouse_button::LeftButton) { // Set start cell
 				start = coord::tile{grid_x, grid_y};
 				PathRequest new_path_request{
 					grid->get_id(),

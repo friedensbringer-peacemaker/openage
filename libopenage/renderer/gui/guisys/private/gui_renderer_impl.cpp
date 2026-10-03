@@ -18,6 +18,7 @@
 
 #include "renderer/gui/guisys/public/gui_renderer.h"
 #include "renderer/window.h"
+#include "renderer/window_events_qt.h"
 
 
 namespace qtgui {
@@ -46,28 +47,24 @@ GuiRendererImpl::GuiRendererImpl(std::shared_ptr<openage::renderer::Window> wind
 	// TODO: This solution leads to a 1 frame delay because Qt processing of the events sent here
 	//       does not happen until the start of the next frame. Maybe we can forward them to the
 	//       GUI earlier?
-	window->add_key_callback([this](const QKeyEvent &cb) {
-		auto event = cb.clone();
+	window->add_key_callback([this](const openage::renderer::WindowEvent &cb) {
+		auto event = openage::renderer::to_qt_event(cb);
 		// TODO: Use notify() instead of sendEvent() to check if the event was processed
-		QCoreApplication::sendEvent(this->target_window.get(), event);
+		QCoreApplication::sendEvent(this->target_window.get(), event.get());
 	});
-	window->add_mouse_button_callback([this](const QMouseEvent &cb) {
+	window->add_mouse_button_callback([this](const openage::renderer::WindowEvent &cb) {
 		// Quote from the QQuickRenderControl Example:
 		// Use the constructor taking position and globalPosition. That puts position into the
 		// event's position and scenePosition, and globalPosition into the event's globalPosition. This way
 		// the scenePosition in e is ignored and is replaced by position. This is necessary
 		// because QQuickWindow thinks of itself as a top-level window always.
-		QMouseEvent event{cb.type(),
-		                  cb.position(),
-		                  cb.globalPosition(),
-		                  cb.button(),
-		                  cb.buttons(),
-		                  cb.modifiers()};
-		QCoreApplication::sendEvent(this->target_window.get(), &event);
+		// (to_qt_event() uses that constructor)
+		auto event = openage::renderer::to_qt_event(cb);
+		QCoreApplication::sendEvent(this->target_window.get(), event.get());
 	});
-	window->add_mouse_wheel_callback([this](const QWheelEvent &cb) {
-		auto event = cb.clone();
-		QCoreApplication::sendEvent(this->target_window.get(), event);
+	window->add_mouse_wheel_callback([this](const openage::renderer::WindowEvent &cb) {
+		auto event = openage::renderer::to_qt_event(cb);
+		QCoreApplication::sendEvent(this->target_window.get(), event.get());
 	});
 
 	auto size = window->get_qt_window()->size();

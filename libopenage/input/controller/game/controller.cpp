@@ -140,9 +140,9 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	binding_action create_entity_action{forward_action_t::SEND, create_entity_event};
 	Event ev_mouse_lmb_ctrl{
 		event_class::MOUSE_BUTTON,
-		Qt::MouseButton::LeftButton,
-		Qt::KeyboardModifier::ControlModifier,
-		QEvent::MouseButtonRelease};
+		mouse_button::LeftButton,
+		modifier::ControlModifier,
+		event_type::MouseButtonRelease};
 
 	ctx->bind(ev_mouse_lmb_ctrl, create_entity_action);
 
@@ -167,9 +167,9 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	binding_action move_entity_action{forward_action_t::SEND, move_entity};
 	Event ev_mouse_rmb{
 		event_class::MOUSE_BUTTON,
-		Qt::MouseButton::RightButton,
-		Qt::KeyboardModifier::NoModifier,
-		QEvent::MouseButtonRelease};
+		mouse_button::RightButton,
+		modifier::NoModifier,
+		event_type::MouseButtonRelease};
 
 	ctx->bind(ev_mouse_rmb, move_entity_action);
 
@@ -182,9 +182,9 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	binding_action init_drag_selection_action{forward_action_t::CLEAR, init_drag_selection};
 	Event ev_mouse_lmb_press{
 		event_class::MOUSE_BUTTON,
-		Qt::MouseButton::LeftButton,
-		Qt::KeyboardModifier::NoModifier,
-		QEvent::MouseButtonPress};
+		mouse_button::LeftButton,
+		modifier::NoModifier,
+		event_type::MouseButtonPress};
 
 	ctx->bind(ev_mouse_lmb_press, init_drag_selection_action);
 
@@ -221,9 +221,9 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	binding_action drag_selection_action{forward_action_t::CLEAR, drag_selection};
 	Event ev_mouse_lmb_release{
 		event_class::MOUSE_BUTTON,
-		Qt::MouseButton::LeftButton,
-		Qt::KeyboardModifier::NoModifier,
-		QEvent::MouseButtonRelease};
+		mouse_button::LeftButton,
+		modifier::NoModifier,
+		event_type::MouseButtonRelease};
 
 	ctx->bind(ev_mouse_lmb_release, drag_selection_action);
 }

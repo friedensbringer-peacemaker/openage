@@ -5,12 +5,9 @@
 #include <memory>
 #include <vector>
 
-#include <QKeyEvent>
-#include <QMouseEvent>
-#include <QWheelEvent>
-
 #include "coord/pixel.h"
 #include "input/action.h"
+#include "input/event.h"
 
 namespace qtgui {
 class GuiInput;
@@ -141,13 +138,13 @@ public:
 	void set_motion(int x, int y);
 
 	/**
-	 * Process an input event from the Qt window management.
+	 * Process an input event from the window management.
 	 *
-	 * @param ev Qt input event.
+	 * @param ev Input event, e.g. created from a renderer::WindowEvent.
 	 *
 	 * @return true if the event is accepted, else false.
 	 */
-	bool process(const QEvent &ev);
+	bool process(const Event &ev);
 
 
 private:

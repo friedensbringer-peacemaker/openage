@@ -3,11 +3,16 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
-#include <QObject>
+#include "config.h"
+
+#if WITH_QT
+	#include <QObject>
 
 QT_FORWARD_DECLARE_CLASS(QWindow)
 QT_FORWARD_DECLARE_CLASS(QOpenGLContext)
+#endif
 
 namespace openage::renderer::opengl {
 
@@ -42,6 +47,7 @@ struct gl_context_spec {
  */
 class GlContext {
 public:
+#if WITH_QT
 	/**
 	 * Create a GL context for the given Qt window.
 	 *
@@ -53,6 +59,17 @@ public:
 	 */
 	explicit GlContext(const std::shared_ptr<QWindow> &window,
 	                   bool debug = false);
+#else
+	/**
+	 * Adopt the OpenGL (ES) context that is current on this thread (XR fork,
+	 * builds without Qt). The embedder creates the context and makes it current
+	 * before the renderer is created.
+	 *
+	 * @param gles True if the current context is an OpenGL ES context.
+	 * @param default_framebuffer Framebuffer that the final pass renders into.
+	 */
+	explicit GlContext(bool gles, unsigned int default_framebuffer = 0);
+#endif
 	~GlContext() = default;
 
 	// It doesn't make sense to have more than one instance of the same context.
@@ -67,12 +84,14 @@ public:
 	GlContext(GlContext &&);
 	GlContext &operator=(GlContext &&);
 
+#if WITH_QT
 	/**
 	 * Get the underlying Qt OpenGL context object.
 	 *
 	 * @return Qt's OpenGL context object.
 	 */
 	std::shared_ptr<QOpenGLContext> get_raw_context() const;
+#endif
 
 	/**
 	 * Get the ID of the default framebuffer used for displaying to
@@ -170,6 +189,7 @@ public:
 	static bool gles_requested_by_env();
 
 private:
+#if WITH_QT
 	/**
 	 * Associated Qt window. Held here so the context remains active.
 	 */
@@ -186,6 +206,12 @@ private:
 	 * Pointer to Qt struct representing the GL context.
 	 */
 	std::shared_ptr<QOpenGLContext> gl_context;
+#else
+	/**
+	 * Framebuffer used as default (display) framebuffer.
+	 */
+	unsigned int default_framebuffer = 0;
+#endif
 
 	/**
 	 * Context capabilities, i.e. available OpenGL features and version.

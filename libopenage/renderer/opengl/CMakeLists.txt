@@ -1,7 +1,6 @@
 add_sources(libopenage
 	buffer.cpp
 	context.cpp
-	debug.cpp
 	error.cpp
 	framebuffer.cpp
 	geometry.cpp
@@ -19,5 +18,12 @@ add_sources(libopenage
 	uniform_input.cpp
 	util.cpp
 	vertex_array.cpp
-	window.cpp
 )
+
+# XR fork: the Qt window and its debug logger only with Qt
+if(OPENAGE_QT)
+	add_sources(libopenage
+		debug.cpp
+		window.cpp
+	)
+endif()

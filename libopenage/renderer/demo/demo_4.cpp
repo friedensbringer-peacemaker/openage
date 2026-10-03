@@ -3,7 +3,6 @@
 #include "demo_4.h"
 
 #include <eigen3/Eigen/Dense>
-#include <QKeyEvent>
 
 #include "renderer/demo/util.h"
 #include "renderer/gui/integration/public/gui_application_with_logger.h"
@@ -193,12 +192,12 @@ void renderer_demo_4(const util::Path &path) {
 	});
 
 	// Control simulation clock
-	window.add_key_callback([&](const QKeyEvent &ev) {
-		if (ev.type() == QEvent::KeyRelease) {
-			auto key = ev.key();
+	window.add_key_callback([&](const renderer::WindowEvent &ev) {
+		if (ev.type == input::event_type::KeyRelease) {
+			auto key = ev.key;
 
 			switch (key) {
-			case Qt::Key_Space: {
+			case input::key::Key_Space: {
 				if (clock.get_state() == time::ClockState::RUNNING) {
 					clock.pause();
 					log::log(INFO << "Stopped simulation at " << clock.get_time() << " (real = " << clock.get_real_time() << ")");
@@ -208,7 +207,7 @@ void renderer_demo_4(const util::Path &path) {
 					log::log(INFO << "Resumed simulation at " << clock.get_time() << " (real = " << clock.get_real_time() << ")");
 				}
 			} break;
-			case Qt::Key_Return: {
+			case input::key::Key_Return: {
 				real_time_animation = not real_time_animation;
 				if (real_time_animation) {
 					log::log(INFO << "Animation speed switched to REAL time");
@@ -217,11 +216,11 @@ void renderer_demo_4(const util::Path &path) {
 					log::log(INFO << "Animation speed switched to SIMULATION time");
 				}
 			} break;
-			case Qt::Key_Minus: {
+			case input::key::Key_Minus: {
 				clock.set_speed(clock.get_speed() - 0.5);
 				log::log(INFO << "Decreased clock speed to: " << clock.get_speed());
 			} break;
-			case Qt::Key_Plus: {
+			case input::key::Key_Plus: {
 				clock.set_speed(clock.get_speed() + 0.5);
 				log::log(INFO << "Increased clock speed to: " << clock.get_speed());
 			} break;

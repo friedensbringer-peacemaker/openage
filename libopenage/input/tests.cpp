@@ -1,4 +1,4 @@
-// Copyright 2023-2024 the openage authors. See copying.md for legal info.
+// Copyright 2023-2026 the openage authors. See copying.md for legal info.
 
 #include "error/error.h"
 #include "log/log.h"
@@ -30,12 +30,12 @@ void action_demo() {
 	mgr.add_context(context2);
 
 	// get the inputs from the Qt window management and forward them to the input manager
-	window.add_key_callback([&](const QKeyEvent &ev) {
-		mgr.process(ev);
+	window.add_key_callback([&](const renderer::WindowEvent &ev) {
+		mgr.process(Event{ev});
 	});
-	window.add_mouse_button_callback([&](const QMouseEvent &ev) {
-		mgr.set_mouse(ev.position().x(), ev.position().y());
-		mgr.process(ev);
+	window.add_mouse_button_callback([&](const renderer::WindowEvent &ev) {
+		mgr.set_mouse(static_cast<int>(ev.x), static_cast<int>(ev.y));
+		mgr.process(Event{ev});
 	});
 
 	// create action functions
@@ -88,39 +88,39 @@ void action_demo() {
 
 	// events that map to specific keys/buttons
 	Event ev_up{event_class::KEYBOARD,
-	            Qt::Key::Key_Up,
-	            Qt::KeyboardModifier::NoModifier,
-	            QEvent::KeyRelease};
+	            key::Key_Up,
+	            modifier::NoModifier,
+	            event_type::KeyRelease};
 	Event ev_down{event_class::KEYBOARD,
-	              Qt::Key::Key_Down,
-	              Qt::KeyboardModifier::NoModifier,
-	              QEvent::KeyRelease};
+	              key::Key_Down,
+	              modifier::NoModifier,
+	              event_type::KeyRelease};
 
 	Event ev_w{event_class::KEYBOARD,
-	           Qt::Key::Key_W,
-	           Qt::KeyboardModifier::NoModifier,
-	           QEvent::KeyRelease};
+	           key::Key_W,
+	           modifier::NoModifier,
+	           event_type::KeyRelease};
 	Event ev_a{event_class::KEYBOARD,
-	           Qt::Key::Key_A,
-	           Qt::KeyboardModifier::NoModifier,
-	           QEvent::KeyRelease};
+	           key::Key_A,
+	           modifier::NoModifier,
+	           event_type::KeyRelease};
 	Event ev_s{event_class::KEYBOARD,
-	           Qt::Key::Key_S,
-	           Qt::KeyboardModifier::NoModifier,
-	           QEvent::KeyRelease};
+	           key::Key_S,
+	           modifier::NoModifier,
+	           event_type::KeyRelease};
 	Event ev_d{event_class::KEYBOARD,
-	           Qt::Key::Key_D,
-	           Qt::KeyboardModifier::NoModifier,
-	           QEvent::KeyRelease};
+	           key::Key_D,
+	           modifier::NoModifier,
+	           event_type::KeyRelease};
 
 	Event ev_lmb{event_class::MOUSE_BUTTON,
-	             Qt::MouseButton::LeftButton,
-	             Qt::KeyboardModifier::NoModifier,
-	             QEvent::MouseButtonRelease};
+	             mouse_button::LeftButton,
+	             modifier::NoModifier,
+	             event_type::MouseButtonRelease};
 	Event ev_rmb{event_class::MOUSE_BUTTON,
-	             Qt::MouseButton::RightButton,
-	             Qt::KeyboardModifier::NoModifier,
-	             QEvent::MouseButtonRelease};
+	             mouse_button::RightButton,
+	             modifier::NoModifier,
+	             event_type::MouseButtonRelease};
 
 	// bind events to actions in the contexts
 	mgr.get_global_context()->bind(ev_up, push_a);

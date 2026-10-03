@@ -4,7 +4,6 @@
 
 #include <eigen3/Eigen/Dense>
 #include <epoxy/gl.h>
-#include <QMouseEvent>
 
 #include "renderer/demo/util.h"
 #include "renderer/gui/integration/public/gui_application_with_logger.h"
@@ -186,11 +185,10 @@ void renderer_demo_1(const util::Path &path) {
 	glDepthRange(0.0, 1.0);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	window.add_mouse_button_callback([&](const QMouseEvent &ev) {
-		if (ev.type() == QEvent::MouseButtonRelease) {
-			auto qpos = ev.position();
-			ssize_t x = qpos.x();
-			ssize_t y = qpos.y();
+	window.add_mouse_button_callback([&](const renderer::WindowEvent &ev) {
+		if (ev.type == input::event_type::MouseButtonRelease) {
+			ssize_t x = ev.x;
+			ssize_t y = ev.y;
 
 			log::log(INFO << "Clicked at location (" << x << ", " << y << ")");
 			if (not texture_data_valid) {

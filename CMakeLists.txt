@@ -103,6 +103,19 @@ if(NOT DEFINED WANT_IWYU)
 endif()
 
 ##################################################
+# XR fork: optional Qt, Python and fonts (e.g. for Android without Qt/Python)
+# The defaults build the regular desktop version.
+option(OPENAGE_QT "use Qt for windows, GUI, input and audio" ON)
+option(OPENAGE_PYTHON "build the Python/Cython parts (needed for the regular entry point and codegen)" ON)
+option(OPENAGE_WITH_FONT "build font rendering (freetype, harfbuzz, fontconfig) and the console" ON)
+set(OPENAGE_CODEGEN_DIR "" CACHE PATH
+	"build directory of a host build whose codegen output is copied instead of running the Python codegen")
+
+if(NOT OPENAGE_PYTHON AND NOT OPENAGE_CODEGEN_DIR)
+	message(FATAL_ERROR "OPENAGE_PYTHON=OFF needs OPENAGE_CODEGEN_DIR (codegen output of a host build)")
+endif()
+
+##################################################
 # static content filesystem locations
 if(NOT DEFINED GLOBAL_ASSET_DIR)
 	set(ASSET_DIR "share/openage")
@@ -173,8 +186,10 @@ include(CheckInSourceBuild)
 include(HandleCXXOptions)
 include(CheckCompilerFeatures)
 include(CMakeParseArguments)
-include(HandlePythonOptions)
-include(CheckRuntimeDependencies)
+if(OPENAGE_PYTHON)
+	include(HandlePythonOptions)
+	include(CheckRuntimeDependencies)
+endif()
 include(DetectProjectVersion)
 include(DependencyFetch)
 include(FindPackageHandleStandardArgs)
@@ -187,7 +202,12 @@ include(codegen)
 include(cpp)
 include(doxygen)
 include(options)
-include(python)
+if(OPENAGE_PYTHON)
+	include(python)
+else()
+	# no-op replacements for the Python/Cython build functions
+	include(python_stub)
+endif()
 include(util)
 
 
@@ -236,6 +256,8 @@ add_subdirectory(libopenage/)
 ##################################################
 # Python content (uses the C++ library)
 
+# XR fork: only with OPENAGE_PYTHON
+if(OPENAGE_PYTHON)
 # create a virtual library that, when linked to,
 # injects a header inclusion, and links to libopenage.
 # -> all cython modules get our hacks included and link to libopenage.
@@ -255,6 +277,7 @@ configure_file(run.py.in run.py)
 add_cython_modules(EMBED NOINSTALL ${CMAKE_CURRENT_BINARY_DIR}/run.py)
 add_py_modules(BININSTALL ${CMAKE_CURRENT_BINARY_DIR}/run.py AS openage)
 add_subdirectory(openage/)
+endif()
 
 python_finalize()
 

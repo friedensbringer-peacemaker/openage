@@ -46,10 +46,10 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	binding_action move_forward_action{move_forward};
 	binding_action move_backward_action{move_backward};
 
-	Event ev_left{event_class::KEYBOARD, Qt::Key_Left, Qt::NoModifier, QEvent::KeyPress};
-	Event ev_right{event_class::KEYBOARD, Qt::Key_Right, Qt::NoModifier, QEvent::KeyPress};
-	Event ev_up{event_class::KEYBOARD, Qt::Key_Up, Qt::NoModifier, QEvent::KeyPress};
-	Event ev_down{event_class::KEYBOARD, Qt::Key_Down, Qt::NoModifier, QEvent::KeyPress};
+	Event ev_left{event_class::KEYBOARD, key::Key_Left, modifier::NoModifier, event_type::KeyPress};
+	Event ev_right{event_class::KEYBOARD, key::Key_Right, modifier::NoModifier, event_type::KeyPress};
+	Event ev_up{event_class::KEYBOARD, key::Key_Up, modifier::NoModifier, event_type::KeyPress};
+	Event ev_down{event_class::KEYBOARD, key::Key_Down, modifier::NoModifier, event_type::KeyPress};
 
 	ctx->bind(ev_left, move_left_action);
 	ctx->bind(ev_right, move_right_action);
@@ -69,30 +69,31 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	binding_action zoom_in_action{zoom_in};
 	binding_action zoom_out_action{zoom_out};
 
-	Event ev_wheel_up{event_class::WHEEL, 1, Qt::NoModifier, QEvent::Wheel};
-	Event ev_wheel_down{event_class::WHEEL, -1, Qt::NoModifier, QEvent::Wheel};
+	Event ev_wheel_up{event_class::WHEEL, 1, modifier::NoModifier, event_type::Wheel};
+	Event ev_wheel_down{event_class::WHEEL, -1, modifier::NoModifier, event_type::Wheel};
 
 	ctx->bind(ev_wheel_up, zoom_in_action);
 	ctx->bind(ev_wheel_down, zoom_out_action);
 
 	// edge movement
 	binding_func_t edge_move{[&](const event_arguments &args) {
-		auto event = std::dynamic_pointer_cast<QMouseEvent>(args.e.get_event());
-		auto pos_x = event->position().x();
-		auto pos_y = event->position().y();
+		// mouse position of the triggering move event (set by the presenter
+		// before the event is processed)
+		auto pos_x = static_cast<double>(args.mouse.x);
+		auto pos_y = static_cast<double>(args.mouse.y);
 
 		int move_directions = 0;
 		if (pos_x < 10) {
 			move_directions = move_directions | static_cast<int>(renderer::camera::MoveDirection::LEFT);
 		}
-		else if (pos_x > cam->get_viewport_size()[0] - 10) {
+		else if (pos_x > static_cast<double>(cam->get_viewport_size()[0]) - 10) {
 			move_directions = move_directions | static_cast<int>(renderer::camera::MoveDirection::RIGHT);
 		}
 
 		if (pos_y < 10) {
 			move_directions = move_directions | static_cast<int>(renderer::camera::MoveDirection::FORWARD);
 		}
-		else if (pos_y > cam->get_viewport_size()[1] - 10) {
+		else if (pos_y > static_cast<double>(cam->get_viewport_size()[1]) - 10) {
 			move_directions = move_directions | static_cast<int>(renderer::camera::MoveDirection::BACKWARD);
 		}
 

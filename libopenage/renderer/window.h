@@ -7,16 +7,20 @@
 #include <string>
 #include <vector>
 
-#include <QObject>
+#include "config.h"
+
+#if WITH_QT
+	#include <QObject>
+#endif
 
 #include "renderer/renderer.h"
 #include "renderer/types.h"
+#include "renderer/window_events.h"
 #include "util/vector.h"
 
+#if WITH_QT
 QT_FORWARD_DECLARE_CLASS(QWindow)
-QT_FORWARD_DECLARE_CLASS(QKeyEvent)
-QT_FORWARD_DECLARE_CLASS(QMouseEvent)
-QT_FORWARD_DECLARE_CLASS(QWheelEvent)
+#endif
 
 namespace openage::renderer {
 
@@ -99,10 +103,11 @@ public:
 	 */
 	bool should_close() const;
 
-	using key_cb_t = std::function<void(const QKeyEvent &)>;
-	using mouse_button_cb_t = std::function<void(const QMouseEvent &)>;
-	using mouse_move_cb_t = std::function<void(const QMouseEvent &)>;
-	using mouse_wheel_cb_t = std::function<void(const QWheelEvent &)>;
+	// Input callbacks get window system independent events (renderer/window_events.h).
+	using key_cb_t = std::function<void(const WindowEvent &)>;
+	using mouse_button_cb_t = std::function<void(const WindowEvent &)>;
+	using mouse_move_cb_t = std::function<void(const WindowEvent &)>;
+	using mouse_wheel_cb_t = std::function<void(const WindowEvent &)>;
 	using resize_cb_t = std::function<void(size_t, size_t, double)>;
 
 	/**
@@ -140,12 +145,14 @@ public:
 	 */
 	void add_resize_callback(const resize_cb_t &cb);
 
+#if WITH_QT
 	/**
 	 * Get the underlying QWindow that is used for drawing.
 	 *
 	 * @return Pointer to the QWindow.
 	 */
 	const std::shared_ptr<QWindow> &get_qt_window() const;
+#endif
 
 	/**
 	 * Force this window to the given size. It's generally not a good idea to use this,
@@ -218,6 +225,7 @@ protected:
 	 */
 	std::vector<resize_cb_t> on_resize;
 
+#if WITH_QT
 	/**
 	 * Main Qt window handle.
 	 */
@@ -228,6 +236,7 @@ protected:
 	 * Gets attached to window in the window subclasses.
 	 */
 	std::shared_ptr<WindowEventHandler> event_handler;
+#endif
 };
 
 } // namespace openage::renderer

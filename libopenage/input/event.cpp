@@ -1,9 +1,11 @@
-// Copyright 2015-2023 the openage authors. See copying.md for legal info.
+// Copyright 2015-2026 the openage authors. See copying.md for legal info.
 
 #include "event.h"
 
 #include <functional>
 #include <utility>
+
+#include "error/error.h"
 
 namespace openage::input {
 
@@ -52,38 +54,25 @@ int class_code_hash::operator()(const ClassCode &cc) const {
 }
 
 
-Event::Event(const QEvent &ev) :
-	event{std::shared_ptr<QEvent>(ev.clone())} {
-	switch (this->event->type()) {
-	case QEvent::KeyPress:
-	case QEvent::KeyRelease: {
-		auto event = dynamic_pointer_cast<QKeyEvent>(this->event);
-		this->cc = ClassCode(event_class::KEYBOARD, event->key());
-		this->mod_code = event->modifiers();
-		this->state = event->type();
-	} break;
-	case QEvent::MouseButtonPress:
-	case QEvent::MouseButtonRelease: {
-		auto event = dynamic_pointer_cast<QMouseEvent>(this->event);
-		this->cc = ClassCode(event_class::MOUSE_BUTTON, event->button());
-		this->mod_code = event->modifiers();
-		this->state = event->type();
-	} break;
-	case QEvent::MouseButtonDblClick: {
-		auto event = dynamic_pointer_cast<QMouseEvent>(this->event);
-		this->cc = ClassCode(event_class::MOUSE_BUTTON_DBL, event->button());
-		this->mod_code = event->modifiers();
-		this->state = event->type();
-	} break;
-	case QEvent::MouseMove: {
-		auto event = dynamic_pointer_cast<QMouseEvent>(this->event);
-		this->cc = ClassCode(event_class::MOUSE_MOVE, event->button());
-		this->mod_code = event->modifiers();
-		this->state = event->type();
-	} break;
-	case QEvent::Wheel: {
-		auto event = dynamic_pointer_cast<QWheelEvent>(this->event);
-		if (event->angleDelta().y() > 0) {
+Event::Event(const renderer::WindowEvent &ev) :
+	window_event{ev} {
+	switch (ev.type) {
+	case event_type::KeyPress:
+	case event_type::KeyRelease:
+		this->cc = ClassCode(event_class::KEYBOARD, ev.key);
+		break;
+	case event_type::MouseButtonPress:
+	case event_type::MouseButtonRelease:
+		this->cc = ClassCode(event_class::MOUSE_BUTTON, ev.button);
+		break;
+	case event_type::MouseButtonDblClick:
+		this->cc = ClassCode(event_class::MOUSE_BUTTON_DBL, ev.button);
+		break;
+	case event_type::MouseMove:
+		this->cc = ClassCode(event_class::MOUSE_MOVE, ev.button);
+		break;
+	case event_type::Wheel:
+		if (ev.angle_delta_y > 0) {
 			// forward
 			this->cc = ClassCode(event_class::WHEEL, 1);
 		}
@@ -91,24 +80,24 @@ Event::Event(const QEvent &ev) :
 			// backwards
 			this->cc = ClassCode(event_class::WHEEL, -1);
 		}
-		this->mod_code = event->modifiers();
-		this->state = event->type();
-	} break;
+		break;
 	// TODO: GUI events
 	default:
 		throw Error{MSG(err) << "Unrecognized input event type."};
 	}
+	this->mod_code = ev.modifiers;
+	this->state = ev.type;
 }
 
 Event::Event(event_class cl, code_t code, modset_t mod, state_t state) :
 	cc{cl, code},
 	mod_code{mod},
 	state{state},
-	event{nullptr} {}
+	window_event{} {}
 
 
-const std::shared_ptr<QEvent> &Event::get_event() const {
-	return this->event;
+const renderer::WindowEvent &Event::get_window_event() const {
+	return this->window_event;
 }
 
 

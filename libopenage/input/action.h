@@ -3,6 +3,8 @@
 #pragma once
 
 #include <functional>
+#include <optional>
+#include <string>
 #include <unordered_map>
 
 #include "input/event.h"

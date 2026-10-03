@@ -36,11 +36,15 @@
 #include <thread>
 #include <vector>
 
+#include "config.h"
+
 #include "assets/mod_manager.h"
 #include "engine/engine.h"
 #include "error/error.h"
 #include "log/log.h"
-#include "renderer/gui/integration/public/gui_application_with_logger.h"
+#if WITH_QT
+	#include "renderer/gui/integration/public/gui_application_with_logger.h"
+#endif
 #include "renderer/renderer.h"
 #include "renderer/resources/shader_source.h"
 #include "renderer/resources/shader_template.h"
@@ -178,7 +182,9 @@ size_t shader_check(const std::filesystem::path &root,
 	using namespace openage;
 	namespace fs = std::filesystem;
 
+#if WITH_QT
 	renderer::gui::GuiApplicationWithLogger app{};
+#endif
 	auto window = renderer::Window::create("openage shader check", settings);
 	auto renderer = window->make_renderer();
 

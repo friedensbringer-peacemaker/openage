@@ -2,7 +2,6 @@
 
 #include "demo_6.h"
 
-#include <QKeyEvent>
 
 #include "curve/continuous.h"
 #include "curve/segmented.h"
@@ -46,22 +45,22 @@ void renderer_demo_6(const util::Path &path) {
 
 	// Move the camera with the WASD keys
 	// This is where we will also update the frustum for the 2D objects
-	render_mgr.window->add_key_callback([&](const QKeyEvent &ev) {
-		if (ev.type() == QEvent::KeyPress) {
-			auto key = ev.key();
+	render_mgr.window->add_key_callback([&](const renderer::WindowEvent &ev) {
+		if (ev.type == input::event_type::KeyPress) {
+			auto key = ev.key;
 
 			// move_frame moves the camera in the specified direction in the next drawn frame
 			switch (key) {
-			case Qt::Key_W: { // forward
+			case input::key::Key_W: { // forward
 				render_mgr.camera->move_rel(Eigen::Vector3f(-1.0f, 0.0f, -1.0f), 0.2f);
 			} break;
-			case Qt::Key_A: { // left
+			case input::key::Key_A: { // left
 				render_mgr.camera->move_rel(Eigen::Vector3f(-1.0f, 0.0f, 1.0f), 0.1f);
 			} break;
-			case Qt::Key_S: { // back
+			case input::key::Key_S: { // back
 				render_mgr.camera->move_rel(Eigen::Vector3f(1.0f, 0.0f, 1.0f), 0.2f);
 			} break;
-			case Qt::Key_D: { // right
+			case input::key::Key_D: { // right
 				render_mgr.camera->move_rel(Eigen::Vector3f(1.0f, 0.0f, -1.0f), 0.1f);
 			} break;
 			default:
