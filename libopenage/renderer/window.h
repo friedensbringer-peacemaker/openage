@@ -24,6 +24,7 @@ QT_FORWARD_DECLARE_CLASS(QWindow)
 
 namespace openage::renderer {
 
+class FrameSink;
 class WindowEventHandler;
 
 /**
@@ -61,6 +62,12 @@ struct window_settings {
 	std::string capture_file{};
 	// Seconds to render before the frame is captured.
 	double capture_delay = 10.0;
+	// If set, the window renders into the frames of this sink (EGL context
+	// shared with the embedder, no window of its own; see renderer/frame_sink.h)
+	// instead of opening a window. The sink must outlive the presenter thread;
+	// the shared_ptr keeps it alive (embedders that own the sink can pass a
+	// shared_ptr with a no-op deleter).
+	std::shared_ptr<FrameSink> sink{};
 };
 
 

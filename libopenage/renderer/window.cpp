@@ -4,6 +4,9 @@
 
 #include "error/error.h"
 
+#if WITH_EGL
+	#include "opengl/egl_window.h"
+#endif
 #if WITH_QT
 	#include <QWindow>
 
@@ -16,6 +19,16 @@ namespace openage::renderer {
 
 std::shared_ptr<Window> Window::create(const std::string &title,
                                        window_settings settings) {
+	if (settings.sink) {
+		// XR fork: render into the frames of an embedder (with and without Qt)
+#if WITH_EGL
+		return std::make_shared<opengl::EglSinkWindow>(title, settings);
+#else
+		throw Error{MSG(err) << "Cannot create window '" << title
+		                     << "' for a frame sink: built without EGL support."};
+#endif
+	}
+
 #if WITH_QT
 	// currently we only have a functional GL window
 	// TODO: support other renderer windows
@@ -80,10 +93,13 @@ const std::shared_ptr<QWindow> &Window::get_qt_window() const {
 
 void Window::close() {
 #if WITH_QT
-	this->window->close();
-#else
-	this->should_be_closed = true;
+	// windows without a Qt window (EGL frame sink) only remember the request
+	if (this->window) {
+		this->window->close();
+		return;
+	}
 #endif
+	this->should_be_closed = true;
 }
 
 

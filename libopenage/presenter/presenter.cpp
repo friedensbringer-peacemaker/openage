@@ -135,7 +135,10 @@ void Presenter::init_graphics(const renderer::window_settings &window_settings) 
 	log::log(INFO << "Presenter: Initializing graphics subsystems...");
 
 	// Start up rendering framework
-	this->gui_app = this->init_window_system();
+	// (XR fork: a frame sink embedder owns the window system, no Qt GUI)
+	if (not window_settings.sink) {
+		this->gui_app = this->init_window_system();
+	}
 
 	// Window and renderer
 	this->window = renderer::Window::create("openage presenter test", window_settings);

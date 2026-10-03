@@ -11,12 +11,23 @@
  *   openage-native --root <dir> [--modpack hd_base] [--headless]
  *                  [--seconds N] [--width W --height H] [--check]
  *                  [--gles] [--render-check <png>] [--shader-check]
+ *                  [--egl-sink-check <png> [--replay] [--frames N]]
  *
  * --gles selects an OpenGL ES 3.x context (like OPENAGE_GLES=1).
  * --render-check renders the game for --seconds (default 10) in a hidden
  * window, stores the final frame as PNG and exits. --shader-check compiles
  * and links all vertex/fragment shader pairs in assets/shaders and
  * assets/test/shaders in a hidden window and exits. Both never show a window.
+ *
+ * --egl-sink-check renders without any window system into the frames of a
+ * test frame sink (EGL, OpenGL ES, context shared with a consumer thread like
+ * the XR layer of the Quest app). The consumer stores the newest frame after
+ * --seconds (default 15) as <png>, then requests 1920x1080 and stores a
+ * second frame as <png stem>-1920x1080.png; the engine is stopped with
+ * Engine::stop() after at least --frames (default 1000) frames. --replay
+ * plays input instead of the first plain capture: Ctrl+click spawns two
+ * entities, a drag selects them (captured into <png> while the rectangle is
+ * visible), a right click moves them.
  *
  * <dir> must contain assets/ (with shaders and converted/{engine,<modpack>})
  * and cfg/. The converted modpacks (including the "engine" API modpack) are
@@ -25,6 +36,7 @@
  */
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -38,12 +50,15 @@
 
 #include "config.h"
 
-#include "assets/mod_manager.h"
+#include "engine/check_root.h"
 #include "engine/engine.h"
 #include "error/error.h"
 #include "log/log.h"
 #if WITH_QT
 	#include "renderer/gui/integration/public/gui_application_with_logger.h"
+#endif
+#if WITH_EGL
+	#include "renderer/opengl/test_sink.h"
 #endif
 #include "renderer/renderer.h"
 #include "renderer/resources/shader_source.h"
@@ -62,6 +77,9 @@ struct native_args {
 	bool gles = false;
 	std::string render_check;
 	bool shader_check = false;
+	std::string egl_sink_check;
+	bool replay = false;
+	uint64_t frames = 1000;
 	int seconds = 0;
 	size_t width = 1024;
 	size_t height = 768;
@@ -70,7 +88,9 @@ struct native_args {
 void usage(const char *argv0) {
 	std::cerr << "usage: " << argv0
 	          << " --root <dir> [--modpack <id>]... [--headless] [--seconds <n>]"
-	             " [--width <w> --height <h>] [--check]\n";
+	             " [--width <w> --height <h>] [--check]"
+	             " [--gles] [--render-check <png>] [--shader-check]"
+	             " [--egl-sink-check <png> [--replay] [--frames <n>]]\n";
 }
 
 bool parse_args(int argc, char **argv, native_args &args) {
@@ -104,6 +124,15 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		else if (arg == "--shader-check") {
 			args.shader_check = true;
 		}
+		else if (arg == "--egl-sink-check") {
+			args.egl_sink_check = value();
+		}
+		else if (arg == "--replay") {
+			args.replay = true;
+		}
+		else if (arg == "--frames") {
+			args.frames = std::stoull(value());
+		}
 		else if (arg == "--seconds") {
 			args.seconds = std::stoi(value());
 		}
@@ -127,37 +156,13 @@ bool parse_args(int argc, char **argv, native_args &args) {
 }
 
 /**
- * Same checks as openage/game/main.py: the "engine" API modpack and all
- * requested modpacks must exist in assets/converted.
+ * Same checks as openage/game/main.py (engine::check_root), as exception.
  */
 void check_modpacks(const openage::util::Path &root,
                     const std::vector<std::string> &wanted) {
-	using namespace openage;
-
-	auto modpack_dir = root / "assets" / "converted";
-	auto mods = assets::ModManager::enumerate_modpacks(modpack_dir);
-
-	auto has = [&](const std::string &id) {
-		return std::any_of(mods.begin(), mods.end(), [&](const assets::ModpackInfo &mod) {
-			return mod.id == id;
-		});
-	};
-
-	for (const auto &mod : mods) {
-		log::log(INFO << "found modpack " << mod.id << " " << mod.versionstr);
-	}
-
-	if (not has("engine")) {
-		throw Error{MSG(err) << "Modpack 'engine' not found in " << modpack_dir
-		                     << ". Export it with 'python -m openage convert-export-api'."};
-	}
-	for (const auto &id : wanted) {
-		if (not has(id)) {
-			throw Error{MSG(err) << "Modpack '" << id << "' not found in " << modpack_dir};
-		}
-	}
-	if (not (root / "assets" / "shaders").is_dir()) {
-		throw Error{MSG(err) << "assets/shaders missing in " << root};
+	auto problem = openage::engine::check_root(root, wanted);
+	if (not problem.empty()) {
+		throw openage::Error{MSG(err) << problem};
 	}
 }
 
@@ -260,6 +265,125 @@ size_t shader_check(const std::filesystem::path &root,
 	return failed;
 }
 
+#if WITH_EGL
+/**
+ * Render into a test frame sink without any window system (see file header).
+ *
+ * @return true if all frames were read and captured and the engine stopped in time.
+ */
+bool egl_sink_check(const native_args &args,
+                    const openage::util::Path &root,
+                    openage::renderer::window_settings settings) {
+	using namespace openage;
+	using clock = std::chrono::steady_clock;
+	using renderer::opengl::TestFrameSink;
+
+	const int width = static_cast<int>(args.width);
+	const int height = static_cast<int>(args.height);
+	const double start = args.seconds > 0 ? args.seconds : 15;
+	const auto png = std::filesystem::absolute(args.egl_sink_check);
+	const auto png_resized = png.parent_path() / (png.stem().string() + "-1920x1080.png");
+	std::filesystem::remove(png);
+	std::filesystem::remove(png_resized);
+
+	std::vector<TestFrameSink::Step> steps;
+	if (args.replay) {
+		steps = TestFrameSink::replay_steps(start, width, height, png.string());
+	}
+	else {
+		TestFrameSink::Step shot;
+		shot.at = start;
+		shot.what = TestFrameSink::Step::kind::capture;
+		shot.file = png.string();
+		steps.push_back(shot);
+	}
+	// size change while running, captured in the new size
+	const double last = steps.back().at;
+	TestFrameSink::Step resize;
+	resize.at = last + 1.0;
+	resize.what = TestFrameSink::Step::kind::resize;
+	resize.width = 1920;
+	resize.height = 1080;
+	steps.push_back(resize);
+	TestFrameSink::Step shot;
+	shot.at = last + 4.0;
+	shot.what = TestFrameSink::Step::kind::capture;
+	shot.file = png_resized.string();
+	steps.push_back(shot);
+
+	// declared before the engine: destroyed after the engine threads are joined
+	auto sink = std::make_shared<TestFrameSink>(width, height, steps, args.frames);
+	settings.sink = sink;
+
+	auto engine = std::make_unique<engine::Engine>(engine::Engine::mode::FULL, root, args.modpacks, settings);
+
+	// stop the engine once the sink is done (or failed, or after a generous timeout)
+	std::atomic<bool> loop_finished{false};
+	bool sink_done = false;
+	clock::time_point stop_time{};
+	std::thread watcher{[&]() {
+		const auto deadline = clock::now() + std::chrono::seconds(static_cast<int>(last) + 900);
+		while (not loop_finished and clock::now() < deadline) {
+			if (sink->wait_done(std::chrono::milliseconds(100))) {
+				sink_done = true;
+				break;
+			}
+			if (not sink->get_error().empty()) {
+				break;
+			}
+		}
+		stop_time = clock::now();
+		log::log(INFO << "egl sink check: stopping engine");
+		engine->stop();
+	}};
+
+	engine->loop();
+	loop_finished = true;
+	watcher.join();
+	// joins the time loop and presenter threads
+	engine.reset();
+	const double stop_seconds = std::chrono::duration<double>(clock::now() - stop_time).count();
+
+	auto stats = sink->get_stats();
+	auto error = sink->get_error();
+	sink.reset();
+
+	log::log(INFO << "egl sink check: " << stats.published << " frames published, "
+	              << stats.frames_read << " frames read (" << stats.reads << " reads), "
+	              << stats.gl_errors << " consumer GL errors, "
+	              << stats.steps_done << "/" << steps.size() << " steps, stop took "
+	              << stop_seconds << " s");
+	for (const auto &file : stats.captures) {
+		log::log(INFO << "egl sink check: stored " << file);
+	}
+
+	bool ok = true;
+	if (not error.empty()) {
+		log::log(ERR << "egl sink check: " << error);
+		ok = false;
+	}
+	if (not sink_done) {
+		log::log(ERR << "egl sink check: sink not done (frames or steps missing)");
+		ok = false;
+	}
+	if (stats.gl_errors != 0) {
+		ok = false;
+	}
+	if (stop_seconds >= 1.0) {
+		log::log(ERR << "egl sink check: stop took " << stop_seconds << " s (limit 1 s)");
+		ok = false;
+	}
+	for (const auto &file : {png, png_resized}) {
+		if (not std::filesystem::exists(file)) {
+			log::log(ERR << "egl sink check: missing " << file.string());
+			ok = false;
+		}
+	}
+	log::log(INFO << "egl sink check " << (ok ? "ok" : "FAILED"));
+	return ok;
+}
+#endif
+
 } // namespace
 
 
@@ -300,6 +424,15 @@ int main(int argc, char **argv) {
 		}
 
 		check_modpacks(root, args.modpacks);
+
+		if (not args.egl_sink_check.empty()) {
+#if WITH_EGL
+			return egl_sink_check(args, root, win_settings) ? EXIT_SUCCESS : EXIT_FAILURE;
+#else
+			throw Error{MSG(err) << "--egl-sink-check: built without EGL support"};
+#endif
+		}
+
 		if (args.check) {
 			log::log(INFO << "check ok");
 			return EXIT_SUCCESS;

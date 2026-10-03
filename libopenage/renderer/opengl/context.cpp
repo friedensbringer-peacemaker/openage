@@ -198,24 +198,26 @@ GlContext::GlContext(const std::shared_ptr<QWindow> &window,
 
 	check_context(specs);
 }
-#else
+#endif
+
 GlContext::GlContext(bool gles, unsigned int default_framebuffer) :
 	default_framebuffer{default_framebuffer} {
-	this->specs = find_spec(gles);
+	// the context is already current: query it directly (no probing contexts)
+	this->specs = query_current_spec(gles);
 	this->uniform_buffer_bindings = std::vector<bool>(this->specs.max_uniform_buffer_bindings);
 
 	check_context(this->specs);
 }
-#endif
 
 #if WITH_QT
 GlContext::GlContext(GlContext &&other) :
-	gl_context(other.gl_context), specs(other.specs) {
+	gl_context(other.gl_context), default_framebuffer(other.default_framebuffer), specs(other.specs) {
 	other.gl_context = nullptr;
 }
 
 GlContext &GlContext::operator=(GlContext &&other) {
 	this->gl_context = other.gl_context;
+	this->default_framebuffer = other.default_framebuffer;
 	this->specs = other.specs;
 	other.gl_context = nullptr;
 
@@ -227,7 +229,11 @@ std::shared_ptr<QOpenGLContext> GlContext::get_raw_context() const {
 }
 
 GLuint GlContext::get_default_framebuffer_id() {
-	return this->gl_context->defaultFramebufferObject();
+	if (this->gl_context) {
+		return this->gl_context->defaultFramebufferObject();
+	}
+	// adopted context (EGL frame sink)
+	return this->default_framebuffer;
 }
 #else
 GlContext::GlContext(GlContext &&other) :
@@ -245,6 +251,10 @@ GLuint GlContext::get_default_framebuffer_id() {
 	return this->default_framebuffer;
 }
 #endif
+
+void GlContext::set_default_framebuffer_id(unsigned int id) {
+	this->default_framebuffer = id;
+}
 
 gl_context_spec GlContext::get_specs() const {
 	return this->specs;

@@ -59,17 +59,18 @@ public:
 	 */
 	explicit GlContext(const std::shared_ptr<QWindow> &window,
 	                   bool debug = false);
-#else
+#endif
+
 	/**
 	 * Adopt the OpenGL (ES) context that is current on this thread (XR fork,
-	 * builds without Qt). The embedder creates the context and makes it current
-	 * before the renderer is created.
+	 * builds with and without Qt). The creator of the context (e.g. the EGL
+	 * frame sink window) makes it current before the renderer is created
+	 * and keeps it alive as long as this object.
 	 *
 	 * @param gles True if the current context is an OpenGL ES context.
 	 * @param default_framebuffer Framebuffer that the final pass renders into.
 	 */
 	explicit GlContext(bool gles, unsigned int default_framebuffer = 0);
-#endif
 	~GlContext() = default;
 
 	// It doesn't make sense to have more than one instance of the same context.
@@ -103,6 +104,15 @@ public:
 	 * @return ID of the default (display) framebuffer.
 	 */
 	unsigned int get_default_framebuffer_id();
+
+	/**
+	 * Set the default (display) framebuffer of an adopted context
+	 * (see GlContext(bool, unsigned int)), e.g. the framebuffer of the
+	 * current frame sink slot. Has no effect on contexts created by Qt.
+	 *
+	 * @param id Framebuffer ID, 0 for the framebuffer of the current surface.
+	 */
+	void set_default_framebuffer_id(unsigned int id);
 
 	/**
 	 * Get the capabilities of this context.
@@ -206,12 +216,12 @@ private:
 	 * Pointer to Qt struct representing the GL context.
 	 */
 	std::shared_ptr<QOpenGLContext> gl_context;
-#else
+#endif
+
 	/**
-	 * Framebuffer used as default (display) framebuffer.
+	 * Framebuffer used as default (display) framebuffer of an adopted context.
 	 */
 	unsigned int default_framebuffer = 0;
-#endif
 
 	/**
 	 * Context capabilities, i.e. available OpenGL features and version.

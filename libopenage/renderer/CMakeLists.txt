@@ -1,6 +1,7 @@
 add_sources(libopenage
 	color.cpp
     definitions.cpp
+	frame_sink.cpp
 	geometry.cpp
 	render_factory.cpp
     render_pass.cpp

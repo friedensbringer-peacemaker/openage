@@ -27,3 +27,11 @@ if(OPENAGE_QT)
 		window.cpp
 	)
 endif()
+
+# XR fork: window for frame sinks of embedders and the test sink (EGL)
+if(WITH_EGL)
+	add_sources(libopenage
+		egl_window.cpp
+		test_sink.cpp
+	)
+endif()

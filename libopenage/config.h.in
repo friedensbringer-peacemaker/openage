@@ -15,6 +15,7 @@
 #define WITH_NCURSES ${WITH_NCURSES}
 #define WITH_QT ${WITH_QT}
 #define WITH_FONT ${WITH_FONT}
+#define WITH_EGL ${WITH_EGL}
 
 
 namespace openage {
