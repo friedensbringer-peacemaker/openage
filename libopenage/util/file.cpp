@@ -124,7 +124,12 @@ std::ostream &operator<<(std::ostream &stream, const File &file) {
 
 File File::get_temp_file(bool executable) {
 	fslike::Directory temp_dir = fslike::Directory::get_temp_directory();
+#ifdef __ANDROID__
+	// XR fork: bionic deprecates tmpnam; the directory above is new and unique already
+	std::string file_name = "/file";
+#else
 	std::string file_name = std::tmpnam(nullptr);
+#endif
 	std::ostringstream dir_path;
 	temp_dir.repr(dir_path);
 

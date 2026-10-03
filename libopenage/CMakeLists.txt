@@ -10,9 +10,12 @@ declare_binary(libopenage openage library allow_no_undefined)
 #################################################################
 
 # set basic library settings
-set_target_properties(libopenage PROPERTIES
-	VERSION 0
-)
+# XR fork: no version suffix on Android, apps only package and load "libopenage.so"
+if(NOT ANDROID)
+	set_target_properties(libopenage PROPERTIES
+		VERSION 0
+	)
+endif()
 if(OPENAGE_QT)
 	set_target_properties(libopenage PROPERTIES
 		AUTOMOC ON
@@ -46,6 +49,10 @@ endif()
 if(WIN32)
 	find_library(OGG_LIB ogg)
 	target_link_libraries(libopenage PRIVATE DbgHelp)
+endif()
+if(ANDROID)
+	# XR fork: opus/opusfile are static on Android and need libogg explicitly
+	find_library(OGG_LIB ogg REQUIRED)
 endif()
 if(NOT APPLE AND NOT WIN32)
 	find_library(RT_LIB rt)
@@ -250,7 +257,12 @@ else()
 endif()
 
 # opengl support
-if(WANT_OPENGL)
+if(WANT_OPENGL AND ANDROID)
+	# XR fork: Android has no desktop OpenGL. The renderer uses GLES through
+	# libepoxy, which loads libEGL.so/libGLESv2.so at runtime (dlopen),
+	# so there is nothing to link here.
+	set(OPENGL_FOUND TRUE)
+elseif(WANT_OPENGL)
 	find_package(OpenGL)
 endif()
 
@@ -261,7 +273,9 @@ endif()
 
 if(WANT_OPENGL AND OPENGL_FOUND)
 	have_config_option(opengl OPENGL true)
-	target_link_libraries(libopenage PRIVATE OpenGL::GL)
+	if(NOT ANDROID)
+		target_link_libraries(libopenage PRIVATE OpenGL::GL)
+	endif()
 else()
 	have_config_option(opengl OPENGL false)
 endif()

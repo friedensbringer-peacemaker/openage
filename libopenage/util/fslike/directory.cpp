@@ -1,4 +1,4 @@
-// Copyright 2017-2024 the openage authors. See copying.md for legal info.
+// Copyright 2017-2026 the openage authors. See copying.md for legal info.
 
 #include "directory.h"
 
@@ -9,6 +9,7 @@
 #endif
 
 #include <cstdio>
+#include <cstdlib>
 #include <dirent.h>
 #include <fcntl.h>
 #include <filesystem>
@@ -294,8 +295,16 @@ std::ostream &Directory::repr(std::ostream &stream) {
 }
 
 Directory Directory::get_temp_directory() {
+#ifdef __ANDROID__
+	// XR fork: bionic deprecates tmpnam; mkdtemp creates a unique directory
+	std::string temp_dir_path = (std::filesystem::temp_directory_path() / "openage-XXXXXX").string();
+	if (mkdtemp(temp_dir_path.data()) == nullptr) {
+		throw Error{ERR << "can't create temporary directory " << temp_dir_path};
+	}
+#else
 	std::filesystem::path path = std::filesystem::temp_directory_path() / std::tmpnam(nullptr);
 	std::string temp_dir_path = path.string();
+#endif
 	bool create = true;
 	Directory directory = Directory(temp_dir_path, create);
 	return directory;

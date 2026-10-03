@@ -1,4 +1,4 @@
-// Copyright 2014-2024 the openage authors. See copying.md for legal info.
+// Copyright 2014-2026 the openage authors. See copying.md for legal info.
 
 #include "subprocess.h"
 
@@ -53,7 +53,9 @@ std::string which(const char *name) {
 
 	std::unique_ptr<char[]> path = util::copy_string(env_path);
 
-	for (char *dir = strtok(path.get(), ":"); dir; dir = strtok(nullptr, ":")) {
+	// XR fork: strtok_r (POSIX) instead of strtok, which bionic deprecates as not thread-safe
+	char *saveptr = nullptr;
+	for (char *dir = strtok_r(path.get(), ":", &saveptr); dir; dir = strtok_r(nullptr, ":", &saveptr)) {
 		std::string filename;
 		filename.append(dir);
 		filename.push_back('/');
