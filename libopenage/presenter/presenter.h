@@ -140,6 +140,14 @@ protected:
 	 */
 	void init_final_render_pass();
 
+	/**
+	 * Render the final pass into a texture and store it as PNG file
+	 * (offscreen render checks, see window_settings::capture_file).
+	 *
+	 * @param file Absolute path of the PNG file.
+	 */
+	void capture_frame(const std::string &file);
+
 	// void init_audio();
 
 	/**

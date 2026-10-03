@@ -2,10 +2,14 @@
 
 #include "presenter.h"
 
+#include <chrono>
 #include <eigen3/Eigen/Dense>
 #include <iostream>
 #include <string>
 #include <vector>
+
+#include <QImage>
+#include <QString>
 
 #include "gamestate/simulation.h"
 #include "input/controller/camera/binding_context.h"
@@ -25,6 +29,7 @@
 #include "renderer/render_target.h"
 #include "renderer/resources/assets/asset_manager.h"
 #include "renderer/resources/shader_source.h"
+#include "renderer/resources/texture_data.h"
 #include "renderer/resources/texture_info.h"
 #include "renderer/stages/camera/manager.h"
 #include "renderer/stages/hud/render_stage.h"
@@ -32,6 +37,7 @@
 #include "renderer/stages/skybox/render_stage.h"
 #include "renderer/stages/terrain/render_stage.h"
 #include "renderer/stages/world/render_stage.h"
+#include "renderer/texture.h"
 #include "time/time_loop.h"
 #include "util/path.h"
 
@@ -54,6 +60,9 @@ void Presenter::run(const renderer::window_settings window_settings) {
 
 	this->init_input();
 
+	const auto start = std::chrono::steady_clock::now();
+	size_t frames = 0;
+
 	while (not this->window->should_close()) {
 		this->gui_app->process_events();
 		// TODO: pass button presses and events from GUI to controller
@@ -61,6 +70,17 @@ void Presenter::run(const renderer::window_settings window_settings) {
 		this->render();
 
 		this->renderer->check_error();
+
+		frames += 1;
+		if (not window_settings.capture_file.empty()) {
+			std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+			if (elapsed.count() >= window_settings.capture_delay) {
+				log::log(INFO << "Presenter: capturing frame " << frames
+				              << " after " << elapsed.count() << " s");
+				this->capture_frame(window_settings.capture_file);
+				break;
+			}
+		}
 
 		this->window->update();
 	}
@@ -305,6 +325,33 @@ void Presenter::init_final_render_pass() {
 		}
 		this->screen_renderer->set_render_targets(targets);
 	});
+}
+
+void Presenter::capture_frame(const std::string &file) {
+	// Render the final pass again, into a texture instead of the window.
+	// The default framebuffer of a hidden window has no defined content,
+	// and reading the texture back also covers the texture readback path.
+	auto size = this->window->get_size() * this->window->get_scale();
+	auto texture = this->renderer->add_texture(
+		renderer::resources::Texture2dInfo(size[0], size[1], renderer::resources::pixel_format::rgba8));
+	auto target = this->renderer->create_texture_target({texture});
+
+	auto pass = this->screen_renderer->get_render_pass();
+	auto display = pass->get_target();
+	pass->set_target(target);
+	this->renderer->render(pass);
+	pass->set_target(display);
+	this->renderer->check_error();
+
+	// OpenGL rows start at the bottom
+	auto image = texture->into_data().flip_y();
+	// saved with Qt directly: Texture2dData::store() needs a writable util::Path,
+	// which a plain fslike::Directory does not provide
+	QImage png{image.get_data(), int(size[0]), int(size[1]), QImage::Format_RGBA8888};
+	if (not png.save(QString::fromStdString(file))) {
+		throw Error{ERR << "Presenter: could not store frame to " << file};
+	}
+	log::log(INFO << "Presenter: stored frame " << size[0] << "x" << size[1] << " to " << file);
 }
 
 void Presenter::render() {

@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <QObject>
@@ -50,6 +51,12 @@ struct window_settings {
 	window_mode mode = window_mode::WINDOWED;
 	// If false, the window is created but never shown (offscreen checks).
 	bool visible = true;
+	// If not empty: after capture_delay seconds of rendering, the presenter
+	// renders the final frame into a texture, stores it as PNG to this file
+	// and closes the window (offscreen render checks).
+	std::string capture_file{};
+	// Seconds to render before the frame is captured.
+	double capture_delay = 10.0;
 };
 
 
