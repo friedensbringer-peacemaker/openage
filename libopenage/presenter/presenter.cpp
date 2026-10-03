@@ -408,17 +408,17 @@ void Presenter::apply_sink_camera() {
 	const bool moving = this->sink and this->sink->poll_camera(dx, dy, zoom)
 	                    and (dx != 0.0f or dy != 0.0f or zoom != 0.0f);
 	if (moving) {
+		if (not this->sink_camera_active) {
+			const auto &pos = this->camera->get_scene_pos();
+			log::log(INFO << "Presenter: camera channel active at scene (" << pos[0] << ", "
+			              << pos[1] << ", " << pos[2] << "), zoom " << this->camera->get_zoom());
+		}
 		this->camera->move_screen(dx, dy, this->camera_manager->get_camera_boundaries());
 		if (zoom > 0.0f) {
 			this->camera_manager->zoom_frame(renderer::camera::ZoomDirection::IN, zoom * zoom_step);
 		}
 		else if (zoom < 0.0f) {
 			this->camera_manager->zoom_frame(renderer::camera::ZoomDirection::OUT, -zoom * zoom_step);
-		}
-		if (not this->sink_camera_active) {
-			const auto &pos = this->camera->get_scene_pos();
-			log::log(INFO << "Presenter: camera channel active at scene (" << pos[0] << ", "
-			              << pos[1] << ", " << pos[2] << "), zoom " << this->camera->get_zoom());
 		}
 		this->sink_camera_active = true;
 		this->sink_camera_dx += dx;
