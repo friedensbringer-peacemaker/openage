@@ -9,7 +9,7 @@ layout(location=1) out uint id;
 
 void main() {
 	vec4 tex_val = texture(tex, v_uv);
-	int alpha = int(round(tex_val.a * 255));
+	int alpha = int(round(tex_val.a * 255.0));
 	switch (alpha) {
 		case 0:
 		discard;

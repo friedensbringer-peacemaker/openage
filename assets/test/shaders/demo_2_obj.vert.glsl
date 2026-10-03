@@ -7,12 +7,12 @@ uniform mat4 mv;
 uniform mat4 proj;
 uniform vec4 offset_tile;
 
-float width = offset_tile.y - offset_tile.x;
-float height = offset_tile.w - offset_tile.z;
-
 out vec2 v_uv;
 
 void main() {
+	float width = offset_tile.y - offset_tile.x;
+	float height = offset_tile.w - offset_tile.z;
+
 	gl_Position = proj * mv * vec4(position, 0.0, 1.0);
     v_uv = vec2((uv.x * width) + offset_tile.x, (((1.0 - uv.y) * height) + offset_tile.z));
 }

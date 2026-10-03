@@ -12,6 +12,7 @@ add_sources(libopenage
     shader_data.cpp
 	shader_program.cpp
 	simple_object.cpp
+	tests.cpp
 	texture.cpp
 	texture_array.cpp
     uniform_buffer.cpp

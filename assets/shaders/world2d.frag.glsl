@@ -11,14 +11,15 @@ uniform uint u_id;
 // position (top left corner) and size: (x, y, width, height)
 uniform vec4 tile_params;
 
-vec2 uv = vec2(
-	vert_uv.x * tile_params.z + tile_params.x,
-	vert_uv.y * tile_params.w + tile_params.y
-);
-
 void main() {
+	// computed here, GLSL ES only allows constant global initializers
+	vec2 uv = vec2(
+		vert_uv.x * tile_params.z + tile_params.x,
+		vert_uv.y * tile_params.w + tile_params.y
+	);
+
 	vec4 tex_val = texture(tex, uv);
-	int alpha = int(round(tex_val.a * 255));
+	int alpha = int(round(tex_val.a * 255.0));
 	switch (alpha) {
 		case 0:
 			col = tex_val;

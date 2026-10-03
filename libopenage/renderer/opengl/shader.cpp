@@ -3,6 +3,8 @@
 #include "shader.h"
 
 #include "../../datastructure/constexpr_map.h"
+#include "renderer/opengl/context.h"
+#include "renderer/opengl/glsl_es.h"
 
 
 namespace openage {
@@ -30,7 +32,12 @@ GlShader::GlShader(const std::shared_ptr<GlContext> &context,
 	this->handle = handle;
 
 	// load shader source
-	const char *data = src.get_source().c_str();
+	// the sources are desktop GLSL, an OpenGL ES context needs a GLSL ES header
+	const auto &specs = context->get_specs();
+	const std::string source = specs.gles
+	                               ? glsl_to_gles(src.get_source(), specs.major_version, specs.minor_version)
+	                               : src.get_source();
+	const char *data = source.c_str();
 	glShaderSource(handle, 1, &data, nullptr);
 
 	// compile shader source

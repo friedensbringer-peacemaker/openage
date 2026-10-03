@@ -9,7 +9,7 @@ layout(location=1) out uint id;
 
 void main() {
 	vec4 tex_val = texture(tex, v_uv);
-	if (tex_val.a == 0) {
+	if (tex_val.a == 0.0) {
 		discard;
 	}
 	col = tex_val;
