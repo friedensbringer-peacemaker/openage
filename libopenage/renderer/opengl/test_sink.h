@@ -139,7 +139,7 @@ private:
 
 	mutable std::mutex mutex;
 	std::condition_variable cv;
-	std::array<Slot, slot_count> slots{};
+	std::array<Slot, slot_count> frame_slots{};
 	int latest = -1;
 	int reading = -1;
 	int writing = -1;

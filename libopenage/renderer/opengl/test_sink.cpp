@@ -205,7 +205,7 @@ unsigned TestFrameSink::acquire_target(int width, int height) {
 				break;
 			}
 		}
-		Slot &slot = this->slots[index];
+		Slot &slot = this->frame_slots[index];
 		wait_before_write = slot.read_done;
 		discard = slot.written;
 		slot.read_done = nullptr;
@@ -216,7 +216,7 @@ unsigned TestFrameSink::acquire_target(int width, int height) {
 	wait_and_delete(wait_before_write);
 	delete_fence(discard);
 
-	Slot &slot = this->slots[index];
+	Slot &slot = this->frame_slots[index];
 	if (slot.texture == 0 or slot.width != width or slot.height != height) {
 		if (slot.producer_fbo != 0) {
 			glDeleteFramebuffers(1, &slot.producer_fbo);
@@ -271,7 +271,7 @@ void TestFrameSink::publish() {
 		log::log(MSG(warn) << "Test sink: publish() without acquire_target()");
 		return;
 	}
-	this->slots[this->writing].written = written;
+	this->frame_slots[this->writing].written = written;
 	this->latest = this->writing;
 	this->writing = -1;
 	this->published += 1;
@@ -373,7 +373,7 @@ void TestFrameSink::consumer_loop() {
 			if (this->latest >= 0) {
 				index = this->latest;
 				this->reading = index;
-				Slot &slot = this->slots[index];
+				Slot &slot = this->frame_slots[index];
 				wait_before_read = slot.written;
 				slot.written = nullptr;
 				texture = slot.texture;
@@ -391,7 +391,7 @@ void TestFrameSink::consumer_loop() {
 			wait_and_delete(wait_before_read);
 
 			// read framebuffers are objects of this context
-			Slot &slot = this->slots[index];
+			Slot &slot = this->frame_slots[index];
 			if (slot.read_fbo == 0) {
 				glGenFramebuffers(1, &slot.read_fbo);
 			}
@@ -511,7 +511,7 @@ void TestFrameSink::consumer_cleanup() {
 	// runs after the producer is gone: its context and framebuffers are destroyed,
 	// textures and fences belong to the share group and are deleted here
 	std::lock_guard<std::mutex> lock{this->mutex};
-	for (Slot &slot : this->slots) {
+	for (Slot &slot : this->frame_slots) {
 		if (slot.read_fbo != 0) {
 			glDeleteFramebuffers(1, &slot.read_fbo);
 		}
