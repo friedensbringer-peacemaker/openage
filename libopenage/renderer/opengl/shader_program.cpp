@@ -376,6 +376,8 @@ void GlShaderProgram::update_uniforms(std::shared_ptr<GlUniformInput> const &uni
 			break;
 		case GL_DOUBLE:
 			// TODO requires an extension
+			// GLSL ES has no double uniforms, so this cannot happen there
+			ENSURE(not this->context->get_specs().gles, "double uniforms are not supported by OpenGL ES");
 			glUniform1d(loc, *reinterpret_cast<const double *>(ptr));
 			break;
 		case GL_BOOL:

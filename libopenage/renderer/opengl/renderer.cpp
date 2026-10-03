@@ -43,7 +43,13 @@ GlRenderer::GlRenderer(const std::shared_ptr<GlContext> &ctx,
 
 	// global GL depth testing settings
 	glDepthFunc(GL_LEQUAL);
-	glDepthRange(0.0, 1.0);
+	if (ctx->get_specs().gles) {
+		// OpenGL ES has no double precision variant
+		glDepthRangef(0.0f, 1.0f);
+	}
+	else {
+		glDepthRange(0.0, 1.0);
+	}
 
 	log::log(MSG(info) << "Created OpenGL renderer");
 }
@@ -136,7 +142,9 @@ resources::Texture2dData GlRenderer::display_into_data() {
 
 	std::static_pointer_cast<GlRenderTarget>(this->get_display_target())->bind_read();
 	glPixelStorei(GL_PACK_ALIGNMENT, 4);
-	glReadnPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, tex_info.get_data_size(), data.data());
+	// data is sized for exactly this read, so the robust glReadnPixels
+	// (OpenGL 4.5 / OpenGL ES 3.2 only) is not needed
+	glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
 
 	resources::Texture2dData img(std::move(tex_info), std::move(data));
 	return img.flip_y();

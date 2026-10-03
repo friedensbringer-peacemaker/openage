@@ -25,7 +25,7 @@ static constexpr auto GL_PIXEL_FORMAT = datastructure::create_const_map<resource
 	std::pair(resources::pixel_format::bgr8, std::tuple(GL_RGB8, GL_BGR, GL_UNSIGNED_BYTE)),
 	std::pair(resources::pixel_format::rgba8, std::tuple(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE)),
 	std::pair(resources::pixel_format::rgba8ui, std::tuple(GL_RGBA8UI, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE)),
-	std::pair(resources::pixel_format::depth24, std::tuple(GL_DEPTH_COMPONENT, GL_DEPTH_COMPONENT, GL_UNSIGNED_BYTE)));
+	std::pair(resources::pixel_format::depth24, std::tuple(GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT)));
 
 /// Sizes of various uniform/vertex input types in shaders.
 static constexpr auto GL_UNIFORM_TYPE_SIZE = datastructure::create_const_map<GLenum, size_t>(
