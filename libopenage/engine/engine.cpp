@@ -75,6 +75,16 @@ Engine::Engine(mode mode,
 	              << "(" << std::jthread::hardware_concurrency() << " available)");
 }
 
+Engine::~Engine() {
+	// the members are destroyed before the jthreads (declared first), but the
+	// threads still use them, e.g. the presenter thread resets this->presenter
+	for (auto &thread : this->threads) {
+		if (thread.joinable()) {
+			thread.join();
+		}
+	}
+}
+
 void Engine::stop() {
 	if (auto simulation = this->stop_simulation.lock()) {
 		simulation->stop();

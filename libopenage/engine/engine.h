@@ -86,7 +86,12 @@ public:
 	Engine &operator=(const Engine &) = delete;
 	Engine(Engine &&) = delete;
 	Engine &operator=(Engine &&) = delete;
-	~Engine() = default;
+	/**
+	 * Wait for the time loop and presenter threads (XR fork). They use the
+	 * members of the engine until they finish, so they have to end before
+	 * the members are destroyed. Call stop() first to make them finish.
+	 */
+	~Engine();
 
 
 	/**
