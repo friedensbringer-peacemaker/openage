@@ -125,6 +125,8 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 	auto pathfinder = map->get_pathfinder();
 	auto grid_id = map->get_grid_id(move_path_grid->get_name());
 	auto waypoints = find_path(pathfinder, grid_id, current_pos, destination, start_time);
+	// XR fork: follow the terrain elevation (hills), no change on flat maps
+	waypoints = map->follow_terrain(waypoints);
 
 	// use waypoints for movement
 	double total_time = 0;

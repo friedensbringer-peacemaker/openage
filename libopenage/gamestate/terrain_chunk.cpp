@@ -22,6 +22,18 @@ void TerrainChunk::set_render_entity(const std::shared_ptr<renderer::terrain::Re
 	this->render_entity = entity;
 }
 
+TerrainChunk::TerrainChunk(const util::Vector2s size,
+                           const coord::tile_delta offset,
+                           const std::vector<TerrainTile> &&tiles,
+                           std::vector<float> &&corner_heights) :
+	TerrainChunk{size, offset, std::move(tiles)} {
+	if (corner_heights.size() != (size[0] + 1) * (size[1] + 1)) {
+		throw Error(MSG(err) << "Terrain chunk: " << corner_heights.size()
+		                     << " corner heights for " << size[0] << "x" << size[1] << " tiles");
+	}
+	this->corner_heights = std::move(corner_heights);
+}
+
 const util::Vector2s &TerrainChunk::get_size() const {
 	return this->size;
 }
@@ -51,9 +63,17 @@ void TerrainChunk::render_update(const time::time_t &time) {
 			tiles.emplace_back(tile.elevation, tile.terrain_asset_path);
 		}
 
-		this->render_entity->update(this->size,
-		                            tiles,
-		                            time);
+		if (this->corner_heights.empty()) {
+			this->render_entity->update(this->size,
+			                            tiles,
+			                            time);
+		}
+		else {
+			this->render_entity->update(this->size,
+			                            tiles,
+			                            this->corner_heights,
+			                            time);
+		}
 	}
 }
 

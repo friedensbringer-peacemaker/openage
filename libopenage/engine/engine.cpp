@@ -17,7 +17,8 @@ namespace openage::engine {
 Engine::Engine(mode mode,
                const util::Path &root_dir,
                const std::vector<std::string> &mods,
-               const renderer::window_settings &window_settings) :
+               const renderer::window_settings &window_settings,
+               const gamestate::MapSettings &map_settings) :
 	running{true},
 	run_mode{mode},
 	root_dir{root_dir},
@@ -39,6 +40,7 @@ Engine::Engine(mode mode,
 	                                                               this->cvar_manager,
 	                                                               this->time_loop);
 	this->simulation->set_modpacks(mods);
+	this->simulation->set_map_settings(map_settings);
 
 	this->stop_simulation = this->simulation;
 	this->stop_time_loop = this->time_loop;

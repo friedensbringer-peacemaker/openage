@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <shared_mutex>
+#include <vector>
 
 #include "coord/tile.h"
 #include "util/vector.h"
@@ -19,6 +20,7 @@ namespace gamestate {
 class GameState;
 class Terrain;
 class TerrainChunk;
+struct TerrainTile;
 
 /**
  * Creates terrain data (tiles, chunks, etc.) to generate a map.
@@ -50,6 +52,21 @@ public:
 	std::shared_ptr<TerrainChunk> add_chunk(const std::shared_ptr<GameState> &gstate,
 	                                        const util::Vector2s size,
 	                                        const coord::tile_delta offset);
+
+	/**
+	 * Create a terrain chunk from given tiles and vertex heights (XR fork, random maps).
+	 *
+	 * @param size Size of the chunk.
+	 * @param offset Offset of the chunk.
+	 * @param tiles Tiles (row-major, index ne + se * width).
+	 * @param corner_heights (width + 1) * (height + 1) vertex heights.
+	 *
+	 * @return New terrain chunk.
+	 */
+	std::shared_ptr<TerrainChunk> add_chunk(const util::Vector2s size,
+	                                        const coord::tile_delta offset,
+	                                        std::vector<TerrainTile> &&tiles,
+	                                        std::vector<float> &&corner_heights);
 
 	// TODO: Add tiles
 	// std::shared_ptr<TerrainTile> add_tile(const std::shared_ptr<openage::event::EventLoop> &loop,

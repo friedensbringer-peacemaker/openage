@@ -11,6 +11,7 @@
 #include "gamestate/component/types.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
+#include "gamestate/map.h"
 #include "gamestate/types.h"
 
 
@@ -56,6 +57,8 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 	auto gstate = std::dynamic_pointer_cast<openage::gamestate::GameState>(state);
 
 	auto command_type = params.get("type", component::command::command_t::NONE);
+	// XR fork: targets from input are plane hits; use the visible terrain point (hills)
+	auto target = gstate->get_map()->pick_terrain(params.get("target", coord::phys3{0, 0, 0}));
 	std::vector<gamestate::entity_id_t> ids = params.get("entity_ids",
 	                                                     std::vector<gamestate::entity_id_t>{});
 	for (auto id : ids) {
@@ -70,9 +73,7 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 		case component::command::command_t::MOVE:
 			command_queue->add_command(
 				time,
-				std::make_shared<component::command::MoveCommand>(
-					params.get("target",
-			                   coord::phys3{0, 0, 0})));
+				std::make_shared<component::command::MoveCommand>(target));
 			break;
 		default:
 			break;

@@ -145,6 +145,14 @@ private:
 	std::shared_ptr<renderer::world::RenderEntity> render_entity;
 
 	/**
+	 * Last animation and its start time (XR fork): replayed when a render
+	 * entity is attached later, e.g. for map objects created before the
+	 * renderer (random maps).
+	 */
+	std::string last_animation_path;
+	time::time_t last_render_time;
+
+	/**
 	 * Event manager.
 	 */
 	std::shared_ptr<GameEntityManager> manager;

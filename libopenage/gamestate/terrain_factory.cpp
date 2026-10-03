@@ -259,6 +259,22 @@ std::shared_ptr<TerrainChunk> TerrainFactory::add_chunk(const std::shared_ptr<Ga
 	return chunk;
 }
 
+std::shared_ptr<TerrainChunk> TerrainFactory::add_chunk(const util::Vector2s size,
+                                                        const coord::tile_delta offset,
+                                                        std::vector<TerrainTile> &&tiles,
+                                                        std::vector<float> &&corner_heights) {
+	auto chunk = std::make_shared<TerrainChunk>(size, offset, std::move(tiles), std::move(corner_heights));
+
+	if (this->render_factory) {
+		auto render_entity = this->render_factory->add_terrain_render_entity(size, offset);
+		chunk->set_render_entity(render_entity);
+
+		chunk->render_update(time::TIME_ZERO);
+	}
+
+	return chunk;
+}
+
 void TerrainFactory::attach_renderer(const std::shared_ptr<renderer::RenderFactory> &render_factory) {
 	std::unique_lock lock{this->mutex};
 

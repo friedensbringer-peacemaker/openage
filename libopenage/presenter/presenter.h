@@ -161,6 +161,12 @@ protected:
 	 */
 	void capture_frame(const std::string &file);
 
+	/**
+	 * Random maps (XR fork): once the game exists, look at its start view and
+	 * limit the camera to the map size. The test map keeps the default camera.
+	 */
+	void apply_map_view();
+
 	// void init_audio();
 
 	/**
@@ -206,6 +212,11 @@ protected:
 	 * Camera manager for camera controls.
 	 */
 	std::shared_ptr<renderer::camera::CameraManager> camera_manager;
+
+	/**
+	 * Start view of the map applied (or the test map found) (XR fork).
+	 */
+	bool map_view_done = false;
 
 	/**
 	 * Graphics output for the map background.

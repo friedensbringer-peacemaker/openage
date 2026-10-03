@@ -158,6 +158,8 @@ void SpawnEntityHandler::invoke(openage::event::EventLoop & /* loop */,
 
 	// Check if spawn position is on the map
 	auto pos = params.get("position", gamestate::WORLD_ORIGIN);
+	// XR fork: input positions are plane hits; use the visible terrain point (hills)
+	pos = gstate->get_map()->pick_terrain(pos);
 	auto map_size = gstate->get_map()->get_size();
 	if (not(pos.ne >= 0
 	        and pos.ne < map_size[0]

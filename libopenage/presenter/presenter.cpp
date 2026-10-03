@@ -10,6 +10,9 @@
 #include <string>
 #include <vector>
 
+#include "gamestate/game.h"
+#include "gamestate/game_state.h"
+#include "gamestate/map.h"
 #include "gamestate/simulation.h"
 #include "input/controller/camera/binding_context.h"
 #include "input/controller/camera/controller.h"
@@ -393,7 +396,48 @@ void Presenter::capture_frame(const std::string &file) {
 	log::log(INFO << "Presenter: stored frame " << size[0] << "x" << size[1] << " to " << file);
 }
 
+void Presenter::apply_map_view() {
+	if (this->map_view_done or not this->simulation) {
+		return;
+	}
+	auto game = this->simulation->get_game();
+	if (not game) {
+		return;
+	}
+	this->map_view_done = true;
+
+	const auto &view = game->get_start_view();
+	if (not view) {
+		return;
+	}
+	auto map_size = game->get_state()->get_map()->get_size();
+
+	// camera above the ground at the given height, looking down at the target
+	// (look_at keeps the height of the camera and sets x and z)
+	this->camera->move_to(Eigen::Vector3f{0.0f, view->height, 0.0f});
+	this->camera->look_at_coord(coord::scene3{view->ne, view->se, 0});
+	this->camera->set_zoom(view->zoom);
+
+	// limits: camera position = looked-at point + offset of the fixed view direction
+	// (renderer::camera::Camera::calc_look_at: height * sqrt(3) / sqrt(2) in x and z)
+	const float offset = view->height * 1.2247449f;
+	const float max_height = std::max(renderer::camera::Y_BOUND_MAX, view->height);
+	this->camera_manager->set_camera_boundaries(
+		renderer::camera::CameraBoundaries{
+			offset,
+			offset + static_cast<float>(map_size[1]),
+			renderer::camera::Y_BOUND_MIN,
+			max_height,
+			offset - static_cast<float>(map_size[0]),
+			offset});
+
+	log::log(INFO << "Presenter: map view at tile (" << view->ne << ", " << view->se << "), zoom "
+	              << view->zoom << ", camera height " << view->height << ", map " << map_size[0] << "x" << map_size[1]);
+}
+
 void Presenter::render() {
+	this->apply_map_view();
+
 	// TODO: Pass current time to update() instead of fetching it in renderer
 	this->camera_manager->update();
 	this->terrain_renderer->update();
