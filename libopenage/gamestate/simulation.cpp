@@ -2,6 +2,9 @@
 
 #include "simulation.h"
 
+#include <chrono>
+#include <thread>
+
 #include "assets/mod_manager.h"
 #include "event/event_loop.h"
 #include "gamestate/entity_factory.h"
@@ -44,9 +47,18 @@ GameSimulation::GameSimulation(const util::Path &root_dir,
 
 void GameSimulation::run() {
 	this->start();
+	time::time_t last_time = -1;
 	while (this->running) {
 		time::time_t current_time = this->time_loop->get_clock()->get_time();
 		this->event_loop->reach_time(current_time, this->game->get_state());
+
+		if (current_time == last_time) {
+			// The clock advances in whole milliseconds (and not at all while paused).
+			// Without a pause here the loop would keep a core at 100 % (battery and
+			// heat on standalone headsets); new events are still handled within 1 ms.
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		last_time = current_time;
 	}
 	log::log(MSG(info) << "Game simulation loop exited");
 }
@@ -63,7 +75,7 @@ void GameSimulation::start() {
 	                                               this->entity_factory,
 	                                               this->terrain_factory);
 
-	this->running = true;
+	this->running = not this->stop_requested;
 
 	log::log(MSG(info) << "Game simulation started");
 }
@@ -72,6 +84,7 @@ void GameSimulation::start() {
 void GameSimulation::stop() {
 	std::unique_lock lock{this->mutex};
 
+	this->stop_requested = true;
 	this->running = false;
 
 	log::log(MSG(info) << "Game simulation stopped");

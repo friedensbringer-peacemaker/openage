@@ -29,7 +29,7 @@ void TimeLoop::run() {
 void TimeLoop::start() {
 	std::unique_lock lock{this->mutex};
 
-	this->running = true;
+	this->running = not this->stop_requested;
 
 	if (this->clock->get_state() == ClockState::INIT) {
 		this->clock->start();
@@ -41,6 +41,7 @@ void TimeLoop::start() {
 void TimeLoop::stop() {
 	std::unique_lock lock{this->mutex};
 
+	this->stop_requested = true;
 	this->running = false;
 
 	log::log(MSG(info) << "Time loop stopped");

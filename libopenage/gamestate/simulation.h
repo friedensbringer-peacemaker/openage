@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <shared_mutex>
 
 #include "util/path.h"
@@ -140,7 +141,13 @@ public:
 	 * current simulation state variable.
 	 * to be set to false to stop the simulation loop.
 	 */
-	bool running;
+	std::atomic<bool> running;
+
+	/**
+	 * Set by stop(). Keeps a stop that arrives before start() from being
+	 * overwritten when the loop starts.
+	 */
+	std::atomic<bool> stop_requested{false};
 
 private:
 	/**

@@ -53,6 +53,14 @@ Presenter::Presenter(const util::Path &root_dir,
 	time_loop{time_loop} {}
 
 
+void Presenter::stop() {
+	*this->stop_requested = true;
+}
+
+std::shared_ptr<std::atomic<bool>> Presenter::get_stop_flag() const {
+	return this->stop_requested;
+}
+
 void Presenter::run(const renderer::window_settings window_settings) {
 	log::log(INFO << "Presenter: Launching subsystems...");
 
@@ -63,7 +71,7 @@ void Presenter::run(const renderer::window_settings window_settings) {
 	const auto start = std::chrono::steady_clock::now();
 	size_t frames = 0;
 
-	while (not this->window->should_close()) {
+	while (not this->window->should_close() and not *this->stop_requested) {
 		this->gui_app->process_events();
 		// TODO: pass button presses and events from GUI to controller
 

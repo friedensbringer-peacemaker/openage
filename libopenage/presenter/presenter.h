@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -94,6 +95,18 @@ public:
 	void run(const renderer::window_settings window_settings = {});
 
 	/**
+	 * Ask the draw loop to exit after the current frame (like closing the window).
+	 * Safe to call from any thread.
+	 */
+	void stop();
+
+	/**
+	 * Flag behind stop(). Lets other threads request a stop without holding
+	 * a reference to the presenter (it must be destroyed in its own GL thread).
+	 */
+	std::shared_ptr<std::atomic<bool>> get_stop_flag() const;
+
+	/**
 	 * Set the game simulation controlled by this presenter.
 	 *
 	 * @param simulation Game simulation.
@@ -168,6 +181,11 @@ protected:
 	 * Display window.
 	 */
 	std::shared_ptr<renderer::Window> window;
+
+	/**
+	 * Set by stop(), checked once per frame by run().
+	 */
+	std::shared_ptr<std::atomic<bool>> stop_requested = std::make_shared<std::atomic<bool>>(false);
 
 	/**
 	 * openage's graphics renderer.

@@ -47,10 +47,11 @@ Engine::Engine(mode mode,
 		this->presenter = std::make_shared<presenter::Presenter>(this->root_dir,
 		                                                         this->simulation,
 		                                                         this->time_loop);
+		this->stop_presenter = this->presenter->get_stop_flag();
 	}
 
 	// spawn thread to run time loop
-	this->threads.emplace_back([&]() {
+	this->threads.emplace_back([this]() {
 		this->time_loop->run();
 
 		this->time_loop.reset();
@@ -58,7 +59,9 @@ Engine::Engine(mode mode,
 
 	// if presenter is used, run it in a separate thread
 	if (this->run_mode == mode::FULL) {
-		this->threads.emplace_back([&]() {
+		// capture the settings by value: the caller's object may be gone
+		// before the presenter thread reads it
+		this->threads.emplace_back([this, window_settings]() {
 			this->presenter->run(window_settings);
 
 			// Make sure that the presenter gets destructed in the same thread
@@ -78,6 +81,9 @@ void Engine::stop() {
 	}
 	if (auto time_loop = this->stop_time_loop.lock()) {
 		time_loop->stop();
+	}
+	if (this->stop_presenter) {
+		*this->stop_presenter = true;
 	}
 }
 

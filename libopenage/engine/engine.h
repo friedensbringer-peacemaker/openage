@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <thread>
@@ -95,7 +96,7 @@ public:
 
 	/**
 	 * Ask the engine to shut down: stops the game simulation
-	 * (which ends loop()) and the time loop thread.
+	 * (which ends loop()), the time loop thread and the presenter's draw loop.
 	 * Safe to call from any thread.
 	 */
 	void stop();
@@ -146,6 +147,7 @@ private:
 	// thread while the owning threads reset the shared_ptrs above
 	std::weak_ptr<gamestate::GameSimulation> stop_simulation;
 	std::weak_ptr<time::TimeLoop> stop_time_loop;
+	std::shared_ptr<std::atomic<bool>> stop_presenter;
 };
 
 } // namespace engine

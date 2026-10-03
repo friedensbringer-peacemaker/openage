@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <shared_mutex>
 
@@ -53,7 +54,13 @@ private:
 	/**
 	 * State of the time loop.
 	 */
-	bool running;
+	std::atomic<bool> running;
+
+	/**
+	 * Set by stop(). Keeps a stop that arrives before start() from being
+	 * overwritten when the loop starts.
+	 */
+	std::atomic<bool> stop_requested{false};
 
 	/**
 	 * Manage time and speed inside the simulation.
