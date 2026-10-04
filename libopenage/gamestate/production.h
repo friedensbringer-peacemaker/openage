@@ -88,6 +88,26 @@ void update_building_health(const std::shared_ptr<GameState> &state,
  */
 std::string entity_name(const std::shared_ptr<GameEntity> &entity);
 
+// ---- ai (XR fork): queries for the computer opponent (simulation thread) ----
+
+/// population (units + units in training) and limit of a player
+struct PlayerPopulation {
+	size_t used = 0;
+	size_t cap = 0;
+};
+
+PlayerPopulation population_of(const std::shared_ptr<GameState> &state,
+                               player_id_t player,
+                               const time::time_t &time);
+
+/// units queued in a building (0 without a training queue)
+size_t queued_in(const std::shared_ptr<GameEntity> &building);
+
+/// the building is finished (no foundation)
+bool is_finished(const std::shared_ptr<GameEntity> &building);
+
+// ---- end ai (XR fork) ----
+
 
 /// kind of a HUD status message
 enum class status_t {
@@ -223,6 +243,19 @@ public:
 	/// place a building directly (scripts, tests)
 	void place(const std::string &id, const coord::phys3 &ground_hit);
 
+	// ---- ai (XR fork): requests of a computer opponent, independent of the HUD
+	// player and its selection; they never change the HUD status message
+
+	/// train a unit in a building of \p player
+	void train_for(player_id_t player, entity_id_t building, const std::string &id);
+
+	/// place a building of \p player and let \p builders (villagers of that player) build it
+	void place_for(player_id_t player,
+	               const std::vector<entity_id_t> &builders,
+	               const std::string &id,
+	               const coord::phys3 &ground_hit);
+	// ---- end ai (XR fork)
+
 	// --- simulation thread ---
 
 	/**
@@ -245,6 +278,9 @@ private:
 		std::string id;
 		entity_id_t building = 0;
 		coord::phys3 pos{0, 0, 0};
+		// ai (XR fork): request of a computer opponent (no HUD status) and its builders
+		std::optional<player_id_t> for_player{};
+		std::vector<entity_id_t> builders{};
 	};
 
 	/// set the status message (simulation thread or API, mutex held)

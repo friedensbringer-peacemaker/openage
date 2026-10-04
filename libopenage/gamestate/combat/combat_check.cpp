@@ -220,6 +220,8 @@ int main(int argc, char **argv) {
 		settings.seed = seed;
 		settings.size = size;
 		settings.skirmish = true;
+		// ai (XR fork): this check commands both players itself
+		settings.ai.mode = ai_mode_t::OFF;
 		w.game = std::make_shared<Game>(w.loop, mod_manager, entity_factory, terrain_factory, settings);
 		w.state = w.game->get_state();
 		w.loop->reach_time(w.now, w.state);

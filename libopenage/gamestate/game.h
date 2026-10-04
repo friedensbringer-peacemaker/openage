@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "gamestate/map_settings.h"
 #include "gamestate/resources.h"
@@ -37,6 +38,14 @@ class GameState;
 class EntityFactory;
 class TerrainFactory;
 class Universe;
+
+// ai (XR fork)
+namespace ai {
+class AiPlayer;
+}
+namespace prod {
+class Production;
+}
 
 /**
  * Manages a game session (settings, win conditions, etc.).
@@ -100,7 +109,34 @@ public:
 	 */
 	void attach_renderer(const std::shared_ptr<renderer::RenderFactory> &render_factory);
 
+	// ---- ai (XR fork) ----
+	/**
+	 * Computer opponents of the game (empty if MapSettings::ai is off).
+	 * The objects live as long as the game; get_status() is thread-safe.
+	 */
+	const std::vector<std::shared_ptr<ai::AiPlayer>> &get_ai_players() const;
+
+	/**
+	 * Let the computer opponents train and build through the production of
+	 * the simulation (before that they only log their wishes).
+	 */
+	void connect_ai_production(const std::shared_ptr<prod::Production> &production);
+	// ---- end ai (XR fork) ----
+
 private:
+	// ---- ai (XR fork) ----
+	/**
+	 * Create and start the computer opponents (random maps, see MapSettings::ai).
+	 */
+	void start_ai(const std::shared_ptr<openage::event::EventLoop> &event_loop,
+	              const MapSettings &settings);
+
+	/// start positions of the random map (0: test map)
+	size_t start_count = 0;
+
+	std::vector<std::shared_ptr<ai::AiPlayer>> ai_players;
+	// ---- end ai (XR fork) ----
+
 	/**
 	 * Load game data from the filesystem.
 	 *

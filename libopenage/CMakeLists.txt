@@ -475,4 +475,20 @@ if(OPENAGE_NATIVE_ENTRY)
 	if(OPENAGE_QT)
 		target_link_libraries(openage-combat-check PRIVATE Qt6::Core Qt6::Gui)
 	endif()
+
+	# ---- ai (XR fork) ----
+	# host test: AI decision rules (dependency-free, parameter sweep)
+	add_executable(openage-ai-rules-check gamestate/ai/ai_rules_check.cpp)
+	target_include_directories(openage-ai-rules-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-ai-rules-check COMMAND openage-ai-rules-check)
+
+	# game state check of the computer opponent with the converted modpack (--root <dir>, headless)
+	add_executable(openage-ai-check gamestate/ai/ai_check.cpp)
+	target_include_directories(openage-ai-check PRIVATE $<TARGET_PROPERTY:libopenage,INCLUDE_DIRECTORIES>)
+	add_dependencies(openage-ai-check cppgen)
+	target_link_libraries(openage-ai-check PRIVATE libopenage nyan::nyan Eigen3::Eigen Threads::Threads)
+	if(OPENAGE_QT)
+		target_link_libraries(openage-ai-check PRIVATE Qt6::Core Qt6::Gui)
+	endif()
+	# ---- end ai (XR fork) ----
 endif()

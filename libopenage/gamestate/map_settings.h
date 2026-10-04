@@ -129,6 +129,46 @@ struct MapView {
 	float height = 10.0f;
 };
 
+// ---- ai (XR fork) ----
+
+/**
+ * Computer opponent switch (gamestate/ai).
+ */
+enum class ai_mode_t {
+	/// on for random maps with two or more start positions, off otherwise
+	AUTO,
+	ON,
+	OFF,
+};
+
+/**
+ * Difficulty of the computer opponent (gamestate/ai/ai_rules.h: params_for()).
+ */
+enum class ai_difficulty_t {
+	/// slow reactions, first attack after 8 minutes at the earliest
+	EASY,
+	/// faster reactions, earlier and smaller attacks
+	NORMAL,
+};
+
+/**
+ * Settings of the computer opponent. Unset optionals keep the values of the difficulty.
+ */
+struct AiSettings {
+	ai_mode_t mode = ai_mode_t::AUTO;
+	ai_difficulty_t difficulty = ai_difficulty_t::EASY;
+	/// controlled player; default: the last player before gaia (player 1 of two)
+	std::optional<uint64_t> player{};
+	/// earliest first attack (simulation seconds)
+	std::optional<double> first_attack{};
+	/// army size that starts an attack wave
+	std::optional<size_t> attack_size{};
+	/// seed of the decisions (0: map seed)
+	uint32_t seed = 0;
+};
+
+// ---- end ai (XR fork) ----
+
 /**
  * Settings for the map of a new game.
  */
@@ -152,6 +192,8 @@ struct MapSettings {
 	/// XR fork test option: a small army per player between the starts
 	/// (gamestate/combat/skirmish.h), the camera looks at the battlefield
 	bool skirmish = false;
+	// ai (XR fork): computer opponent
+	AiSettings ai{};
 };
 
 } // namespace openage::gamestate
