@@ -2,9 +2,12 @@
 
 #pragma once
 
+#include <array>
 #include <memory>
 #include <shared_mutex>
 #include <vector>
+
+#include <eigen3/Eigen/Dense>
 
 #include "util/path.h"
 
@@ -15,8 +18,10 @@ class Clock;
 }
 
 namespace renderer {
+class Geometry;
 class Renderer;
 class RenderPass;
+class UniformInput;
 class ShaderProgram;
 class Texture2d;
 class Window;
@@ -32,6 +37,16 @@ class AssetManager;
 namespace hud {
 class HudDragObject;
 class DragRenderEntity;
+
+/**
+ * Frame around a selected game entity (XR fork).
+ */
+struct SelectionMarker {
+	/// screen rectangle of the sprite (left, bottom, right, top) in normalized device coordinates
+	Eigen::Vector4f ndc;
+	/// owned by the controlled player (white), else only displayed (yellow)
+	bool own;
+};
 
 /**
  * Renderer for the "Heads-Up Display" (HUD).
@@ -79,6 +94,14 @@ public:
 	 * @param render_entity Render entity to remove.
 	 */
 	void remove_drag_entity();
+
+	/**
+	 * Frames around the selected game entities (XR fork), drawn until the
+	 * next call. Call in the render thread, e.g. once per frame.
+	 *
+	 * @param markers Screen rectangles of the selection.
+	 */
+	void set_selection_markers(std::vector<SelectionMarker> &&markers);
 
 	/**
 	 * Update the render entities and render positions.
@@ -137,6 +160,20 @@ private:
 	 * Shader for rendering the drag select rectangle.
 	 */
 	std::shared_ptr<renderer::ShaderProgram> drag_select_shader;
+
+	/**
+	 * Selection frames (XR fork): rectangles and, per color group (own, other),
+	 * the geometry + uniforms in the render pass.
+	 */
+	std::vector<SelectionMarker> selection_markers;
+	std::array<std::shared_ptr<renderer::Geometry>, 2> marker_geometry;
+	std::array<std::shared_ptr<renderer::UniformInput>, 2> marker_uniforms;
+	std::array<size_t, 2> marker_vertices{0, 0};
+
+	/**
+	 * Draw the selection frames (XR fork), part of update().
+	 */
+	void update_selection_markers();
 
 	/**
 	 * Simulation clock for timing animations.

@@ -4,6 +4,7 @@
 
 #include <epoxy/gl.h>
 
+#include <array>
 #include <cstring>
 #include <tuple>
 #include <vector>
@@ -235,6 +236,28 @@ resources::Texture2dData GlTexture2d::into_data() {
 	glGetTexImage(GL_TEXTURE_2D, 0, std::get<1>(fmt_in_out), std::get<2>(fmt_in_out), data.data());
 
 	return resources::Texture2dData(resources::Texture2dInfo(this->info), std::move(data));
+}
+
+uint32_t GlTexture2d::read_texel_uint(size_t x, size_t y) {
+	// XR fork: one texel through a temporary read framebuffer. GL_RGBA_INTEGER +
+	// GL_UNSIGNED_INT is the read format OpenGL ES guarantees for unsigned
+	// integer color buffers (desktop GL accepts it as well).
+	GLint prev_read_fbo;
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev_read_fbo);
+
+	GLuint fbo;
+	glGenFramebuffers(1, &fbo);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+	glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *this->handle, 0);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+
+	std::array<GLuint, 4> texel{0, 0, 0, 0};
+	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), 1, 1, GL_RGBA_INTEGER, GL_UNSIGNED_INT, texel.data());
+
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, prev_read_fbo);
+	glDeleteFramebuffers(1, &fbo);
+	return texel[0];
 }
 
 void GlTexture2d::upload(resources::Texture2dData const &data) {

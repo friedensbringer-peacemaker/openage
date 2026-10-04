@@ -100,8 +100,9 @@ void WorldRenderStage::update() {
 						false,
 						"flip_y",
 						false,
+						// XR fork: id + 1, 0 = nothing drawn (see pick())
 						"u_id",
-						obj->get_id(),
+						obj->get_id() + 1,
 						// XR fork: player color of the marked sprite pixels
 						"u_player",
 						obj->get_player());
@@ -124,6 +125,50 @@ void WorldRenderStage::update() {
 		}
 		obj->update_uniforms(current_time);
 	}
+}
+
+std::optional<uint32_t> WorldRenderStage::pick(float ndc_x, float ndc_y) {
+	std::unique_lock lock{this->mutex};
+
+	const auto size = this->id_texture->get_info().get_size();
+	const auto width = static_cast<size_t>(size.first);
+	const auto height = static_cast<size_t>(size.second);
+	if (width == 0 or height == 0 or ndc_x < -1.0f or ndc_x > 1.0f or ndc_y < -1.0f or ndc_y > 1.0f) {
+		return std::nullopt;
+	}
+	// texel of the point, origin bottom left like NDC
+	auto x = std::min(static_cast<size_t>((ndc_x + 1.0f) * 0.5f * width), width - 1);
+	auto y = std::min(static_cast<size_t>((ndc_y + 1.0f) * 0.5f * height), height - 1);
+	auto value = this->id_texture->read_texel_uint(x, y);
+	if (value == 0) {
+		return std::nullopt;
+	}
+	return value - 1;
+}
+
+std::vector<ScreenBox> WorldRenderStage::get_screen_boxes(const std::vector<uint32_t> &ids) {
+	std::vector<ScreenBox> boxes;
+	if (ids.empty()) {
+		return boxes;
+	}
+
+	std::unique_lock lock{this->mutex};
+	auto current_time = this->clock->get_real_time();
+	Eigen::Matrix4f view_proj = this->camera->get_projection_matrix() * this->camera->get_view_matrix();
+	float inv_zoom = 1.0f / this->camera->get_zoom();
+	const auto &viewport = this->camera->get_viewport_size();
+	Eigen::Vector2f inv_viewport{1.0f / static_cast<float>(viewport[0]), 1.0f / static_cast<float>(viewport[1])};
+
+	for (auto &obj : this->render_objects) {
+		if (obj->is_removed() or std::find(ids.begin(), ids.end(), obj->get_id()) == ids.end()) {
+			continue;
+		}
+		auto bounds = obj->get_screen_bounds(current_time, view_proj, inv_zoom, inv_viewport);
+		if (bounds) {
+			boxes.push_back(ScreenBox{obj->get_id(), obj->get_player(), *bounds});
+		}
+	}
+	return boxes;
 }
 
 void WorldRenderStage::resize(size_t width, size_t height) {

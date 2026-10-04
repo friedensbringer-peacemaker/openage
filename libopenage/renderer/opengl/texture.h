@@ -26,6 +26,8 @@ public:
 	resources::Texture2dData into_data() override;
 
 	void upload(resources::Texture2dData const &) override;
+
+	uint32_t read_texel_uint(size_t x, size_t y) override;
 };
 
 } // namespace opengl

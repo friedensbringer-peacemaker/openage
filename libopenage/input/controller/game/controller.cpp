@@ -14,6 +14,7 @@
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
 #include "gamestate/production.h"
+#include "gamestate/selection_rules.h"
 #include "gamestate/simulation.h"
 #include "input/controller/game/binding_context.h"
 #include "time/clock.h"
@@ -138,10 +139,31 @@ void Controller::reset_drag_select() {
 	this->drag_select_start = std::nullopt;
 }
 
+bool Controller::has_drag_select_start() const {
+	std::unique_lock lock{this->mutex};
+
+	return this->drag_select_start.has_value();
+}
+
+void Controller::set_double_click() {
+	std::unique_lock lock{this->mutex};
+
+	this->double_click = true;
+}
+
+bool Controller::take_double_click() {
+	std::unique_lock lock{this->mutex};
+
+	bool result = this->double_click;
+	this->double_click = false;
+	return result;
+}
+
 void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
                     const std::shared_ptr<time::TimeLoop> &time_loop,
                     const std::shared_ptr<openage::gamestate::GameSimulation> &simulation,
-                    const std::shared_ptr<renderer::camera::Camera> &camera) {
+                    const std::shared_ptr<renderer::camera::Camera> &camera,
+                    const pick_func_t &pick) {
 	binding_func_t create_entity_event{[&](const event_arguments &args,
 	                                       const std::shared_ptr<Controller> controller) {
 		auto mouse_pos = args.mouse.to_phys3(camera);
@@ -188,12 +210,20 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 			});
 		}
 		log::log(INFO << "Input: right click at pixel (" << args.mouse.x << ", " << args.mouse.y
-		              << ") -> move/attack " << controller->get_selected().size() << " entities");
+		              << ") -> move/attack, " << controller->get_selected().size()
+		              << " selected so far (the command log line counts the final selection)");
 		Eigen::Matrix4f cam_matrix = camera->get_projection_matrix() * camera->get_view_matrix();
 		event::EventHandler::param_map::map_t params{
 			{"type", gamestate::component::command::command_t::MOVE},
 			{"target", mouse_pos},
-			{"entity_ids", controller->get_selected()},
+			{"entity_ids", controller->get_selected_copy()},
+			// XR fork: the selection when the command is handled - a click just
+			// before (same frame, slow renderer) is handled first by the event loop
+			{"selection_cb", std::function<std::vector<gamestate::entity_id_t>()>{[controller]() {
+				 return controller->get_selected_copy();
+			 }}},
+			// XR fork: only own entities take commands (a foreign selection is only displayed)
+			{"controlled", controller->get_controlled()},
 			{"camera_matrix", cam_matrix},
 			{"pick_ndc", Eigen::Vector2f{args.mouse.to_viewport(camera).to_ndc_space(camera)}},
 		};
@@ -202,7 +232,9 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 			"game.send_command",
 			simulation->get_commander(),
 			simulation->get_game()->get_state(),
-			time_loop->get_clock()->get_time(),
+			// XR fork: 1 ms later, so a selection click of the same frame (same clock
+			// time, the event queue does not order ties) is handled first
+			time_loop->get_clock()->get_time() + time::time_t::from_double(0.001),
 			params);
 		return event;
 	}};
@@ -230,13 +262,32 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 		event_type::MouseButtonPress};
 
 	ctx->bind(ev_mouse_lmb_press, init_drag_selection_action);
+	// XR fork: Shift + left button adds to the selection
+	ctx->bind(Event{event_class::MOUSE_BUTTON, mouse_button::LeftButton, modifier::ShiftModifier,
+	                event_type::MouseButtonPress},
+	          init_drag_selection_action);
 
+	// XR fork: the release after a double click selects all own entities of the type on screen
+	binding_func_t double_click{[&](const event_arguments &args,
+	                                const std::shared_ptr<Controller> controller) {
+		if (not controller->has_drag_select_start()) {
+			controller->set_drag_select_start(args.mouse);
+		}
+		controller->set_double_click();
+		return nullptr;
+	}};
+	ctx->bind(Event{event_class::MOUSE_BUTTON_DBL, mouse_button::LeftButton, modifier::NoModifier,
+	                event_type::MouseButtonDblClick},
+	          binding_action{forward_action_t::CLEAR, double_click});
+
+	auto pick_fn = pick;
 	binding_func_t drag_selection{
-		[&](const event_arguments &args,
-	        const std::shared_ptr<Controller> controller) {
+		[&, pick_fn](const event_arguments &args,
+	                 const std::shared_ptr<Controller> controller) {
 			// XR fork (production): in the placement mode a left click places the foundation
 			if (simulation->get_production()->placement_active()) {
 				controller->reset_drag_select();
+				controller->take_double_click();
 				auto ground = args.mouse.to_phys3(camera);
 				log::log(INFO << "Input: left click at pixel (" << args.mouse.x << ", " << args.mouse.y
 				              << ") -> place building at tile (" << ground.ne.to_float() << ", "
@@ -244,12 +295,27 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 				simulation->get_production()->place_at(ground);
 				return std::shared_ptr<event::Event>{};
 			}
+			// XR fork: a release without press (e.g. the press went elsewhere) is a click
+			auto start = controller->has_drag_select_start() ? controller->get_drag_select_start() : args.mouse;
+			Eigen::Vector2f release_ndc = args.mouse.to_viewport(camera).to_ndc_space(camera);
+			const bool click = gamestate::select::is_click(static_cast<int>(args.mouse.x - start.x),
+			                                               static_cast<int>(args.mouse.y - start.y));
+			const bool additive = (args.e.mod_code & modifier::ShiftModifier) != 0;
+			const bool same_type = controller->take_double_click() and click;
 			Eigen::Matrix4f cam_matrix = camera->get_projection_matrix() * camera->get_view_matrix();
 			event::EventHandler::param_map::map_t params{
 				{"controlled", controller->get_controlled()},
-				{"drag_start", controller->get_drag_select_start().to_viewport(camera).to_ndc_space(camera)},
-				{"drag_end", args.mouse.to_viewport(camera).to_ndc_space(camera)},
+				{"drag_start", start.to_viewport(camera).to_ndc_space(camera)},
+				{"drag_end", release_ndc},
 				{"camera_matrix", cam_matrix},
+				// XR fork: single click, Shift, double click, current selection
+				{"click", click},
+				{"additive", additive},
+				{"same_type", same_type},
+				// selection when the click is handled (clicks of the same frame build on each other)
+				{"current_cb", std::function<std::vector<gamestate::entity_id_t>()>{[controller]() {
+					 return controller->get_selected_copy();
+				 }}},
 				{"select_cb",
 		         std::function<void(const std::vector<gamestate::entity_id_t> ids)>{
 					 [controller, production = simulation->get_production()](
@@ -259,6 +325,16 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 						 production->set_selection(ids);
 					 }}},
 			};
+			if (click and pick_fn) {
+				// topmost drawn entity under the cursor (object ids of the world pass)
+				auto picked = pick_fn(release_ndc.x(), release_ndc.y());
+				if (picked) {
+					params.emplace("picked", *picked);
+				}
+				log::log(INFO << "Input: left click at pixel (" << args.mouse.x << ", " << args.mouse.y << ")"
+				              << (additive ? " + Shift" : "") << (same_type ? " (double click)" : "")
+				              << " -> " << (picked ? "entity " + std::to_string(*picked) : std::string{"ground"}));
+			}
 
 			auto event = simulation->get_event_loop()->create_event(
 				"game.drag_select",
@@ -281,6 +357,9 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 		event_type::MouseButtonRelease};
 
 	ctx->bind(ev_mouse_lmb_release, drag_selection_action);
+	ctx->bind(Event{event_class::MOUSE_BUTTON, mouse_button::LeftButton, modifier::ShiftModifier,
+	                event_type::MouseButtonRelease},
+	          drag_selection_action);
 
 	// production (XR fork): keys of cfg/keybinds.oac (TRAIN_OBJECT t, ENABLE_BUILDING_PLACEMENT y),
 	// Esc ends the placement mode, Backspace cancels the last queued unit

@@ -185,6 +185,22 @@ void GlRenderer::render(const std::shared_ptr<RenderPass> &pass) {
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+	// XR fork: glClear leaves integer color buffers undefined (e.g. the r32ui
+	// object ids of the world pass, read for picking) -> clear them to 0
+	GLint color_index = 0;
+	for (const auto &texture : gl_target->get_texture_targets()) {
+		auto format = texture->get_info().get_format();
+		if (format == resources::pixel_format::depth24) {
+			continue;
+		}
+		if (format == resources::pixel_format::r16ui or format == resources::pixel_format::r32ui
+		    or format == resources::pixel_format::rgba8ui) {
+			static constexpr GLuint zero[4] = {0, 0, 0, 0};
+			glClearBufferuiv(GL_COLOR, color_index, zero);
+		}
+		color_index += 1;
+	}
+
 	// TODO: Option for face culling
 	// glEnable(GL_CULL_FACE);
 

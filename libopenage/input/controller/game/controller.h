@@ -116,6 +116,25 @@ public:
 	 */
 	void reset_drag_select();
 
+	/**
+	 * Whether a drag selection was started (XR fork: a release without press,
+	 * e.g. after a double click, counts as a click at the release position).
+	 */
+	bool has_drag_select_start() const;
+
+	/**
+	 * Mark the running click as double click (XR fork): the release selects
+	 * all own entities of the clicked type on screen.
+	 */
+	void set_double_click();
+
+	/**
+	 * Take the double click mark of the running click (XR fork).
+	 *
+	 * @return true if the running click is a double click.
+	 */
+	bool take_double_click();
+
 private:
 	/**
 	 * Factions controllable by this controller.
@@ -145,26 +164,42 @@ private:
 	std::optional<coord::input> drag_select_start;
 
 	/**
+	 * Running click is a double click (XR fork).
+	 */
+	bool double_click = false;
+
+	/**
 	 * Mutex for threaded access.
 	 */
 	mutable std::recursive_mutex mutex;
 };
 
 /**
+ * Game entity drawn at a screen point (XR fork, normalized device
+ * coordinates), e.g. from the object ids of the world render pass.
+ * Called in the input (render) thread.
+ */
+using pick_func_t = std::function<std::optional<gamestate::entity_id_t>(float ndc_x, float ndc_y)>;
+
+/**
  * Setup default controller action bindings:
  *
  * - CTRL + Left Mouse click: Create game entity.
  * - Right Mouse click: Move game entity.
+ * - Left click (XR fork): select the entity under the cursor (\p pick),
+ *   Shift adds, double click selects all own entities of the type on screen.
  *
  * @param ctx Binding context the actions are added to.
  * @param time_loop Time loop for getting simulation time.
  * @param simulation Game simulation.
  * @param camera Active game camera.
+ * @param pick Entity under a screen point (XR fork), empty = only rectangles.
  */
 void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
                     const std::shared_ptr<time::TimeLoop> &time_loop,
                     const std::shared_ptr<openage::gamestate::GameSimulation> &simulation,
-                    const std::shared_ptr<renderer::camera::Camera> &camera);
+                    const std::shared_ptr<renderer::camera::Camera> &camera,
+                    const pick_func_t &pick = {});
 
 } // namespace input::game
 } // namespace openage

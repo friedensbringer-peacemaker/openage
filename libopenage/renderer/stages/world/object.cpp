@@ -2,6 +2,7 @@
 
 #include "object.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <functional>
@@ -240,6 +241,54 @@ bool WorldObject::is_removed() const {
 
 uint32_t WorldObject::get_player() const {
 	return this->render_entity != nullptr ? this->render_entity->get_player() : 0;
+}
+
+std::optional<Eigen::Vector4f> WorldObject::get_screen_bounds(const time::time_t &time,
+                                                              const Eigen::Matrix4f &view_proj,
+                                                              float inv_zoom,
+                                                              const Eigen::Vector2f &inv_viewport) {
+	auto animation_info = this->animation_info.get(time);
+	if (not animation_info or animation_info->get_layer_count() == 0) {
+		return std::nullopt;
+	}
+
+	auto world_pos = this->position.get(time).to_world_space();
+	Eigen::Vector4f clip = view_proj * Eigen::Vector4f{world_pos.x(), world_pos.y(), world_pos.z(), 1.0f};
+	auto angle_degrees = this->angle.get(time).to_float();
+	float zoom_scale = animation_info->get_scalefactor() * inv_zoom;
+
+	std::optional<Eigen::Vector4f> sprite;
+	std::optional<Eigen::Vector4f> shadow;
+	for (size_t layer_idx = 0; layer_idx < animation_info->get_layer_count(); ++layer_idx) {
+		auto &layer = animation_info->get_layer(layer_idx);
+		auto &angle = layer.get_direction_angle(angle_degrees);
+		auto &frame_info = angle->get_frame(0);
+		auto &tex_info = animation_info->get_texture(frame_info->get_texture_idx());
+		const auto &subtex = tex_info->get_subtex_info(frame_info->get_subtexture_idx());
+
+		// world2d.vert.glsl: the quad spans +-1 scaled by the subtex size and is
+		// moved by the anchor offset (mirrored angles flip it)
+		Eigen::Vector2f half{zoom_scale * subtex.get_size()[0] * inv_viewport.x(),
+		                     zoom_scale * subtex.get_size()[1] * inv_viewport.y()};
+		Eigen::Vector2f anchor{zoom_scale * subtex.get_anchor_params()[0] * inv_viewport.x(),
+		                       zoom_scale * subtex.get_anchor_params()[1] * inv_viewport.y()};
+		if (angle->is_mirrored()) {
+			anchor.x() = -anchor.x();
+		}
+		Eigen::Vector2f center{clip.x() + anchor.x(), clip.y() + anchor.y()};
+		Eigen::Vector4f box{center.x() - half.x(), center.y() - half.y(),
+		                    center.x() + half.x(), center.y() + half.y()};
+
+		auto &target = layer.get_position() < 10 ? shadow : sprite;
+		if (target) {
+			*target = Eigen::Vector4f{std::min(target->x(), box.x()), std::min(target->y(), box.y()),
+			                          std::max(target->z(), box.z()), std::max(target->w(), box.w())};
+		}
+		else {
+			target = box;
+		}
+	}
+	return sprite ? sprite : shadow;
 }
 
 bool WorldObject::is_visible(const camera::Frustum2d &frustum,

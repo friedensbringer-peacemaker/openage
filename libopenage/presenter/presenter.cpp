@@ -323,6 +323,11 @@ void Presenter::init_input() {
 		this->input_manager->process(input::Event{ev});
 	});
 	this->window->add_mouse_button_callback([&](const renderer::WindowEvent &ev) {
+		// XR fork: every button release in the log (which clicks reach the engine)
+		if (ev.type == input::event_type::MouseButtonRelease) {
+			log::log(INFO << "Input: button " << ev.button << " released at pixel (" << ev.x << ", " << ev.y
+			              << "), modifiers " << ev.modifiers);
+		}
 		this->input_manager->process(input::Event{ev});
 	});
 	this->window->add_mouse_move_callback([&](const renderer::WindowEvent &ev) {
@@ -344,7 +349,16 @@ void Presenter::init_input() {
 		auto game_controller = std::make_shared<input::game::Controller>(
 			std::unordered_set<size_t>{0, 1, 2, 3}, 0);
 		auto engine_context = std::make_shared<input::game::BindingContext>();
-		input::game::setup_defaults(engine_context, this->time_loop, this->simulation, this->camera);
+		// XR fork: a click selects the entity drawn under the cursor (object ids of the world pass)
+		input::game::pick_func_t pick = [world = this->world_renderer](float ndc_x, float ndc_y)
+			-> std::optional<gamestate::entity_id_t> {
+			auto id = world->pick(ndc_x, ndc_y);
+			if (not id) {
+				return std::nullopt;
+			}
+			return static_cast<gamestate::entity_id_t>(*id);
+		};
+		input::game::setup_defaults(engine_context, this->time_loop, this->simulation, this->camera, pick);
 		this->input_manager->set_game_controller(game_controller);
 		input_ctx->set_game_bindings(engine_context);
 		// XR fork: selection for HUDs in other threads
@@ -481,6 +495,22 @@ void Presenter::apply_sink_background() {
 	}
 }
 
+void Presenter::update_selection_markers() {
+	auto controller = this->controller_slot->get();
+	if (not controller) {
+		return;
+	}
+	auto selected = controller->get_selected_copy();
+	std::vector<uint32_t> ids(selected.begin(), selected.end());
+	auto controlled = controller->get_controlled();
+
+	std::vector<renderer::hud::SelectionMarker> markers;
+	for (const auto &box : this->world_renderer->get_screen_boxes(ids)) {
+		markers.push_back(renderer::hud::SelectionMarker{box.ndc, box.player == controlled});
+	}
+	this->hud_renderer->set_selection_markers(std::move(markers));
+}
+
 void Presenter::apply_map_view() {
 	if (this->map_view_done or not this->simulation) {
 		return;
@@ -530,6 +560,7 @@ void Presenter::render() {
 	this->camera_manager->update();
 	this->terrain_renderer->update();
 	this->world_renderer->update();
+	this->update_selection_markers();
 	this->hud_renderer->update();
 #if WITH_QT
 	if (this->gui) {

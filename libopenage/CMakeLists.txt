@@ -459,6 +459,11 @@ if(OPENAGE_NATIVE_ENTRY)
 	target_include_directories(openage-prod-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 	add_test(NAME openage-prod-check COMMAND openage-prod-check)
 
+	# host test: mouse selection rules and presenter frame statistics (dependency-free, parameter sweep; XR fork)
+	add_executable(openage-select-check gamestate/selection_check.cpp)
+	target_include_directories(openage-select-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-select-check COMMAND openage-select-check)
+
 	# host test: combat rules and skirmish layout (dependency-free, parameter sweep)
 	add_executable(openage-combat-rules-check
 		gamestate/combat/rules_check.cpp

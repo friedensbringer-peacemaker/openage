@@ -5,7 +5,10 @@
 #include <cstdint>
 #include <list>
 #include <memory>
+#include <optional>
 #include <string>
+
+#include <eigen3/Eigen/Dense>
 
 #include "coord/scene.h"
 #include "curve/continuous.h"
@@ -147,6 +150,26 @@ public:
 	 * Owning player of the game entity (XR fork, player color).
 	 */
 	uint32_t get_player() const;
+
+	/**
+	 * Screen rectangle of the drawn sprite (XR fork, selection markers).
+	 *
+	 * Same placement as the world2d vertex shader, with the first frame of
+	 * each layer; layers below position 10 (shadows) only count if there are
+	 * no others.
+	 *
+	 * @param time Current time.
+	 * @param view_proj Projection * view matrix of the camera.
+	 * @param inv_zoom 1 / zoom of the camera.
+	 * @param inv_viewport 1 / viewport size in pixels.
+	 *
+	 * @return (left, bottom, right, top) in normalized device coordinates,
+	 *         nothing without animation.
+	 */
+	std::optional<Eigen::Vector4f> get_screen_bounds(const time::time_t &time,
+	                                                 const Eigen::Matrix4f &view_proj,
+	                                                 float inv_zoom,
+	                                                 const Eigen::Vector2f &inv_viewport);
 
 	/**
 	 * Check whether the object is visible in the camera view.

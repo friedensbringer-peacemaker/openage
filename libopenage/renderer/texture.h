@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "resources/texture_data.h"
 
 
@@ -24,6 +26,11 @@ public:
 	/// Uploads the provided data into the GPU texture storage. The format has
 	/// to match the format this Texture was originally created with.
 	virtual void upload(resources::Texture2dData const &) = 0;
+
+	/// Read one texel of an unsigned integer texture (e.g. r32ui object ids,
+	/// XR fork). Coordinates as in OpenGL: origin at the bottom left.
+	/// The default copies the whole texture; renderers read only the texel.
+	virtual uint32_t read_texel_uint(size_t x, size_t y);
 
 protected:
 	/// Constructs the base with the given information.

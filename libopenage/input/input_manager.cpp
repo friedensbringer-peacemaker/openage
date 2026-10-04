@@ -254,6 +254,8 @@ void setup_defaults(const std::shared_ptr<InputContext> &ctx) {
 
 	// also forward all other mouse button events
 	ctx->bind(event_class::MOUSE_BUTTON, {game_action, hud_action});
+	// XR fork: double clicks (left: select all own entities of the type on screen)
+	ctx->bind(event_class::MOUSE_BUTTON_DBL, game_action);
 
 	// production (XR fork): train (T), place a building (Y, again = next building),
 	// cancel the placement (Esc), cancel the last queued unit (Backspace); see cfg/keybinds.oac

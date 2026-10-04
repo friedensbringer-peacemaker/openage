@@ -2,9 +2,13 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <vector>
+
+#include <eigen3/Eigen/Dense>
 
 #include "util/path.h"
 
@@ -33,6 +37,18 @@ class AssetManager;
 namespace world {
 class RenderEntity;
 class WorldObject;
+
+/**
+ * Screen rectangle of a drawn game entity (XR fork, selection markers).
+ */
+struct ScreenBox {
+	/// game entity
+	uint32_t id;
+	/// owning player
+	uint32_t player;
+	/// (left, bottom, right, top) in normalized device coordinates
+	Eigen::Vector4f ndc;
+};
 
 /**
  * Renderer for drawing and displaying entities in the game world (units, buildings, etc.)
@@ -89,6 +105,27 @@ public:
 	 * @param height New height of the FBO.
 	 */
 	void resize(size_t width, size_t height);
+
+	/**
+	 * Game entity drawn at a point of the last frame (XR fork): reads the
+	 * object id texture of the world pass (one texel). Call in the render
+	 * thread.
+	 *
+	 * @param ndc_x Horizontal position in normalized device coordinates.
+	 * @param ndc_y Vertical position in normalized device coordinates.
+	 *
+	 * @return ID of the topmost game entity at the point, nothing on terrain.
+	 */
+	std::optional<uint32_t> pick(float ndc_x, float ndc_y);
+
+	/**
+	 * Screen rectangles of game entities (XR fork, selection markers).
+	 *
+	 * @param ids Game entities.
+	 *
+	 * @return Rectangles of those entities that are drawn.
+	 */
+	std::vector<ScreenBox> get_screen_boxes(const std::vector<uint32_t> &ids);
 
 private:
 	/**

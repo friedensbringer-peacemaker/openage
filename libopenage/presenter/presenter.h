@@ -216,6 +216,11 @@ protected:
 	void apply_sink_background();
 
 	/**
+	 * Frames around the selected entities in the HUD (XR fork), once per frame.
+	 */
+	void update_selection_markers();
+
+	/**
 	 * Render all configured render passes in sequence.
 	 */
 	void render();

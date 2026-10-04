@@ -11,7 +11,7 @@
  *   openage-native --root <dir> [--modpack hd_base] [--headless]
  *                  [--seconds N] [--width W --height H] [--check]
  *                  [--gles] [--render-check <png>] [--shader-check]
- *                  [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --replay-prod | --stop-in-resize] [--frames N]]
+ *                  [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --replay-prod | --replay-select | --stop-in-resize] [--frames N]]
  *                  [--map test|random [--map-seed N] [--map-size N] [--map-biome B]
  *                   [--map-trees N] [--map-elevation H] [--map-view ne,se[,zoom[,height]]]
  *                   [--map-skirmish]]
@@ -49,6 +49,11 @@
  * and clicks a free spot (foundation); then tries to place a house on water through
  * the production interface (rejected). Logs the HUD snapshot every 5 s, captures
  * <png> after 20 s (training, construction) and <png stem>-prod2.png after 70 s.
+ * --replay-select (XR fork, selection; with --map random) single clicks a villager,
+ * the ground, the town centre and a tree, double clicks a villager, clicks a
+ * villager and right clicks the ground (move), clicks a villager, Shift + clicks
+ * the town centre and right clicks the tree (gathering); captures each state
+ * (<png stem>-click/-ground/-tc/-tree/-double/-shift.png) and <png> at the end.
  * A hanging engine fails the check instead of blocking: no new frame for
  * 60 s stops it, and if it did not stop 10 s after Engine::stop(), the
  * process exits with an error.
@@ -142,6 +147,8 @@ struct native_args {
 	// XR fork (production)
 	bool replay_prod = false;
 	bool replay_combat = false;
+	// XR fork: single click selection
+	bool replay_select = false;
 	bool stop_in_resize = false;
 	uint64_t frames = 1000;
 	int seconds = 0;
@@ -178,7 +185,7 @@ void usage(const char *argv0) {
 	          << " --root <dir> [--modpack <id>]... [--headless] [--seconds <n>]"
 	             " [--width <w> --height <h>] [--check]"
 	             " [--gles] [--render-check <png>] [--shader-check]"
-	             " [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --replay-prod | --stop-in-resize] [--frames <n>]]"
+	             " [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --replay-prod | --replay-select | --stop-in-resize] [--frames <n>]]"
 	             " [--map test|random [--map-seed <n>] [--map-size <n>] [--map-biome <name>] [--map-trees <n>]"
 	             " [--map-elevation <h>] [--map-view <ne,se[,zoom[,height]]>] [--map-skirmish]]"
 	             " [--background <r,g,b,a> [--background-switch <r,g,b,a>]]"
@@ -228,6 +235,9 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		}
 		else if (arg == "--replay-econ") {
 			args.replay_econ = true;
+		}
+		else if (arg == "--replay-select") {
+			args.replay_select = true;
 		}
 		else if (arg == "--replay-combat") {
 			args.replay_combat = true;
@@ -619,6 +629,189 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> econ_replay_steps(co
 #endif
 
 #if WITH_EGL
+/**
+ * Input replay of the selection check (--replay-select, XR fork): on the random
+ * map, single clicks through the regular input path (object ids of the world
+ * pass): a villager (captured as <png stem>-click with its selection frame),
+ * the ground (selection cleared, <png stem>-ground), the own town centre
+ * (<png stem>-tc), a tree (gaia: only displayed, a right click commands
+ * nothing), a double click on a villager (all villagers on screen), a click on
+ * a villager and a right click on the ground (walks), a click on another
+ * villager, Shift + click on the town centre and a right click on the tree
+ * (the villager gathers). Captures <png> 14 s after the first click.
+ */
+std::vector<openage::renderer::opengl::TestFrameSink::Step> select_replay_steps(const native_args &args,
+                                                                                 openage::gamestate::MapSettings &map_settings,
+                                                                                 double start,
+                                                                                 const std::string &capture_file) {
+	using namespace openage;
+	using renderer::opengl::TestFrameSink;
+	using gamestate::map_object_t;
+	using E = renderer::SinkInputEvent;
+	constexpr int shift_modifier = 0x02000000; // Qt::ShiftModifier
+
+	const auto map = gamestate::generate_map(map_settings);
+	const gamestate::Heightmap heights{map.width, map.height, map.corners};
+	if (not map_settings.view) {
+		// first start position, a bit zoomed out: town centre, villagers and trees on screen
+		gamestate::MapView start_view;
+		start_view.ne = map.starts.at(0)[0];
+		start_view.se = map.starts.at(0)[1];
+		start_view.zoom = 1.6f;
+		map_settings.view = start_view;
+	}
+	const gamestate::MapView view = *map_settings.view;
+
+	const int width = static_cast<int>(args.width);
+	const int height = static_cast<int>(args.height);
+	auto camera = std::make_shared<renderer::camera::Camera>(nullptr, util::Vector2s{args.width, args.height});
+	camera->look_at_coord(coord::scene3{10.0, 10.0, 0});
+	camera->move_to(Eigen::Vector3f{0.0f, view.height, 0.0f});
+	camera->look_at_coord(coord::scene3{view.ne, view.se, 0});
+	camera->set_zoom(view.zoom);
+	const Eigen::Matrix4f matrix = camera->get_projection_matrix() * camera->get_view_matrix();
+
+	auto pixel = [&](double ne, double se, double up) {
+		double ground = heights.is_flat() ? 0.0 : heights.at(ne, se);
+		coord::phys3 pos{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{ground + up}};
+		auto w = pos.to_scene3().to_world_space();
+		Eigen::Vector4f clip = matrix * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+		int x = static_cast<int>(std::lround((clip.x() + 1.0) * 0.5 * width));
+		int y = static_cast<int>(std::lround(height - (clip.y() + 1.0) * 0.5 * height));
+		return std::pair{x, y};
+	};
+	auto on_screen = [&](std::pair<int, int> p) {
+		return p.first >= 40 and p.second >= 40 and p.first < width - 40 and p.second < height - 40;
+	};
+
+	std::vector<const gamestate::MapObject *> villagers;
+	const gamestate::MapObject *town_centre = nullptr;
+	for (const auto &o : map.objects) {
+		if (o.kind == map_object_t::VILLAGER and o.owner == 0 and on_screen(pixel(o.ne, o.se, 0.0))) {
+			villagers.push_back(&o);
+		}
+		if (o.kind == map_object_t::TOWN_CENTER and o.owner == 0) {
+			town_centre = &o;
+		}
+	}
+	// nearest visible tree to the screen centre
+	const gamestate::MapObject *tree = nullptr;
+	double best_tree = 1e9;
+	for (const auto &o : map.objects) {
+		if (o.kind != map_object_t::TREE_PINE and o.kind != map_object_t::TREE_JUNGLE
+		    and o.kind != map_object_t::TREE_PALM and o.kind != map_object_t::TREE_SNOW
+		    and o.kind != map_object_t::TREE_BAMBOO) {
+			continue;
+		}
+		auto p = pixel(o.ne, o.se, 0.0);
+		double d = std::hypot(p.first - width / 2.0, p.second - height / 2.0);
+		if (on_screen(p) and d < best_tree) {
+			best_tree = d;
+			tree = &o;
+		}
+	}
+	// free ground: on screen and at least 2.5 tiles away from every object
+	std::optional<std::pair<double, double>> ground;
+	for (int r = 2; r < 12 and not ground; ++r) {
+		for (int dne = -r; dne <= r and not ground; ++dne) {
+			for (int dse = -r; dse <= r and not ground; ++dse) {
+				double ne = view.ne + dne;
+				double se = view.se + dse;
+				if (not on_screen(pixel(ne, se, 0.0))) {
+					continue;
+				}
+				bool free = true;
+				for (const auto &o : map.objects) {
+					if (std::hypot(o.ne - ne, o.se - se) < (o.kind == map_object_t::TOWN_CENTER ? 4.0 : 2.5)) {
+						free = false;
+						break;
+					}
+				}
+				if (free) {
+					ground = std::pair{ne, se};
+				}
+			}
+		}
+	}
+	if (villagers.size() < 3 or town_centre == nullptr or tree == nullptr or not ground) {
+		log::log(WARN << "select replay: map without 3 visible villagers, town centre, tree and free ground ("
+		              << villagers.size() << " villagers, town centre " << (town_centre != nullptr) << ", tree "
+		              << (tree != nullptr) << ", ground " << ground.has_value() << ")");
+		return {};
+	}
+
+	std::vector<TestFrameSink::Step> steps;
+	auto add = [&](double at, int type, int x, int y, int button, int buttons, int modifiers = 0) {
+		TestFrameSink::Step step;
+		step.at = start + at;
+		step.what = TestFrameSink::Step::kind::input;
+		step.event.type = type;
+		step.event.x = x;
+		step.event.y = y;
+		step.event.button = button;
+		step.event.buttons = buttons;
+		step.event.modifiers = modifiers;
+		steps.push_back(step);
+	};
+	auto click = [&](double at, std::pair<int, int> p, int button, int modifiers = 0) {
+		add(at, E::kMouseMove, p.first, p.second, 0, 0, modifiers);
+		add(at + 0.05, E::kMouseDown, p.first, p.second, button, button, modifiers);
+		// 2 px of jitter between press and release: still a click (< 6 px)
+		add(at + 0.15, E::kMouseUp, p.first + 2, p.second - 1, button, 0, modifiers);
+	};
+	auto capture = [&](double at, const std::string &suffix) {
+		const std::filesystem::path png{capture_file};
+		TestFrameSink::Step shot;
+		shot.at = start + at;
+		shot.what = TestFrameSink::Step::kind::capture;
+		shot.file = suffix.empty() ? capture_file
+		                           : (png.parent_path() / (png.stem().string() + "-" + suffix + png.extension().string())).string();
+		steps.push_back(shot);
+	};
+
+	// on the sprite: a bit above the anchor (villagers ~1 tile high, the town centre's building)
+	auto v0 = pixel(villagers[0]->ne, villagers[0]->se, 0.35);
+	auto v1 = pixel(villagers[1]->ne, villagers[1]->se, 0.35);
+	auto v2 = pixel(villagers[2]->ne, villagers[2]->se, 0.35);
+	auto tc = pixel(town_centre->ne, town_centre->se, 1.2);
+	auto tr = pixel(tree->ne, tree->se, 0.8);
+	auto gr = pixel(ground->first, ground->second, 0.0);
+	log::log(INFO << "select replay: villagers at pixel (" << v0.first << ", " << v0.second << "), (" << v1.first
+	              << ", " << v1.second << "), (" << v2.first << ", " << v2.second << "), town centre ("
+	              << tc.first << ", " << tc.second << "), tree (" << tr.first << ", " << tr.second
+	              << "), ground tile (" << ground->first << ", " << ground->second << ") pixel (" << gr.first
+	              << ", " << gr.second << ")");
+
+	click(0.0, v0, E::kLeftButton); // 1 villager
+	capture(1.0, "click");
+	click(1.5, gr, E::kLeftButton); // nothing
+	capture(2.5, "ground");
+	click(3.0, tc, E::kLeftButton); // town centre
+	capture(4.0, "tc");
+	click(4.5, tr, E::kLeftButton);  // tree: displayed only
+	click(5.0, gr, E::kRightButton); // commands nothing
+	capture(5.6, "tree");
+	// double click on the right villager (the middle one stands behind the town centre's
+	// roof): press, release, press + double click, release
+	add(6.0, E::kMouseMove, v2.first, v2.second, 0, 0);
+	add(6.05, E::kMouseDown, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
+	add(6.1, E::kMouseUp, v2.first, v2.second, E::kLeftButton, 0);
+	add(6.2, E::kMouseDown, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
+	add(6.2, E::kMouseDoubleClick, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
+	add(6.3, E::kMouseUp, v2.first, v2.second, E::kLeftButton, 0);
+	capture(6.8, "double");
+	click(7.0, v0, E::kLeftButton);                 // 1 villager
+	click(7.4, gr, E::kRightButton);                // walks to the ground spot
+	click(8.2, v2, E::kLeftButton);                 // 1 villager
+	click(8.6, tc, E::kLeftButton, shift_modifier); // + the town centre
+	click(9.2, tr, E::kRightButton);                // the villager gathers wood at the tree
+	capture(9.8, "shift");
+	capture(14.0, "");
+	return steps;
+}
+#endif
+
+#if WITH_EGL
 /// a water tile of the generated map for the placement check (XR fork, production)
 struct ProdReplayTargets {
 	std::optional<std::array<double, 2>> water;
@@ -867,6 +1060,12 @@ bool egl_sink_check(const native_args &args,
 	}
 	else if (args.replay_econ and not args.stop_in_resize) {
 		steps = econ_replay_steps(args, map_settings, start, png.string());
+	}
+	else if (args.replay_select and not args.stop_in_resize) {
+		steps = select_replay_steps(args, map_settings, start, png.string());
+		if (steps.empty()) {
+			return false;
+		}
 	}
 	else if (args.replay_combat and not args.stop_in_resize) {
 		steps = TestFrameSink::combat_replay_steps(start, width, height, png.string());
@@ -1140,7 +1339,8 @@ int main(int argc, char **argv) {
 	log::set_level(log::level::info);
 
 	// ai (XR fork): the input replays check the human side; keep the computer opponent out
-	if ((args.replay or args.replay_econ or args.replay_combat or args.replay_prod) and not args.ai_explicit) {
+	if ((args.replay or args.replay_econ or args.replay_combat or args.replay_prod or args.replay_select)
+	    and not args.ai_explicit) {
 		args.map.ai.mode = gamestate::ai_mode_t::OFF;
 	}
 

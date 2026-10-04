@@ -2,6 +2,7 @@
 
 #include "send_command.h"
 
+#include <functional>
 #include <vector>
 
 #include "coord/phys.h"
@@ -69,6 +70,31 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 	auto target = gstate->get_map()->pick_terrain(params.get("target", coord::phys3{0, 0, 0}));
 	std::vector<gamestate::entity_id_t> ids = params.get("entity_ids",
 	                                                     std::vector<gamestate::entity_id_t>{});
+	// XR fork: input commands use the selection at this point; a selection click
+	// sent just before (same frame) has been handled by now
+	using selection_cb_t = std::function<std::vector<gamestate::entity_id_t>()>;
+	if (auto selection_cb = params.get("selection_cb", selection_cb_t{})) {
+		ids = selection_cb();
+	}
+	// XR fork: a player's input only commands own entities; a selected enemy or
+	// gaia object (tree, gold) is only displayed. Gone entities are dropped.
+	if (params.contains("controlled")) {
+		auto controlled = params.get<size_t>("controlled", 0);
+		const auto &entities = gstate->get_game_entities();
+		auto foreign = std::erase_if(ids, [&](gamestate::entity_id_t id) {
+			auto it = entities.find(id);
+			if (it == entities.end()) {
+				return true;
+			}
+			auto owner = std::dynamic_pointer_cast<component::Ownership>(
+				it->second->get_component(component::component_t::OWNERSHIP));
+			return owner == nullptr or owner->get_owners().get(time) != controlled;
+		});
+		if (foreign > 0) {
+			log::log(INFO << "Command: " << foreign << " selected entities are not player " << controlled
+			              << "'s, ignored");
+		}
+	}
 	// XR fork: INFO, embedders diagnose taps on headsets from the log
 	log::log(INFO << "Command " << static_cast<int>(command_type) << " for " << ids.size()
 	              << " entities, target tile (" << target.ne.to_float() << ", " << target.se.to_float() << ")");
