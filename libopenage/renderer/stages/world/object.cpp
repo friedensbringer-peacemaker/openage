@@ -239,6 +239,10 @@ bool WorldObject::is_removed() const {
 	return this->render_entity != nullptr and this->render_entity->is_removed();
 }
 
+const std::shared_ptr<bool> &WorldObject::get_visible_flag() const {
+	return this->visible;
+}
+
 uint32_t WorldObject::get_player() const {
 	return this->render_entity != nullptr ? this->render_entity->get_player() : 0;
 }

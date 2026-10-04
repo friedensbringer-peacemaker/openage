@@ -152,6 +152,12 @@ public:
 	uint32_t get_player() const;
 
 	/**
+	 * Visibility flag shared with the renderables of this object (XR fork):
+	 * false while the object is outside the screen.
+	 */
+	const std::shared_ptr<bool> &get_visible_flag() const;
+
+	/**
 	 * Screen rectangle of the drawn sprite (XR fork, selection markers).
 	 *
 	 * Same placement as the world2d vertex shader, with the first frame of
@@ -248,6 +254,11 @@ private:
 	 * Time of the last update call.
 	 */
 	time::time_t last_update;
+
+	/**
+	 * Drawn this frame (XR fork, see get_visible_flag()).
+	 */
+	std::shared_ptr<bool> visible = std::make_shared<bool>(true);
 };
 } // namespace world
 } // namespace openage::renderer

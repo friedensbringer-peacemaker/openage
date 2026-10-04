@@ -61,6 +61,13 @@ public:
 	static bool ENABLE_FRUSTUM_CULLING;
 
 	/**
+	 * Skip objects outside the screen (XR fork, default = true): screen
+	 * rectangle of the sprite as in the vertex shader, see
+	 * WorldObject::get_screen_bounds().
+	 */
+	static bool ENABLE_SCREEN_CULLING;
+
+	/**
 	 * Create a new render stage for the game world.
 	 *
 	 * @param window openage window targeted for rendering.
@@ -127,6 +134,16 @@ public:
 	 */
 	std::vector<ScreenBox> get_screen_boxes(const std::vector<uint32_t> &ids);
 
+	/**
+	 * Objects drawn in the last update() (XR fork, statistics).
+	 */
+	size_t get_drawn_objects() const;
+
+	/**
+	 * Objects of the stage (XR fork, statistics).
+	 */
+	size_t get_object_count() const;
+
 private:
 	/**
 	 * Create the render pass for world drawing.
@@ -172,6 +189,11 @@ private:
 	 * Render entities requested by the game world.
 	 */
 	std::vector<std::shared_ptr<WorldObject>> render_objects;
+
+	/**
+	 * Objects drawn in the last update() (XR fork).
+	 */
+	size_t drawn_objects = 0;
 
 	/**
 	 * Shader for rendering the world objects.

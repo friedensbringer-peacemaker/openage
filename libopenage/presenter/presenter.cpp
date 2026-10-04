@@ -128,7 +128,9 @@ void Presenter::run(const renderer::window_settings window_settings) {
 		if (stats.due(seconds(stats_start, t_end))) {
 			auto size = this->window->get_size();
 			log::log(INFO << "Presenter: " << stats.report(seconds(stats_start, t_end)) << ", window "
-			              << size[0] << "x" << size[1]);
+			              << size[0] << "x" << size[1] << ", objects drawn "
+			              << this->world_renderer->get_drawn_objects() << "/"
+			              << this->world_renderer->get_object_count());
 			stats.reset();
 			stats_start = t_end;
 		}

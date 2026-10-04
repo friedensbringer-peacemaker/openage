@@ -222,6 +222,10 @@ void GlRenderer::render(const std::shared_ptr<RenderPass> &pass) {
 		}
 
 		for (auto const &obj : objects) {
+			if (obj.visible and not *obj.visible) {
+				// XR fork: culled (e.g. outside the screen)
+				continue;
+			}
 			if (obj.alpha_blending) {
 				glEnable(GL_BLEND);
 			}

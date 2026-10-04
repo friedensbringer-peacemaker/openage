@@ -22,6 +22,7 @@
 namespace openage::renderer::world {
 
 bool WorldRenderStage::ENABLE_FRUSTUM_CULLING = false;
+bool WorldRenderStage::ENABLE_SCREEN_CULLING = true;
 
 WorldRenderStage::WorldRenderStage(const std::shared_ptr<Window> &window,
                                    const std::shared_ptr<renderer::Renderer> &renderer,
@@ -77,6 +78,16 @@ void WorldRenderStage::update() {
 		return true;
 	});
 
+	// XR fork: objects outside the screen are not drawn (one draw call per sprite
+	// layer; the whole map has ~600 objects with ~2 layers, a screen shows a few).
+	// Screen rectangle as in the vertex shader, 10 % margin.
+	Eigen::Matrix4f view_proj = this->camera->get_projection_matrix() * this->camera->get_view_matrix();
+	float inv_zoom = 1.0f / this->camera->get_zoom();
+	const auto &viewport = this->camera->get_viewport_size();
+	Eigen::Vector2f inv_viewport{1.0f / static_cast<float>(std::max<size_t>(viewport[0], 1)),
+	                             1.0f / static_cast<float>(std::max<size_t>(viewport[1], 1))};
+	size_t drawn = 0;
+
 	for (auto &obj : this->render_objects) {
 		obj->fetch_updates(current_time);
 
@@ -84,6 +95,17 @@ void WorldRenderStage::update() {
 		    and not obj->is_visible(camera_frustum, current_time)) {
 			continue;
 		}
+		if (WorldRenderStage::ENABLE_SCREEN_CULLING) {
+			auto bounds = obj->get_screen_bounds(current_time, view_proj, inv_zoom, inv_viewport);
+			bool on_screen = not bounds
+			                 or (bounds->x() < 1.1f and bounds->z() > -1.1f and bounds->y() < 1.1f and bounds->w() > -1.1f);
+			*obj->get_visible_flag() = on_screen;
+			if (not on_screen and not obj->requires_renderable()) {
+				// renderables exist and are skipped; their uniforms are updated when visible again
+				continue;
+			}
+		}
+		drawn += 1;
 
 		if (obj->is_changed()) {
 			if (obj->requires_renderable()) {
@@ -112,6 +134,8 @@ void WorldRenderStage::update() {
 						this->default_geometry,
 						true,
 						true,
+						// XR fork: skipped while outside the screen
+						obj->get_visible_flag(),
 					};
 					this->render_pass->add_renderables(std::move(display_obj), layer_pos);
 					transform_unifs.push_back(layer_unifs);
@@ -125,6 +149,15 @@ void WorldRenderStage::update() {
 		}
 		obj->update_uniforms(current_time);
 	}
+	this->drawn_objects = drawn;
+}
+
+size_t WorldRenderStage::get_drawn_objects() const {
+	return this->drawn_objects;
+}
+
+size_t WorldRenderStage::get_object_count() const {
+	return this->render_objects.size();
 }
 
 std::optional<uint32_t> WorldRenderStage::pick(float ndc_x, float ndc_y) {

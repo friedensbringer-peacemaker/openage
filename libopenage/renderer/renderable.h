@@ -42,6 +42,9 @@ struct Renderable {
 	bool alpha_blending = true;
 	/// Whether to perform depth testing and discard occluded fragments.
 	bool depth_test = true;
+	/// XR fork: the renderable is skipped while this is false (nullptr = always
+	/// drawn), e.g. world objects outside the screen (fewer draw calls)
+	std::shared_ptr<bool> visible = nullptr;
 };
 
 /**
