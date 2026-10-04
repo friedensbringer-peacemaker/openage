@@ -58,6 +58,9 @@ struct MatchStatus {
 	time::time_t decided_at = time::TIME_ZERO;
 	/// units + buildings left per participant
 	std::map<player_id_t, size_t> alive{};
+	/// units (without buildings) left per participant, e.g. the population of a HUD;
+	/// updated with the periodic scan (once per simulated second) and on deaths
+	std::map<player_id_t, size_t> units{};
 };
 
 /**
@@ -150,6 +153,9 @@ public:
 	bool was_removed(entity_id_t id) const;
 	/// health of the given entities (unknown ids: alive = false)
 	std::vector<HealthInfo> get_health(const std::vector<entity_id_t> &ids) const;
+	/// combat values (name, unit/building, ...) of a registered entity, nullptr if
+	/// unknown or removed; the stats are immutable and may be kept by the caller
+	std::shared_ptr<const CombatStats> get_stats_snapshot(entity_id_t id) const;
 	/// current match status
 	MatchStatus get_match_status() const;
 	/// state of the match for \p player (VICTORY/DEFEAT/DRAW once decided)
@@ -222,6 +228,7 @@ private:
 	mutable std::mutex shared_mutex;
 	std::unordered_set<entity_id_t> removed;
 	std::unordered_map<entity_id_t, HealthInfo> health_snapshot;
+	std::unordered_map<entity_id_t, std::shared_ptr<const CombatStats>> stats_snapshot;
 	MatchStatus match_status{};
 	std::vector<std::function<void(const MatchStatus &)>> match_callbacks;
 };
