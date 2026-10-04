@@ -230,6 +230,18 @@ void WorldObject::set_uniforms(std::vector<std::shared_ptr<renderer::UniformInpu
 	this->layer_uniforms = std::move(uniforms);
 }
 
+const std::vector<std::shared_ptr<renderer::UniformInput>> &WorldObject::get_uniforms() const {
+	return this->layer_uniforms;
+}
+
+bool WorldObject::is_removed() const {
+	return this->render_entity != nullptr and this->render_entity->is_removed();
+}
+
+uint32_t WorldObject::get_player() const {
+	return this->render_entity != nullptr ? this->render_entity->get_player() : 0;
+}
+
 bool WorldObject::is_visible(const camera::Frustum2d &frustum,
                              const time::time_t &time) {
 	static const Eigen::Matrix4f model_matrix = this->get_model_matrix();

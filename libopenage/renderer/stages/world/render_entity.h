@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 
@@ -96,6 +97,29 @@ public:
 	 */
 	const curve::Discrete<std::string> &get_animation_path();
 
+	/**
+	 * Mark the entity as removed from the game (XR fork). The world render
+	 * stage drops its object on the next update.
+	 */
+	void mark_removed();
+
+	/**
+	 * Whether the entity was removed from the game (XR fork).
+	 */
+	bool is_removed() const;
+
+	/**
+	 * Set the owning player (XR fork, player color of the sprite).
+	 *
+	 * @param player Player ID (0 = first player).
+	 */
+	void set_player(uint32_t player);
+
+	/**
+	 * Get the owning player (XR fork).
+	 */
+	uint32_t get_player() const;
+
 private:
 	/**
 	 * ID of the game entity in the gamestate.
@@ -116,5 +140,15 @@ private:
 	 * Path to the animation definition file.
 	 */
 	curve::Discrete<std::string> animation_path;
+
+	/**
+	 * Removed from the game (XR fork).
+	 */
+	std::atomic<bool> removed{false};
+
+	/**
+	 * Owning player (XR fork).
+	 */
+	std::atomic<uint32_t> player{0};
 };
 } // namespace openage::renderer::world

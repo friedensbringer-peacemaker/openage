@@ -2,6 +2,8 @@
 
 #include "render_stage.h"
 
+#include <algorithm>
+
 #include "renderer/camera/camera.h"
 #include "renderer/camera/frustum_3d.h"
 #include "renderer/opengl/context.h"
@@ -62,6 +64,19 @@ void WorldRenderStage::update() {
 	std::unique_lock lock{this->mutex};
 	auto current_time = this->clock->get_real_time();
 	auto &camera_frustum = this->camera->get_frustum_2d();
+
+	// XR fork: drop objects of entities that left the game (died) with their renderables
+	std::erase_if(this->render_objects, [this](const std::shared_ptr<WorldObject> &obj) {
+		if (not obj->is_removed()) {
+			return false;
+		}
+		const auto &uniforms = obj->get_uniforms();
+		this->render_pass->remove_renderables([&uniforms](const Renderable &renderable) {
+			return std::find(uniforms.begin(), uniforms.end(), renderable.uniform) != uniforms.end();
+		});
+		return true;
+	});
+
 	for (auto &obj : this->render_objects) {
 		obj->fetch_updates(current_time);
 
@@ -86,7 +101,10 @@ void WorldRenderStage::update() {
 						"flip_y",
 						false,
 						"u_id",
-						obj->get_id());
+						obj->get_id(),
+						// XR fork: player color of the marked sprite pixels
+						"u_player",
+						obj->get_player());
 
 					Renderable display_obj{
 						layer_unifs,
