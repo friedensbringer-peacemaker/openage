@@ -15,24 +15,15 @@ uniform vec4 tile_params;
 
 // player colors of the classic games: blue, red, green, yellow, cyan, purple, gray, orange
 vec4 player_color(uint player) {
-	switch (player % 8u) {
-		case 0u:
-			return vec4(0.0f, 0.3f, 1.0f, 1.0f);
-		case 1u:
-			return vec4(1.0f, 0.0f, 0.0f, 1.0f);
-		case 2u:
-			return vec4(0.0f, 1.0f, 0.0f, 1.0f);
-		case 3u:
-			return vec4(1.0f, 1.0f, 0.0f, 1.0f);
-		case 4u:
-			return vec4(0.0f, 1.0f, 1.0f, 1.0f);
-		case 5u:
-			return vec4(1.0f, 0.0f, 1.0f, 1.0f);
-		case 6u:
-			return vec4(0.6f, 0.6f, 0.6f, 1.0f);
-		default:
-			return vec4(1.0f, 0.5f, 0.0f, 1.0f);
-	}
+	uint p = player % 8u;
+	if (p == 0u) return vec4(0.0f, 0.3f, 1.0f, 1.0f);
+	if (p == 1u) return vec4(1.0f, 0.0f, 0.0f, 1.0f);
+	if (p == 2u) return vec4(0.0f, 1.0f, 0.0f, 1.0f);
+	if (p == 3u) return vec4(1.0f, 1.0f, 0.0f, 1.0f);
+	if (p == 4u) return vec4(0.0f, 1.0f, 1.0f, 1.0f);
+	if (p == 5u) return vec4(1.0f, 0.0f, 1.0f, 1.0f);
+	if (p == 6u) return vec4(0.6f, 0.6f, 0.6f, 1.0f);
+	return vec4(1.0f, 0.5f, 0.0f, 1.0f);
 }
 
 void main() {
@@ -44,25 +35,23 @@ void main() {
 
 	vec4 tex_val = texture(tex, uv);
 	int alpha = int(round(tex_val.a * 255.0));
-	switch (alpha) {
-		case 0:
-			col = tex_val;
-			discard;
-
-			// do not save the ID
-			return;
-		case 254:
-			col = player_color(u_player);
-			break;
-		case 252:
-			col = vec4(0.0f, 1.0f, 0.0f, 1.0f);
-			break;
-		case 250:
-			col = vec4(0.0f, 0.0f, 1.0f, 1.0f);
-			break;
-		default:
-			col = tex_val;
-			break;
+	// if/else instead of switch: some GL drivers (Apple, upstream PR #1817)
+	// crash compiling switch statements in this shader
+	if (alpha == 0) {
+		col = tex_val;
+		discard;
+	}
+	else if (alpha == 254) {
+		col = player_color(u_player);
+	}
+	else if (alpha == 252) {
+		col = vec4(0.0f, 1.0f, 0.0f, 1.0f);
+	}
+	else if (alpha == 250) {
+		col = vec4(0.0f, 0.0f, 1.0f, 1.0f);
+	}
+	else {
+		col = tex_val;
 	}
 	id = u_id;
 }
