@@ -432,6 +432,12 @@ void TestFrameSink::consumer_loop() {
 	clock::time_point first_frame{};
 	bool have_frame = false;
 	uint64_t last_sequence = 0;
+	// XR fork: a capture after input shows a frame rendered after the input
+	// (the presenter polls it after publishing, the simulation handles the
+	// resulting events, then the next frames show the effect). Without this, a
+	// slow consumer iteration (PNG written to a slow disk) took inputs and the
+	// following capture from one and the same frame.
+	uint64_t capture_from_sequence = 0;
 
 	while (not this->stop) {
 		this->run_resize_stop();
@@ -492,6 +498,7 @@ void TestFrameSink::consumer_loop() {
 				if (step.what == Step::kind::input) {
 					std::lock_guard<std::mutex> lock{this->mutex};
 					this->input.push_back(step.event);
+					capture_from_sequence = last_sequence + 3;
 				}
 				else if (step.what == Step::kind::resize) {
 					log::log(MSG(info) << "Test sink: request " << step.width << "x" << step.height
@@ -521,6 +528,10 @@ void TestFrameSink::consumer_loop() {
 					unpack_size(this->size.load(), want_width, want_height);
 					if (width != want_width or height != want_height) {
 						// wait for a frame in the requested size
+						break;
+					}
+					if (last_sequence < capture_from_sequence) {
+						// wait for a frame that shows the effect of the inputs before
 						break;
 					}
 					if (not this->capture(slot, step.file)) {
