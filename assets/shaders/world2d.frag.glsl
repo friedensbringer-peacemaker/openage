@@ -42,13 +42,22 @@ void main() {
 		discard;
 	}
 	else if (alpha == 254) {
-		col = player_color(u_player);
+		// XR fork: the converter stores the shade (0 dark .. 7 light) of the
+		// player color pixel in green; a flat color made e.g. the roof trims of
+		// the town centre look like a painted edge
+		float shade = clamp(round(tex_val.g * 255.0) / 7.0, 0.0, 1.0);
+		vec3 base = player_color(u_player).rgb;
+		vec3 shaded = shade < 0.57 ? base * (0.35 + 1.14 * shade)
+		                           : mix(base, vec3(1.0), (shade - 0.57) * 1.6);
+		col = vec4(shaded, 1.0);
 	}
-	else if (alpha == 252) {
-		col = vec4(0.0f, 1.0f, 0.0f, 1.0f);
-	}
-	else if (alpha == 250) {
-		col = vec4(0.0f, 0.0f, 1.0f, 1.0f);
+	else if (alpha == 252 || alpha == 250) {
+		// XR fork: outline pixels of the converter (252 outline, 250 special
+		// outline) were debug colors (green, blue) around every sprite. The
+		// classic games only show outlines of units hidden behind buildings,
+		// which needs an occlusion pass; until then they are not drawn.
+		col = tex_val;
+		discard;
 	}
 	else {
 		col = tex_val;
