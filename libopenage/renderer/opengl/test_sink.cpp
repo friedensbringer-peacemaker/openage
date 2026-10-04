@@ -498,7 +498,10 @@ void TestFrameSink::consumer_loop() {
 				if (step.what == Step::kind::input) {
 					std::lock_guard<std::mutex> lock{this->mutex};
 					this->input.push_back(step.event);
-					capture_from_sequence = last_sequence + 3;
+					// count from the newest published frame: while this iteration
+					// wrote a PNG, the presenter may have published several frames
+					// (pacing timeout) that were rendered before this input
+					capture_from_sequence = this->published + 3;
 				}
 				else if (step.what == Step::kind::resize) {
 					log::log(MSG(info) << "Test sink: request " << step.width << "x" << step.height

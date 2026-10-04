@@ -799,13 +799,13 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> select_replay_steps(
 	add(6.2, E::kMouseDown, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
 	add(6.2, E::kMouseDoubleClick, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
 	add(6.3, E::kMouseUp, v2.first, v2.second, E::kLeftButton, 0);
-	capture(6.8, "double");
-	click(7.0, v0, E::kLeftButton);                 // 1 villager
-	click(7.4, gr, E::kRightButton);                // walks to the ground spot
-	click(8.2, v2, E::kLeftButton);                 // 1 villager
-	click(8.6, tc, E::kLeftButton, shift_modifier); // + the town centre
-	click(9.2, tr, E::kRightButton);                // the villager gathers wood at the tree
-	capture(9.8, "shift");
+	capture(7.0, "double");
+	click(7.8, v0, E::kLeftButton);                 // 1 villager
+	click(8.2, gr, E::kRightButton);                // walks to the ground spot
+	click(9.0, v2, E::kLeftButton);                 // 1 villager
+	click(9.4, tc, E::kLeftButton, shift_modifier); // + the town centre
+	click(10.0, tr, E::kRightButton);               // the villager gathers wood at the tree
+	capture(10.6, "shift");
 	capture(14.0, "");
 	return steps;
 }
