@@ -224,6 +224,11 @@ const Pathfinder::portal_star_t Pathfinder::portal_a_star(const PathRequest &req
 	auto start_sector_y = request.start.se / sector_size;
 	auto start_sector = grid->get_sector(start_sector_x, start_sector_y);
 
+	// XR fork: sector of the target cell (see the goal check below)
+	auto target_sector_id = grid->get_sector(request.target.ne / sector_size,
+	                                         request.target.se / sector_size)
+	                            ->get_id();
+
 	// path node storage, always provides cheapest next node.
 	heap_t node_candidates;
 
@@ -268,8 +273,14 @@ const Pathfinder::portal_star_t Pathfinder::portal_a_star(const PathRequest &req
 
 		// check if the current node is a portal in the target sector that can
 		// be reached from the target cell
+		// XR fork: the portal must lead INTO the target sector. A node entered from
+		// the target sector itself (the target sector is split, e.g. by water or
+		// buildings, and the path passes through its other part) leads out of it;
+		// its backtrace does not fit the flow fields built from the target sector
+		// ("Invalid entry sector" in get_path()), so keep searching instead.
 		auto exit_portal_id = current_node->portal->get_id();
-		if (target_portal_ids.contains(exit_portal_id)) {
+		if (target_portal_ids.contains(exit_portal_id)
+		    and current_node->entry_sector != target_sector_id) {
 			auto backtrace = current_node->generate_backtrace();
 			for (auto &node : backtrace) {
 				result.push_back(node->portal);
@@ -289,7 +300,10 @@ const Pathfinder::portal_star_t Pathfinder::portal_a_star(const PathRequest &req
 
 		// evaluate all neighbors of the current candidate for further progress
 		for (auto &[exit, distance_cost] : exits) {
-			exit->entry_sector = current_node->portal->get_exit_sector(current_node->entry_sector.value());
+			// XR fork: set the entry sector only when this node becomes the predecessor
+			// (below); overwriting it for a visited node that keeps its old predecessor
+			// broke the backtrace ("Invalid entry sector" in get_path()).
+			auto entry_sector = current_node->portal->get_exit_sector(current_node->entry_sector.value());
 			bool not_visited = !visited_portals.contains(exit->portal->get_id());
 
 			if (not_visited) {
@@ -303,6 +317,7 @@ const Pathfinder::portal_star_t Pathfinder::portal_a_star(const PathRequest &req
 			auto tentative_cost = current_node->current_cost + distance_cost;
 
 			if (not_visited or tentative_cost < exit->current_cost) {
+				exit->entry_sector = entry_sector;
 				if (not_visited) {
 					// Get heuristic cost (from exit node to target cell)
 					auto exit_sector = grid->get_sector(exit->portal->get_exit_sector(exit->entry_sector.value()));
