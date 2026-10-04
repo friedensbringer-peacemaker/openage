@@ -276,6 +276,10 @@ const Frustum3d Camera::get_frustum_3d() const {
 }
 
 void Camera::init_uniform_buffer(const std::shared_ptr<Renderer> &renderer) {
+	// XR fork: cameras without renderer only do coordinate math (test replays)
+	if (renderer == nullptr) {
+		return;
+	}
 	resources::UBOInput view_input{"view", resources::ubo_input_t::M4F32};
 	resources::UBOInput proj_input{"proj", resources::ubo_input_t::M4F32};
 	resources::UBOInput inv_zoom_input{"inv_zoom", resources::ubo_input_t::F32};

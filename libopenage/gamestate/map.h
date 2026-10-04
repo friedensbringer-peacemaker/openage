@@ -12,6 +12,7 @@
 #include "coord/tile.h"
 #include "gamestate/heightmap.h"
 #include "pathfinding/types.h"
+#include "time/time.h"
 #include "util/vector.h"
 
 
@@ -121,6 +122,25 @@ public:
 	 * @return Waypoints on the terrain surface.
 	 */
 	std::vector<coord::phys3> follow_terrain(const std::vector<coord::phys3> &waypoints) const;
+
+	/**
+	 * Check if a tile can be crossed on a path grid (XR fork, economy).
+	 *
+	 * @param grid_id Path grid.
+	 * @param tile Tile coordinates.
+	 *
+	 * @return true if the tile is on the map and not impassable.
+	 */
+	bool is_passable(path::grid_id_t grid_id, const coord::tile &tile) const;
+
+	/**
+	 * Restore the terrain path costs of a tile that was blocked by an object
+	 * (XR fork, economy: a tree or mine that was gathered completely).
+	 *
+	 * @param tile Tile coordinates.
+	 * @param time Time of the change.
+	 */
+	void unblock_tile(const coord::tile &tile, const time::time_t &time);
 
 private:
 	/**

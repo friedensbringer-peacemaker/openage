@@ -28,6 +28,14 @@ const std::shared_ptr<nyan::View> &Player::get_db_view() const {
 	return this->db_view;
 }
 
+ResourceStock &Player::get_resources() {
+	return this->resources;
+}
+
+const ResourceStock &Player::get_resources() const {
+	return this->resources;
+}
+
 void Player::set_id(entity_id_t id) {
 	this->id = id;
 }

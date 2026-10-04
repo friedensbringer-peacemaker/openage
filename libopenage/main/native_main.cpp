@@ -11,7 +11,7 @@
  *   openage-native --root <dir> [--modpack hd_base] [--headless]
  *                  [--seconds N] [--width W --height H] [--check]
  *                  [--gles] [--render-check <png>] [--shader-check]
- *                  [--egl-sink-check <png> [--replay | --stop-in-resize] [--frames N]]
+ *                  [--egl-sink-check <png> [--replay | --replay-econ | --stop-in-resize] [--frames N]]
  *                  [--map test|random [--map-seed N] [--map-size N]
  *                   [--map-trees N] [--map-elevation H] [--map-view ne,se[,zoom[,height]]]]
  *                  [--background r,g,b,a [--background-switch r,g,b,a]]
@@ -34,6 +34,9 @@
  * captures <png>, requests 1920x1080 and lets the consumer thread call
  * Engine::stop() while the presenter is inside acquire_target() for the new
  * size; the engine has to stop within 2 s (no second capture).
+ * --replay-econ (XR fork, economy; with --map random) selects each villager of the
+ * first player and right clicks a tree, berries and gold next to it (gathering),
+ * captures <png> after 45 s and <png stem>-econ2.png after 90 s.
  * A hanging engine fails the check instead of blocking: no new frame for
  * 60 s stops it, and if it did not stop 10 s after Engine::stop(), the
  * process exits with an error.
@@ -77,6 +80,10 @@
 #include "engine/check_root.h"
 #include "engine/engine.h"
 #include "error/error.h"
+#include "coord/phys.h"
+#include "coord/scene.h"
+#include "gamestate/heightmap.h"
+#include "gamestate/map_generator.h"
 #include "gamestate/map_settings.h"
 #include "log/log.h"
 #if WITH_QT
@@ -85,6 +92,7 @@
 #if WITH_EGL
 	#include "renderer/opengl/test_sink.h"
 #endif
+#include "renderer/camera/camera.h"
 #include "renderer/renderer.h"
 #include "renderer/resources/shader_source.h"
 #include "renderer/resources/shader_template.h"
@@ -104,6 +112,7 @@ struct native_args {
 	bool shader_check = false;
 	std::string egl_sink_check;
 	bool replay = false;
+	bool replay_econ = false;
 	bool stop_in_resize = false;
 	uint64_t frames = 1000;
 	int seconds = 0;
@@ -136,7 +145,7 @@ void usage(const char *argv0) {
 	          << " --root <dir> [--modpack <id>]... [--headless] [--seconds <n>]"
 	             " [--width <w> --height <h>] [--check]"
 	             " [--gles] [--render-check <png>] [--shader-check]"
-	             " [--egl-sink-check <png> [--replay | --stop-in-resize] [--frames <n>]]"
+	             " [--egl-sink-check <png> [--replay | --replay-econ | --stop-in-resize] [--frames <n>]]"
 	             " [--map test|random [--map-seed <n>] [--map-size <n>] [--map-trees <n>]"
 	             " [--map-elevation <h>] [--map-view <ne,se[,zoom[,height]]>]]"
 	             " [--background <r,g,b,a> [--background-switch <r,g,b,a>]]\n";
@@ -178,6 +187,9 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		}
 		else if (arg == "--replay") {
 			args.replay = true;
+		}
+		else if (arg == "--replay-econ") {
+			args.replay_econ = true;
 		}
 		else if (arg == "--stop-in-resize") {
 			args.stop_in_resize = true;
@@ -366,6 +378,143 @@ size_t shader_check(const std::filesystem::path &root,
 
 #if WITH_EGL
 /**
+ * Input replay of the economy check (--replay econ, XR fork): on the random map,
+ * select each of the first player's three villagers with a small selection
+ * rectangle and right click a resource (wood, food, gold) next to it, through
+ * the regular input path (drag select, right click = gather on a resource).
+ * Captures <png> after 45 s (villagers at work) and <png stem>-econ2 after 90 s.
+ *
+ * The screen positions come from the generator (same settings = same map) and a
+ * camera without renderer set up like Presenter::apply_map_view().
+ */
+std::vector<openage::renderer::opengl::TestFrameSink::Step> econ_replay_steps(const native_args &args,
+                                                                               openage::gamestate::MapSettings &map_settings,
+                                                                               double start,
+                                                                               const std::string &capture_file) {
+	using namespace openage;
+	using renderer::opengl::TestFrameSink;
+	using gamestate::map_object_t;
+	using E = renderer::SinkInputEvent;
+
+	const auto map = gamestate::generate_map(map_settings);
+	const gamestate::Heightmap heights{map.width, map.height, map.corners};
+	if (not map_settings.view) {
+		// first start position, zoomed out: villagers, wood, berries and gold on screen
+		gamestate::MapView start_view;
+		start_view.ne = map.starts.at(0)[0];
+		start_view.se = map.starts.at(0)[1];
+		start_view.zoom = 2.0f;
+		map_settings.view = start_view;
+	}
+	const gamestate::MapView view = *map_settings.view;
+
+	const int width = static_cast<int>(args.width);
+	const int height = static_cast<int>(args.height);
+	auto camera = std::make_shared<renderer::camera::Camera>(nullptr, util::Vector2s{args.width, args.height});
+	camera->look_at_coord(coord::scene3{10.0, 10.0, 0});
+	camera->move_to(Eigen::Vector3f{0.0f, view.height, 0.0f});
+	camera->look_at_coord(coord::scene3{view.ne, view.se, 0});
+	camera->set_zoom(view.zoom);
+	const Eigen::Matrix4f matrix = camera->get_projection_matrix() * camera->get_view_matrix();
+
+	// screen pixel (input coordinates, origin top left) of a map point, up = height above the ground
+	auto pixel = [&](double ne, double se, double up) {
+		double ground = heights.is_flat() ? 0.0 : heights.at(ne, se);
+		coord::phys3 pos{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{ground + up}};
+		auto w = pos.to_scene3().to_world_space();
+		Eigen::Vector4f clip = matrix * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+		int x = static_cast<int>(std::lround((clip.x() + 1.0) * 0.5 * width));
+		int y = static_cast<int>(std::lround(height - (clip.y() + 1.0) * 0.5 * height));
+		return std::pair{x, y};
+	};
+	auto on_screen = [&](std::pair<int, int> p) {
+		return p.first >= 24 and p.second >= 24 and p.first < width - 24 and p.second < height - 24;
+	};
+
+	std::vector<const gamestate::MapObject *> villagers;
+	for (const auto &o : map.objects) {
+		if (o.kind == map_object_t::VILLAGER and o.owner == 0) {
+			villagers.push_back(&o);
+		}
+	}
+
+	std::vector<TestFrameSink::Step> steps;
+	auto add = [&](double at, int type, int x, int y, int button, int buttons) {
+		TestFrameSink::Step step;
+		step.at = start + at;
+		step.what = TestFrameSink::Step::kind::input;
+		step.event.type = type;
+		step.event.x = x;
+		step.event.y = y;
+		step.event.button = button;
+		step.event.buttons = buttons;
+		steps.push_back(step);
+	};
+
+	const std::array<std::pair<const char *, std::vector<map_object_t>>, 3> jobs{{
+		{"wood", {map_object_t::TREE_PINE, map_object_t::TREE_JUNGLE}},
+		{"food", {map_object_t::BERRIES}},
+		{"gold", {map_object_t::GOLD}},
+	}};
+	double t = 0.0;
+	for (size_t k = 0; k < villagers.size() and k < jobs.size(); ++k) {
+		const auto *v = villagers[k];
+		// nearest resource of the kind that is visible
+		const gamestate::MapObject *target = nullptr;
+		double best = 1e9;
+		for (const auto &o : map.objects) {
+			if (std::find(jobs[k].second.begin(), jobs[k].second.end(), o.kind) == jobs[k].second.end()) {
+				continue;
+			}
+			double d = std::hypot(o.ne - v->ne, o.se - v->se);
+			if (d < best and on_screen(pixel(o.ne, o.se, 0.0))) {
+				best = d;
+				target = &o;
+			}
+		}
+		auto vp = pixel(v->ne, v->se, 0.0);
+		if (target == nullptr or not on_screen(vp)) {
+			log::log(WARN << "econ replay: no visible " << jobs[k].first << " for villager " << k);
+			continue;
+		}
+		// click a bit above the base, like on the sprite of the object
+		auto tp = pixel(target->ne, target->se, 0.6);
+		log::log(INFO << "econ replay: villager " << k << " at tile (" << v->ne << ", " << v->se << ") pixel ("
+		              << vp.first << ", " << vp.second << ") -> " << jobs[k].first << " at tile (" << target->ne
+		              << ", " << target->se << ") pixel (" << tp.first << ", " << tp.second << ")");
+
+		// small selection rectangle around the villager
+		constexpr int box = 8;
+		add(t, E::kMouseMove, vp.first - box, vp.second - box, 0, 0);
+		add(t + 0.1, E::kMouseDown, vp.first - box, vp.second - box, E::kLeftButton, E::kLeftButton);
+		for (int i = 1; i <= 4; ++i) {
+			add(t + 0.1 + 0.05 * i, E::kMouseMove, vp.first - box + box * i / 2, vp.second - box + box * i / 2, 0, E::kLeftButton);
+		}
+		add(t + 0.4, E::kMouseUp, vp.first + box, vp.second + box, E::kLeftButton, 0);
+		// right click on the resource
+		add(t + 0.8, E::kMouseMove, tp.first, tp.second, 0, 0);
+		add(t + 0.9, E::kMouseDown, tp.first, tp.second, E::kRightButton, E::kRightButton);
+		add(t + 1.0, E::kMouseUp, tp.first, tp.second, E::kRightButton, 0);
+		t += 1.5;
+	}
+
+	const std::filesystem::path png{capture_file};
+	TestFrameSink::Step work;
+	work.at = start + 45.0;
+	work.what = TestFrameSink::Step::kind::capture;
+	work.file = capture_file;
+	steps.push_back(work);
+	TestFrameSink::Step later;
+	later.at = start + 90.0;
+	later.what = TestFrameSink::Step::kind::capture;
+	later.file = (png.parent_path() / (png.stem().string() + "-econ2" + png.extension().string())).string();
+	steps.push_back(later);
+	return steps;
+}
+#endif
+
+#if WITH_EGL
+/**
  * Render into a test frame sink without any window system (see file header).
  *
  * @return true if all frames were read and captured and the engine stopped in time.
@@ -385,8 +534,12 @@ bool egl_sink_check(const native_args &args,
 	std::filesystem::remove(png);
 	std::filesystem::remove(png_resized);
 
+	auto map_settings = args.map;
 	std::vector<TestFrameSink::Step> steps;
-	if (args.replay and not args.stop_in_resize) {
+	if (args.replay_econ and not args.stop_in_resize) {
+		steps = econ_replay_steps(args, map_settings, start, png.string());
+	}
+	else 	if (args.replay and not args.stop_in_resize) {
 		steps = TestFrameSink::replay_steps(start, width, height, png.string());
 	}
 	else {
@@ -424,7 +577,7 @@ bool egl_sink_check(const native_args &args,
 	auto sink = std::make_shared<TestFrameSink>(width, height, steps, args.frames);
 	settings.sink = sink;
 
-	auto engine = std::make_unique<engine::Engine>(engine::Engine::mode::FULL, root, args.modpacks, settings, args.map);
+	auto engine = std::make_unique<engine::Engine>(engine::Engine::mode::FULL, root, args.modpacks, settings, map_settings);
 
 	// written before the engine is stopped, read after its threads are joined
 	clock::time_point sink_stop_time{};

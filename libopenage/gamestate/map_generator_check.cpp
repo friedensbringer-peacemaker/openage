@@ -145,7 +145,8 @@ void check_map(const MapSettings &s, const GeneratedMap &m, const std::string &t
 		}
 		auto t = m.tiles[static_cast<size_t>(o.ne) + static_cast<size_t>(o.se) * N];
 		check(not water_kind(t) and t != map_terrain_t::SHALLOWS, tag + " object in water: " + to_string(o.kind));
-		check(o.owner < 2, tag + " owner");
+		bool resource = o.kind != map_object_t::TOWN_CENTER and o.kind != map_object_t::VILLAGER;
+		check(resource ? o.owner == 2 : o.owner < 2, tag + " owner (gaia = 2 for resources)");
 	}
 	for (size_t p = 0; p < 2; ++p) {
 		const auto &st = m.starts[p];

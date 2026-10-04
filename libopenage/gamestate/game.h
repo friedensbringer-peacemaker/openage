@@ -7,6 +7,8 @@
 #include <string>
 
 #include "gamestate/map_settings.h"
+#include "gamestate/resources.h"
+#include "gamestate/types.h"
 
 namespace nyan {
 class Database;
@@ -76,6 +78,18 @@ public:
 	 *         for the test map (the presenter keeps its default camera).
 	 */
 	const std::optional<MapView> &get_start_view() const;
+
+	/**
+	 * Resource stockpile of a player (XR fork, economy; for HUDs).
+	 *
+	 * Thread-safe: may be called from any thread while the game exists.
+	 *
+	 * @param player Player ID (0 = first player).
+	 *
+	 * @return Amounts indexed by resource_t (food, wood, gold, stone), nothing if
+	 *         there is no such player.
+	 */
+	std::optional<resource_amounts_t> get_player_resources(player_id_t player) const;
 
 	/**
 	 * Attach a renderer to the game which enables graphical display options for

@@ -16,6 +16,10 @@ enum class system_id_t {
 	MOVE_COMMAND,
 	MOVE_DEFAULT,
 
+	// economy (XR fork)
+	GATHER_COMMAND,
+	GATHER_STEP,
+
 	ACTIVITY_ADVANCE,
 };
 
