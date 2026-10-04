@@ -12,6 +12,7 @@
 #include "coord/tile.h"
 #include "gamestate/heightmap.h"
 #include "pathfinding/types.h"
+#include "time/time.h"
 #include "util/vector.h"
 
 
@@ -121,6 +122,15 @@ public:
 	 * @return Waypoints on the terrain surface.
 	 */
 	std::vector<coord::phys3> follow_terrain(const std::vector<coord::phys3> &waypoints) const;
+
+	/**
+	 * Make tiles passable again (XR fork: a building was destroyed): restore
+	 * the path costs of their terrain on all grids except air.
+	 *
+	 * @param tiles Tiles (outside the map: ignored).
+	 * @param time Time of the change.
+	 */
+	void unblock_tiles(const std::vector<coord::tile> &tiles, const time::time_t &time);
 
 private:
 	/**

@@ -15,6 +15,8 @@
 #include "assets/mod_manager.h"
 #include "assets/modpack.h"
 #include "gamestate/api/terrain.h"
+#include "gamestate/combat/combat_state.h"
+#include "gamestate/combat/skirmish.h"
 #include "gamestate/component/internal/activity.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
@@ -61,6 +63,9 @@ Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 	//       This can be removed when we spawn based on game logic rather than
 	//       hardcoded entity types.
 	this->state->set_mod_manager(mod_manager);
+
+	// XR fork: auto attacks and the victory condition (gamestate/combat)
+	this->state->get_combat()->start(this->state, time::TIME_ZERO);
 
 	if (map_settings.type == map_type_t::RANDOM
 	    and this->generate_random_map(event_loop, entity_factory, terrain_factory, map_settings)) {
@@ -341,11 +346,51 @@ bool Game::generate_random_map(const std::shared_ptr<openage::event::EventLoop> 
 
 		this->state->add_game_entity(entity);
 	}
+
+	// XR fork: skirmish test option, a small army per player between the starts
+	std::optional<combat::SkirmishLayout> skirmish;
+	if (settings.skirmish) {
+		skirmish = combat::skirmish_layout(generated);
+		if (not skirmish->placed) {
+			log::log(WARN << "Random map: no room for the skirmish armies");
+		}
+		const auto &modpack = names->objects[0].substr(0, names->objects[0].find('.'));
+		for (const auto &unit : skirmish->units) {
+			auto dir = std::string{combat::to_string(unit.kind)};
+			auto cls = dir == "knight" ? "Knight" : (dir == "militia" ? "Militia" : "Archer");
+			auto fqon = modpack + ".data.game_entity.generic." + dir + "." + dir + "." + cls;
+			auto owner = static_cast<player_id_t>(unit.owner);
+			auto entity = entity_factory->add_game_entity(event_loop, this->state, owner, fqon);
+			auto entity_pos = std::dynamic_pointer_cast<component::Position>(
+				entity->get_component(component::component_t::POSITION));
+			coord::phys3 pos{coord::phys_t{unit.ne}, coord::phys_t{unit.se}, coord::phys_t{0.0}};
+			entity_pos->set_position(time, map->on_terrain(pos));
+			coord::phys3_delta face{coord::phys_t{unit.face_ne}, coord::phys_t{unit.face_se}, coord::phys_t{0.0}};
+			entity_pos->set_angle(time, face.to_angle());
+			auto entity_owner = std::dynamic_pointer_cast<component::Ownership>(
+				entity->get_component(component::component_t::OWNERSHIP));
+			entity_owner->set_owner(time, owner);
+			auto activity = std::dynamic_pointer_cast<component::Activity>(
+				entity->get_component(component::component_t::ACTIVITY));
+			activity->init(time);
+			entity->get_manager()->run_activity_system(time);
+			this->state->add_game_entity(entity);
+		}
+		log::log(INFO << "Random map: skirmish, " << skirmish->units.size() << " units around tile ("
+		              << skirmish->center_ne << ", " << skirmish->center_se << ")");
+	}
+
 	auto t3 = std::chrono::steady_clock::now();
 
 	// camera: settings, else the first start position
 	if (settings.view) {
 		this->start_view = settings.view;
+	}
+	else if (skirmish and skirmish->placed) {
+		MapView view;
+		view.ne = skirmish->center_ne;
+		view.se = skirmish->center_se;
+		this->start_view = view;
 	}
 	else if (not generated.starts.empty()) {
 		MapView view;

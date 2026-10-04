@@ -7,6 +7,7 @@
 #include "error/error.h"
 #include "log/log.h"
 
+#include "gamestate/combat/combat_state.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/player.h"
 
@@ -16,7 +17,8 @@ namespace openage::gamestate {
 GameState::GameState(const std::shared_ptr<nyan::Database> &db,
                      const std::shared_ptr<openage::event::EventLoop> &event_loop) :
 	event::State{event_loop},
-	db_view{db->new_view()} {
+	db_view{db->new_view()},
+	combat{std::make_shared<combat::CombatState>(event_loop)} {
 }
 
 const std::shared_ptr<nyan::View> &GameState::get_db_view() {
@@ -28,6 +30,14 @@ void GameState::add_game_entity(const std::shared_ptr<GameEntity> &entity) {
 		throw Error(MSG(err) << "Game entity with ID " << entity->get_id() << " already exists");
 	}
 	this->game_entities[entity->get_id()] = entity;
+}
+
+void GameState::remove_game_entity(entity_id_t id) {
+	this->game_entities.erase(id);
+}
+
+const std::shared_ptr<combat::CombatState> &GameState::get_combat() const {
+	return this->combat;
 }
 
 void GameState::add_player(const std::shared_ptr<Player> &player) {

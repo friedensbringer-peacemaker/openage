@@ -14,6 +14,8 @@ enum class command_t {
 	CUSTOM,
 	IDLE,
 	MOVE,
+	/// XR fork: attack a game entity (combat::CombatState)
+	ATTACK,
 };
 
 } // namespace openage::gamestate::component::command

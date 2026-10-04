@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 #include <nyan/nyan.h>
 
@@ -41,6 +42,17 @@ public:
 	void set_attribute(const time::time_t &time,
 	                   const nyan::fqon_t &attribute,
 	                   int64_t value);
+
+	/**
+	 * Get the value of an attribute at a given time (XR fork).
+	 *
+	 * @param time The time at which the attribute is read.
+	 * @param attribute Attribute identifier (fqon of the nyan object).
+	 *
+	 * @return Attribute value, or nothing if the entity has no such attribute.
+	 */
+	std::optional<int64_t> get_attribute(const time::time_t &time,
+	                                     const nyan::fqon_t &attribute) const;
 
 private:
 	using attribute_storage_t = curve::UnorderedMap<nyan::fqon_t,

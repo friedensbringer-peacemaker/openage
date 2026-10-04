@@ -169,4 +169,33 @@ std::vector<coord::phys3> Map::follow_terrain(const std::vector<coord::phys3> &w
 	return result;
 }
 
+void Map::unblock_tiles(const std::vector<coord::tile> &tiles, const time::time_t &time) {
+	auto chunk_size = this->terrain->get_chunk(0)->get_size();
+	const auto side = static_cast<coord::tile_t>(std::max(chunk_size[0], chunk_size[1]));
+	auto grid_size = this->terrain->get_chunks_size();
+	const auto chunks_ne = static_cast<coord::tile_t>(grid_size[0]);
+	const auto chunks_se = static_cast<coord::tile_t>(grid_size[1]);
+	for (const auto &tile : tiles) {
+		if (tile.ne < 0 or tile.se < 0 or tile.ne >= chunks_ne * side or tile.se >= chunks_se * side) {
+			continue;
+		}
+		auto chunk_idx = static_cast<size_t>((tile.ne / side) + (tile.se / side) * chunks_ne);
+		auto tile_idx = static_cast<size_t>((tile.ne % side) + (tile.se % side) * side);
+		auto path_costs = api::APITerrain::get_path_costs(this->terrain->get_chunk(chunk_idx)->get_tile(tile_idx).terrain);
+		for (const auto &path_type : this->grid_lookup) {
+			const auto &name = path_type.first;
+			if (name.size() >= 4 and name.compare(name.size() - 4, 4, ".Air") == 0) {
+				continue;
+			}
+			auto cost = path::COST_MIN;
+			auto it = path_costs.find(name);
+			if (it != path_costs.end()) {
+				cost = static_cast<path::cost_t>(it->second);
+			}
+			auto grid = this->pathfinder->get_grid(path_type.second);
+			grid->get_sector(chunk_idx)->get_cost_field()->set_cost(tile_idx, cost, time);
+		}
+	}
+}
+
 } // namespace openage::gamestate

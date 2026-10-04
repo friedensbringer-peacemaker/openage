@@ -23,6 +23,7 @@
 #include "gamestate/activity/xor_event_gate.h"
 #include "gamestate/activity/xor_gate.h"
 #include "gamestate/api/activity.h"
+#include "gamestate/combat/combat_state.h"
 #include "gamestate/component/api/idle.h"
 #include "gamestate/component/api/live.h"
 #include "gamestate/component/api/move.h"
@@ -122,6 +123,8 @@ std::shared_ptr<GameEntity> EntityFactory::add_game_entity(const std::shared_ptr
 	// this ensures that only the owner's tech upgrades apply
 	auto db_view = state->get_player(owner_id)->get_db_view();
 	init_components(loop, db_view, entity, nyan_entity);
+	// XR fork: combat values (health, attack, armor) for gamestate/combat
+	state->get_combat()->register_entity(entity, db_view, nyan_entity);
 
 	if (this->render_factory) {
 		entity->set_render_entity(this->render_factory->add_world_render_entity());
