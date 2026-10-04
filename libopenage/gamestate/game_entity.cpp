@@ -57,6 +57,10 @@ void GameEntity::add_component(const std::shared_ptr<component::Component> &comp
 	this->components.insert({component->get_type(), component});
 }
 
+void GameEntity::remove_component(component::component_t type) {
+	this->components.erase(type);
+}
+
 bool GameEntity::has_component(component::component_t type) {
 	return this->components.contains(type);
 }

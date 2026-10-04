@@ -100,6 +100,14 @@ public:
 	bool has_component(component::component_t type);
 
 	/**
+	 * Remove a component of this entity, if it has one (XR fork, production:
+	 * foundations have no drop site until they are complete).
+	 *
+	 * @param type Component type.
+	 */
+	void remove_component(component::component_t type);
+
+	/**
 	 * Update the render entity.
 	 *
 	 * @param time Simulation time of the update.

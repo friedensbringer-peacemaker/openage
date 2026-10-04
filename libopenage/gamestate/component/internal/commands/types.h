@@ -17,6 +17,9 @@ enum class command_t {
 
 	// economy (XR fork)
 	GATHER,
+
+	// production (XR fork)
+	BUILD,
 };
 
 } // namespace openage::gamestate::component::command

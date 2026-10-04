@@ -35,6 +35,10 @@ class EntityFactory;
 class Game;
 class TerrainFactory;
 
+namespace prod {
+class Production;
+} // namespace prod
+
 namespace event {
 class Commander;
 class Spawner;
@@ -125,6 +129,13 @@ public:
 	const std::shared_ptr<gamestate::event::Commander> get_commander();
 
 	/**
+	 * Production interface for the HUD and the input bindings (XR fork, thread-safe).
+	 *
+	 * @return Production interface (exists before the game starts).
+	 */
+	const std::shared_ptr<gamestate::prod::Production> get_production();
+
+	/**
 	 * Attach a renderer to the simulation.
 	 *
 	 * @param factory Factory for creating render entities.
@@ -207,6 +218,9 @@ private:
 	// TODO: move somewhere sensible or remove
 	std::shared_ptr<gamestate::event::Spawner> spawner;
 	std::shared_ptr<gamestate::event::Commander> commander;
+
+	// XR fork (production): training, construction, HUD interface
+	std::shared_ptr<gamestate::prod::Production> production;
 
 	// TODO: The game run by the engine
 	std::shared_ptr<gamestate::Game> game;

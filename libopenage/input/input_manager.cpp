@@ -254,6 +254,12 @@ void setup_defaults(const std::shared_ptr<InputContext> &ctx) {
 
 	// also forward all other mouse button events
 	ctx->bind(event_class::MOUSE_BUTTON, {game_action, hud_action});
+
+	// production (XR fork): train (T), place a building (Y, again = next building),
+	// cancel the placement (Esc), cancel the last queued unit (Backspace); see cfg/keybinds.oac
+	for (int code : {key::Key_T, key::Key_Y, key::Key_Escape, key::Key_Backspace}) {
+		ctx->bind(Event{event_class::KEYBOARD, code, modifier::NoModifier, event_type::KeyPress}, game_action);
+	}
 }
 
 

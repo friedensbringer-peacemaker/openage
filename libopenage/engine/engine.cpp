@@ -44,6 +44,7 @@ Engine::Engine(mode mode,
 
 	this->stop_simulation = this->simulation;
 	this->stop_time_loop = this->time_loop;
+	this->production = this->simulation->get_production();
 
 	// presenter (optional)
 	if (this->run_mode == mode::FULL) {
@@ -105,6 +106,10 @@ std::shared_ptr<time::Clock> Engine::get_clock() const {
 		return time_loop->get_clock();
 	}
 	return nullptr;
+}
+
+std::shared_ptr<gamestate::prod::Production> Engine::get_production() const {
+	return this->production;
 }
 
 void Engine::loop() {

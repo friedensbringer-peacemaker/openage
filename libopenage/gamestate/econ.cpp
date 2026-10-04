@@ -41,6 +41,7 @@
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/resources.h"
+#include "gamestate/system/build.h"
 #include "gamestate/system/gather.h"
 #include "gamestate/system/types.h"
 #include "renderer/camera/definitions.h"
@@ -286,6 +287,40 @@ std::shared_ptr<activity::Activity> gather_activity() {
 			              << static_cast<int>(command->get_type()));
 		}
 	});
+
+	// production (XR fork): villagers construct buildings
+	// Branch -(build)-> BuildCommand -> BuildWait -(step done)-> BuildActive? -(yes)-> BuildStep -> BuildWait
+	//                                                                         '-(no)-> Idle
+	// BuildWait -(new command)-> Branch
+	{
+		auto build_command = std::make_shared<activity::TaskSystemNode>(20, "BuildCommand");
+		auto build_wait = std::make_shared<activity::XorEventGate>(21);
+		auto build_active = std::make_shared<activity::XorGate>(22);
+		auto build_step = std::make_shared<activity::TaskSystemNode>(23, "BuildStep");
+
+		branch->add_output(build_command, [](const time::time_t &time, const std::shared_ptr<GameEntity> &entity) {
+			auto queue = std::dynamic_pointer_cast<component::CommandQueue>(
+				entity->get_component(component::component_t::COMMANDQUEUE));
+			if (queue->get_queue().empty(time)) {
+				return false;
+			}
+			return queue->get_queue().front(time)->get_type() == component::command::command_t::BUILD;
+		});
+
+		build_command->add_output(build_wait);
+		build_command->set_system_id(system::system_id_t::BUILD_COMMAND);
+
+		build_wait->add_output(build_active, activity::primer_wait);
+		build_wait->add_output(branch, activity::primer_command_in_queue);
+
+		build_active->add_output(build_step, [](const time::time_t & /* time */, const std::shared_ptr<GameEntity> &entity) {
+			return system::Build::job_active(entity);
+		});
+		build_active->set_default(idle);
+
+		build_step->add_output(build_wait);
+		build_step->set_system_id(system::system_id_t::BUILD_STEP);
+	}
 
 	cached = std::make_shared<activity::Activity>(0, start, "xr.econ.gatherer");
 	return cached;
