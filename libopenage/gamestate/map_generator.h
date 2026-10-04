@@ -58,7 +58,7 @@ enum class map_object_t : uint8_t {
 	CACTUS,      ///< decoration, blocks the tile
 	DEER,        ///< food (animal, gaia), not blocking
 	FISH_SHORE,  ///< food on water next to the shore
-	FISH_OCEAN,  ///< food on deep water
+	FISH_OCEAN,  ///< food on deep water (big ocean fish)
 	COUNT,
 };
 

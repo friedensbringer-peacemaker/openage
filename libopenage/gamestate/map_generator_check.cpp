@@ -200,8 +200,11 @@ void check_map(const MapSettings &s, const GeneratedMap &m, const std::string &t
 	double forest_share = static_cast<double>(forest) / static_cast<double>(N * N);
 	check(water_share >= limits.water_min and water_share < limits.water_max,
 	      tag + " water share " + std::to_string(water_share));
-	check(forest_share > limits.forest_min and forest_share < limits.forest_max,
-	      tag + " forest share " + std::to_string(forest_share));
+	// presets turn forest floor without trees into open land: no share for tiny tree limits
+	if (m.biome == map_biome_t::GRASSLAND or s.max_trees >= 200) {
+		check(forest_share > limits.forest_min and forest_share < limits.forest_max,
+		      tag + " forest share " + std::to_string(forest_share));
+	}
 
 	// start areas: flat, dry, no forest, no blocked tile except the town center
 	const double start_r = limits.flat_radius;

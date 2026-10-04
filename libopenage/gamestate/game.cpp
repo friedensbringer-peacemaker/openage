@@ -245,7 +245,8 @@ RandomMapObjects random_map_objects(const std::string &modpack) {
 	o(map_object_t::CACTUS) = entity("cactus", "Cactus");
 	o(map_object_t::DEER) = entity("deer", "Deer");
 	o(map_object_t::FISH_SHORE) = entity("shore_fish", "Shorefish");
-	o(map_object_t::FISH_OCEAN) = entity("ocean_fish", "OceanFish");
+	// ocean_fish: its idle sprite declares angle 180 without frames (sprite parser throws), big_ocean_fish is consistent
+	o(map_object_t::FISH_OCEAN) = entity("big_ocean_fish", "BigOceanFish");
 	return result;
 }
 

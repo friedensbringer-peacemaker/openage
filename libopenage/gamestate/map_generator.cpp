@@ -338,7 +338,7 @@ BiomeParams biome_params(map_biome_t biome) {
 		b.deer = true;
 		b.water_min = 0.005;
 		b.water_max = 0.10;
-		b.forest_min = 0.45;
+		b.forest_min = 0.08;
 		b.forest_max = 0.90;
 		break;
 	case map_biome_t::RIVERS:
@@ -461,7 +461,7 @@ BiomeParams biome_params(map_biome_t biome) {
 		b.fish = true;
 		b.water_min = 0.04;
 		b.water_max = 0.30;
-		b.forest_min = 0.20;
+		b.forest_min = 0.08;
 		b.forest_max = 0.60;
 		break;
 	}
@@ -777,10 +777,12 @@ GeneratedMap generate_map(const MapSettings &settings) {
 	}
 	auto dist_land = distance_field(N, N, land_or_ford);
 
+	// winter: fords are frozen, too
+	const map_terrain_t ford_kind = b.frozen_lakes ? map_terrain_t::ICE : map_terrain_t::SHALLOWS;
 	map.tiles.assign(tile_count, b.base);
 	for (size_t i = 0; i < tile_count; ++i) {
 		if (ford[i]) {
-			map.tiles[i] = map_terrain_t::SHALLOWS;
+			map.tiles[i] = ford_kind;
 		}
 		else if (frozen[i]) {
 			map.tiles[i] = map_terrain_t::ICE;
@@ -1167,10 +1169,10 @@ GeneratedMap generate_map(const MapSettings &settings) {
 			float c[4] = {map.corners[ne + se * (N + 1)], map.corners[ne + 1 + se * (N + 1)],
 			              map.corners[ne + (se + 1) * (N + 1)], map.corners[ne + 1 + (se + 1) * (N + 1)]};
 			float steep = *std::max_element(c, c + 4) - *std::min_element(c, c + 4);
-			if (steep > 1.3f) {
+			if (steep > 1.6f) {
 				map.tiles[i] = map_terrain_t::DIRT;
 			}
-			else if (steep > 0.8f) {
+			else if (steep > 1.15f) {
 				map.tiles[i] = map_terrain_t::DIRT3;
 			}
 		}
@@ -1215,6 +1217,13 @@ GeneratedMap generate_map(const MapSettings &settings) {
 			std::stable_sort(trees.begin(), trees.end(), [&](const MapObject &a, const MapObject &b) {
 				return density(a) > density(b);
 			});
+			// forest floor without its tree becomes open land again (glade)
+			for (size_t k = tree_limit; k < trees.size(); ++k) {
+				size_t i = tile_index(static_cast<long>(trees[k].ne), static_cast<long>(trees[k].se));
+				if (map.tiles[i] == b.forest_floor and not oasis[i]) {
+					map.tiles[i] = b.base;
+				}
+			}
 			trees.resize(tree_limit);
 			std::sort(trees.begin(), trees.end(), [](const MapObject &a, const MapObject &b) {
 				return a.se < b.se or (a.se == b.se and a.ne < b.ne);
@@ -1373,7 +1382,7 @@ GeneratedMap generate_map(const MapSettings &settings) {
 					map.carved += 1;
 				}
 				else if (is_water(t) and t != map_terrain_t::SHALLOWS) {
-					map.tiles[i] = map_terrain_t::SHALLOWS;
+					map.tiles[i] = ford_kind;
 					map.carved += 1;
 					// a wider ford: water neighbours along the path become shallow, too
 					long x = static_cast<long>(i % N);
@@ -1381,7 +1390,7 @@ GeneratedMap generate_map(const MapSettings &settings) {
 					const long nb[4][2] = {{x + 1, y}, {x - 1, y}, {x, y + 1}, {x, y - 1}};
 					for (const auto &p : nb) {
 						if (in_map(p[0], p[1]) and is_water(map.tiles[tile_index(p[0], p[1])])) {
-							map.tiles[tile_index(p[0], p[1])] = map_terrain_t::SHALLOWS;
+							map.tiles[tile_index(p[0], p[1])] = ford_kind;
 						}
 					}
 				}
@@ -1548,7 +1557,7 @@ const char *to_string(map_object_t object) {
 	case map_object_t::FISH_SHORE:
 		return "shore_fish";
 	case map_object_t::FISH_OCEAN:
-		return "ocean_fish";
+		return "big_fish";
 	default:
 		return "?";
 	}
