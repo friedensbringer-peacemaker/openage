@@ -203,7 +203,7 @@ enum class river_mode {
 
 enum class sea_mode {
 	NONE,
-	/// sea along the top edge of the map (screen)
+	/// sea along one side of the map (small ne + se; left on screen with the default camera)
 	COAST,
 	/// elongated sea in the map centre between the players
 	INLAND,
@@ -637,7 +637,7 @@ GeneratedMap generate_map(const MapSettings &settings) {
 			double wobble = (fbm(x, y, 12.0, seed + 11, 3) - 0.5) * 2.0;
 			bool sea = false;
 			if (b.sea == sea_mode::COAST) {
-				// top edge on screen: small ne + se (the starts lie at ne + se = n)
+				// side with small ne + se (the starts lie at ne + se = n)
 				sea = (x + y) / (2.0 * n) + 0.08 * wobble < 0.34;
 			}
 			else {
