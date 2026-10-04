@@ -126,6 +126,20 @@ const Path Pathfinder::get_path(const PathRequest &request) {
 	auto portal_status = portal_result.first;
 	auto portal_path = portal_result.second;
 
+	// XR fork: without a portal path, portal_a_star() returns the backtrace of the
+	// portal closest to the target. That chain does not end in the target sector,
+	// so building flow fields from the target sector along it fails with
+	// "Invalid entry sector" (Portal::get_exit_sector) and the exception ends the
+	// simulation (seen on landscapes where buildings/forests cut off an area).
+	// Treat it like the unreachable case above.
+	if (portal_status == PathResult::NOT_FOUND) {
+		log::log(DBG << "Path not found (start = "
+		             << request.start << "; target = "
+		             << request.target << "): "
+		             << "no portal path between start and target.");
+		return Path{request.grid_id, PathResult::NOT_FOUND, {}};
+	}
+
 	// Low-level pathfinding
 	// Find the path within the sectors
 
