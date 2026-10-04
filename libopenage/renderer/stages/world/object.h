@@ -134,6 +134,21 @@ public:
 	void set_uniforms(std::vector<std::shared_ptr<renderer::UniformInput>> &&uniforms);
 
 	/**
+	 * Uniform inputs of the layers of this object (XR fork).
+	 */
+	const std::vector<std::shared_ptr<renderer::UniformInput>> &get_uniforms() const;
+
+	/**
+	 * Whether the game entity of this object left the game (XR fork).
+	 */
+	bool is_removed() const;
+
+	/**
+	 * Owning player of the game entity (XR fork, player color).
+	 */
+	uint32_t get_player() const;
+
+	/**
 	 * Check whether the object is visible in the camera view.
 	 *
 	 * @param frustum Camera frustum for culling.

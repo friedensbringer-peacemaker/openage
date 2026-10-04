@@ -257,8 +257,9 @@ const time::time_t Build::build_step(const std::shared_ptr<gamestate::GameEntity
 		auto target = job.target ? find_entity(state, *job.target) : nullptr;
 		auto constructable = constructable_of(target);
 		if (constructable != nullptr and not constructable->is_complete()) {
+			const double before = constructable->get_progress();
 			bool done = constructable->add_work(job.step);
-			prod::update_building_health(target, start_time);
+			prod::update_building_health(state, target, before, start_time);
 			if (done) {
 				prod::complete_building(target, start_time);
 				log::log(INFO << "Build: unit " << entity->get_id() << " completes " << prod::entity_name(target)

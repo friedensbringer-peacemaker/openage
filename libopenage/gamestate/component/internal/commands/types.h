@@ -20,6 +20,9 @@ enum class command_t {
 
 	// production (XR fork)
 	BUILD,
+
+	/// XR fork: attack a game entity (combat::CombatState)
+	ATTACK,
 };
 
 } // namespace openage::gamestate::component::command

@@ -72,10 +72,15 @@ void complete_building(const std::shared_ptr<GameEntity> &building,
                        const time::time_t &time);
 
 /**
- * Set the health of a building under construction from its progress
- * (rises from 1 to the maximum; the combat system reads it).
+ * Health of a building under construction (AoE II): a new foundation starts at 1,
+ * every building step adds its share of the maximum (damage taken meanwhile stays).
+ * The combat system reads the Live attribute; its HUD snapshot is refreshed.
+ *
+ * @param previous_progress Progress before the step, negative for a new foundation.
  */
-void update_building_health(const std::shared_ptr<GameEntity> &building,
+void update_building_health(const std::shared_ptr<GameState> &state,
+                            const std::shared_ptr<GameEntity> &building,
+                            double previous_progress,
                             const time::time_t &time);
 
 /**

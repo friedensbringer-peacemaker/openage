@@ -40,11 +40,11 @@
 #include "gamestate/econ_math.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
+#include "gamestate/pick.h"
 #include "gamestate/resources.h"
 #include "gamestate/system/build.h"
 #include "gamestate/system/gather.h"
 #include "gamestate/system/types.h"
-#include "renderer/camera/definitions.h"
 
 
 namespace openage::gamestate::econ {
@@ -329,39 +329,23 @@ std::shared_ptr<activity::Activity> gather_activity() {
 std::optional<entity_id_t> pick_resource(const std::shared_ptr<GameState> &state,
                                          const coord::phys3 &ground_hit,
                                          const time::time_t &time) {
-	auto origin_w = ground_hit.to_scene3().to_world_space();
-	const auto &dir_w = renderer::camera::CAM_DIRECTION;
-	const vec3 origin{origin_w.x(), origin_w.y(), origin_w.z()};
-	const vec3 dir{dir_w.x(), dir_w.y(), dir_w.z()};
-
-	std::optional<entity_id_t> best;
-	double best_distance = std::numeric_limits<double>::max();
-	for (const auto &[id, entity] : state->get_game_entities()) {
+	// view ray against the vertical axis of every resource that is not empty (gamestate/pick.h)
+	auto picked = pick_entity_ray(state, time, ground_hit, [](const std::shared_ptr<GameEntity> &entity) -> std::optional<PickShape> {
 		if (not entity->has_component(component::component_t::HARVESTABLE)) {
-			continue;
+			return std::nullopt;
 		}
 		auto harvestable = std::dynamic_pointer_cast<component::Harvestable>(
 			entity->get_component(component::component_t::HARVESTABLE));
 		if (harvestable->is_depleted()) {
-			continue;
+			return std::nullopt;
 		}
-		auto pos = std::dynamic_pointer_cast<component::Position>(
-						entity->get_component(component::component_t::POSITION))
-		               ->get_positions()
-		               .get(time);
-		auto base_w = pos.to_scene3().to_world_space();
-		// vertical axis of the visible object: the sprite stands up from its base
-		const double top = std::clamp(0.6 * harvestable->height, 0.4, 2.0);
-		const vec3 base{base_w.x(), base_w.y(), base_w.z()};
-		const vec3 tip{base_w.x(), base_w.y() + top, base_w.z()};
-		auto distance = line_segment_distance(origin, dir, base, tip);
-		const double pick_radius = std::clamp(harvestable->radius * 1.1, 0.45, 1.2);
-		if (distance <= pick_radius and distance < best_distance) {
-			best = id;
-			best_distance = distance;
-		}
+		return PickShape{std::clamp(harvestable->radius * 1.1, 0.45, 1.2),
+		                 std::clamp(0.6 * harvestable->height, 0.4, 2.0)};
+	});
+	if (not picked) {
+		return std::nullopt;
 	}
-	return best;
+	return picked->get_id();
 }
 
 bool can_gather_from(const std::shared_ptr<GameEntity> &gatherer,

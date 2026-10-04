@@ -8,6 +8,7 @@
 #include "gamestate/component/api/idle.h"
 #include "gamestate/component/api/move.h"
 #include "gamestate/component/base_component.h"
+#include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
 #include "renderer/stages/world/render_entity.h"
 
@@ -76,8 +77,22 @@ void GameEntity::render_update(const time::time_t &time,
 		const auto &angle = dynamic_pointer_cast<component::Position>(
 								this->components.at(component::component_t::POSITION))
 		                        ->get_angles();
+		// XR fork: player color
+		auto owner = this->components.find(component::component_t::OWNERSHIP);
+		if (owner != this->components.end()) {
+			auto ownership = dynamic_pointer_cast<component::Ownership>(owner->second);
+			this->render_entity->set_player(static_cast<uint32_t>(ownership->get_owners().get(time)));
+		}
 		this->render_entity->update(this->id, pos, angle, animation_path, time);
 	}
+}
+
+void GameEntity::remove_render_entity() {
+	if (this->render_entity != nullptr) {
+		this->render_entity->mark_removed();
+	}
+	this->render_entity = nullptr;
+	this->last_animation_path.clear();
 }
 
 void GameEntity::set_id(entity_id_t id) {

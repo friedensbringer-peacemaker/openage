@@ -141,6 +141,19 @@ public:
 	 */
 	static std::vector<Step> replay_steps(double start, int width, int height, const std::string &capture_file);
 
+	/**
+	 * Steps for the combat replay (XR fork, --replay-combat): capture
+	 * <stem>-before.png, drag over the whole image (selects all own units on
+	 * screen), right click on the image centre (attack the enemy there),
+	 * capture <stem>-attack.png 4 s later and p capture_file 30 s later.
+	 *
+	 * @param start Time of the first step.
+	 * @param width Frame width.
+	 * @param height Frame height.
+	 * @param capture_file PNG file for the last capture.
+	 */
+	static std::vector<Step> combat_replay_steps(double start, int width, int height, const std::string &capture_file);
+
 private:
 	static constexpr int slot_count = 3;
 

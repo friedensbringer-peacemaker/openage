@@ -20,6 +20,7 @@
 #include "coord/scene.h"
 #include "coord/tile.h"
 #include "gamestate/api/ability.h"
+#include "gamestate/combat/combat_state.h"
 #include "gamestate/api/animation.h"
 #include "gamestate/api/property.h"
 #include "gamestate/api/types.h"
@@ -265,6 +266,16 @@ std::optional<path::grid_id_t> grid_of(const std::shared_ptr<GameEntity> &entity
 	}
 }
 
+/// current health of a building (Live attribute), -1 if unknown
+long long health_of(const std::shared_ptr<GameEntity> &building, const ConstructableComp &constructable, const time::time_t &time) {
+	auto live = component_of<component::Live>(building, component::component_t::LIVE);
+	if (live == nullptr or constructable.health_attribute.empty()) {
+		return -1;
+	}
+	auto value = live->get_attribute(time, constructable.health_attribute);
+	return value ? static_cast<long long>(*value) : -1;
+}
+
 /// HUD label of an entity
 std::string label_of_entity(const std::shared_ptr<GameEntity> &entity) {
 	return label_of(entity_name(entity));
@@ -300,9 +311,14 @@ struct Population {
 
 std::unordered_map<player_id_t, Population> count_population(const std::shared_ptr<GameState> &state,
                                                              const time::time_t &time) {
+	const auto &combat = state->get_combat();
 	std::unordered_map<player_id_t, Population> result;
 	for (const auto &[id, entity] : state->get_game_entities()) {
 		if (not entity->has_component(component::component_t::OWNERSHIP)) {
+			continue;
+		}
+		if (combat != nullptr and combat->is_dead(id)) {
+			// dying units and burning buildings no longer count
 			continue;
 		}
 		auto owner = owner_of(entity, time);
@@ -605,11 +621,13 @@ void complete_building(const std::shared_ptr<GameEntity> &building,
 	              << ") at tile " << tile_str(position_of(building, time)) << " complete after "
 	              << constructable->get_build_time() << " s of work, provides "
 	              << constructable->population << " population, health "
-	              << construction_health(constructable->max_health, constructable->get_progress()) << "/"
+	              << health_of(building, *constructable, time) << "/"
 	              << constructable->max_health);
 }
 
-void update_building_health(const std::shared_ptr<GameEntity> &building,
+void update_building_health(const std::shared_ptr<GameState> &state,
+                            const std::shared_ptr<GameEntity> &building,
+                            double previous_progress,
                             const time::time_t &time) {
 	auto constructable = component_of<ConstructableComp>(building, component::component_t::CONSTRUCTABLE);
 	auto live = component_of<component::Live>(building, component::component_t::LIVE);
@@ -617,9 +635,18 @@ void update_building_health(const std::shared_ptr<GameEntity> &building,
 	    or constructable->max_health <= 0) {
 		return;
 	}
-	live->set_attribute(time,
-	                    constructable->health_attribute,
-	                    construction_health(constructable->max_health, constructable->get_progress()));
+	const auto max = static_cast<long long>(constructable->max_health);
+	long long health = construction_health(max, constructable->get_progress());
+	if (previous_progress >= 0.0) {
+		auto current = live->get_attribute(time, constructable->health_attribute);
+		long long gain = health - construction_health(max, previous_progress);
+		long long base = current ? static_cast<long long>(*current) : construction_health(max, previous_progress);
+		health = std::clamp(base + gain, 1LL, max);
+	}
+	live->set_attribute(time, constructable->health_attribute, health);
+	if (auto combat = state->get_combat()) {
+		combat->health_changed(building->get_id(), health);
+	}
 }
 
 std::string entity_name(const std::shared_ptr<GameEntity> &entity) {
@@ -847,7 +874,8 @@ void Production::update(const std::shared_ptr<GameState> &state,
 	for (auto id : selected) {
 		auto entity = find_entity(state, id);
 		if (entity != nullptr and entity->has_component(component::component_t::OWNERSHIP)
-		    and owner_of(entity, now) == player_id) {
+		    and owner_of(entity, now) == player_id
+		    and not (state->get_combat() != nullptr and state->get_combat()->is_dead(id))) {
 			own.push_back(entity);
 		}
 	}
@@ -1037,7 +1065,7 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			}
 			else {
 				constructable->start_foundation(buildable->time);
-				update_building_health(building, now);
+				update_building_health(state, building, -1.0, now);
 				if (building->has_component(component::component_t::DROP_SITE)) {
 					constructable->pending_drop_site = building->get_component(component::component_t::DROP_SITE);
 					building->remove_component(component::component_t::DROP_SITE);

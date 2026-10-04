@@ -7,6 +7,7 @@
 #include "event/event_loop.h"
 #include "event/evententity.h"
 #include "event/state.h"
+#include "gamestate/combat/combat_state.h"
 #include "gamestate/component/internal/commands/types.h"
 #include "gamestate/event/send_command.h"
 #include "gamestate/event/spawn_entity.h"
@@ -56,6 +57,12 @@ void Controller::set_selected(const std::vector<gamestate::entity_id_t> ids) {
 	log::log(DBG << "Selected " << ids.size() << " entities");
 
 	this->selected = ids;
+}
+
+void Controller::prune_selected(const std::function<bool(gamestate::entity_id_t)> &removed) {
+	std::unique_lock lock{this->mutex};
+
+	std::erase_if(this->selected, removed);
 }
 
 bool Controller::process(const event_arguments &ev_args, const std::shared_ptr<BindingContext> &ctx) {
@@ -166,12 +173,23 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 			return std::shared_ptr<event::Event>{};
 		}
 		auto mouse_pos = args.mouse.to_phys3(camera);
+		// XR fork: drop entities that died; the handler attacks an enemy under the
+		// cursor instead of moving (gamestate/combat/command.h), picked in screen space
+		if (auto game = simulation->get_game()) {
+			auto combat = game->get_state()->get_combat();
+			controller->prune_selected([&combat](gamestate::entity_id_t id) {
+				return combat->was_removed(id);
+			});
+		}
 		log::log(INFO << "Input: right click at pixel (" << args.mouse.x << ", " << args.mouse.y
-		              << ") -> move " << controller->get_selected().size() << " entities");
+		              << ") -> move/attack " << controller->get_selected().size() << " entities");
+		Eigen::Matrix4f cam_matrix = camera->get_projection_matrix() * camera->get_view_matrix();
 		event::EventHandler::param_map::map_t params{
 			{"type", gamestate::component::command::command_t::MOVE},
 			{"target", mouse_pos},
 			{"entity_ids", controller->get_selected()},
+			{"camera_matrix", cam_matrix},
+			{"pick_ndc", Eigen::Vector2f{args.mouse.to_viewport(camera).to_ndc_space(camera)}},
 		};
 
 		auto event = simulation->get_event_loop()->create_event(

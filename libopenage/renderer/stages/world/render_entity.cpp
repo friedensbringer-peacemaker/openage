@@ -77,4 +77,22 @@ const curve::Discrete<std::string> &RenderEntity::get_animation_path() {
 	return this->animation_path;
 }
 
+void RenderEntity::mark_removed() {
+	this->removed = true;
+	std::unique_lock lock{this->mutex};
+	this->changed = true;
+}
+
+bool RenderEntity::is_removed() const {
+	return this->removed;
+}
+
+void RenderEntity::set_player(uint32_t player) {
+	this->player = player;
+}
+
+uint32_t RenderEntity::get_player() const {
+	return this->player;
+}
+
 } // namespace openage::renderer::world

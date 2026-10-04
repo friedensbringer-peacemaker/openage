@@ -1,4 +1,5 @@
 add_sources(libopenage
+    attack.cpp
     base_command.cpp
     build.cpp
     custom.cpp

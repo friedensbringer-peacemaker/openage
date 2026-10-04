@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -102,6 +103,14 @@ public:
 	 * Clear the list of renderables
 	 */
 	void clear_renderables();
+
+	/**
+	 * Remove the renderables for which p remove returns true (XR fork:
+	 * objects of entities that left the game).
+	 *
+	 * @param remove Predicate.
+	 */
+	void remove_renderables(const std::function<bool(const Renderable &)> &remove);
 
 	using compare_func = std::function<bool(const Renderable &, const Renderable &)>;
 

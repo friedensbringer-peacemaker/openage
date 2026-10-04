@@ -29,6 +29,10 @@ class GameEntity;
 class Map;
 class Player;
 
+namespace combat {
+class CombatState;
+}
+
 /**
  * State of the game.
  *
@@ -61,6 +65,18 @@ public:
 	 * @param entity New game entity.
 	 */
 	void add_game_entity(const std::shared_ptr<GameEntity> &entity);
+
+	/**
+	 * Remove a game entity from the index (XR fork: dead entities, see combat).
+	 *
+	 * @param id ID of the game entity.
+	 */
+	void remove_game_entity(entity_id_t id);
+
+	/**
+	 * Combat of the game (XR fork): attacks, deaths, victory condition.
+	 */
+	const std::shared_ptr<combat::CombatState> &get_combat() const;
 
 	/**
 	 * Add a new player to the index.
@@ -148,6 +164,11 @@ private:
 	 * TODO: Only for testing
 	 */
 	std::shared_ptr<assets::ModManager> mod_manager;
+
+	/**
+	 * Combat state (XR fork).
+	 */
+	std::shared_ptr<combat::CombatState> combat;
 };
 } // namespace gamestate
 } // namespace openage

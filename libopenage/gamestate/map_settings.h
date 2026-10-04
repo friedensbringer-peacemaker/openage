@@ -51,6 +51,9 @@ struct MapSettings {
 	float max_elevation = 4.0f;
 	/// initial camera view; random maps look at the first start position if unset
 	std::optional<MapView> view{};
+	/// XR fork test option: a small army per player between the starts
+	/// (gamestate/combat/skirmish.h), the camera looks at the battlefield
+	bool skirmish = false;
 };
 
 } // namespace openage::gamestate

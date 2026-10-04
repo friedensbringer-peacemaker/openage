@@ -7,6 +7,7 @@
 
 #include "assets/mod_manager.h"
 #include "event/event_loop.h"
+#include "gamestate/combat/events.h"
 #include "gamestate/entity_factory.h"
 #include "gamestate/event/drag_select.h"
 #include "gamestate/event/process_command.h"
@@ -189,6 +190,8 @@ void GameSimulation::init_event_handlers() {
 	this->event_loop->add_event_handler(command_handler);
 	this->event_loop->add_event_handler(manager_handler);
 	this->event_loop->add_event_handler(wait_handler);
+	// XR fork: combat (attack ticks, auto attack scan, removal of dead entities)
+	combat::add_event_handlers(this->event_loop);
 }
 
 } // namespace openage::gamestate
