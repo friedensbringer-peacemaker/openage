@@ -119,6 +119,15 @@ const std::shared_ptr<gamestate::Game> GameSimulation::get_game() {
 	return this->game;
 }
 
+std::shared_ptr<gamestate::Game> GameSimulation::try_get_game() {
+	std::shared_lock lock{this->mutex, std::try_to_lock};
+	if (not lock.owns_lock()) {
+		return nullptr;
+	}
+
+	return this->game;
+}
+
 const std::shared_ptr<openage::event::EventLoop> GameSimulation::get_event_loop() {
 	std::shared_lock lock{this->mutex};
 

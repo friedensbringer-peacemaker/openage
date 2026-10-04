@@ -72,6 +72,10 @@ std::shared_ptr<std::atomic<bool>> Presenter::get_stop_flag() const {
 	return this->stop_requested;
 }
 
+std::shared_ptr<GameControllerSlot> Presenter::get_game_controller_slot() const {
+	return this->controller_slot;
+}
+
 void Presenter::run(const renderer::window_settings window_settings) {
 	log::log(INFO << "Presenter: Launching subsystems...");
 
@@ -321,6 +325,8 @@ void Presenter::init_input() {
 		input::game::setup_defaults(engine_context, this->time_loop, this->simulation, this->camera);
 		this->input_manager->set_game_controller(game_controller);
 		input_ctx->set_game_bindings(engine_context);
+		// XR fork: selection for HUDs in other threads
+		this->controller_slot->set(game_controller);
 	}
 
 #if WITH_QT

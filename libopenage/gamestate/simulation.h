@@ -100,6 +100,14 @@ public:
 	const std::shared_ptr<gamestate::Game> get_game();
 
 	/**
+	 * Get the game without waiting (XR fork): start() holds the lock while the
+	 * game is created (modpacks, map), a HUD in another thread must not block.
+	 *
+	 * @return Game instance, nullptr if there is none yet or the lock is busy.
+	 */
+	std::shared_ptr<gamestate::Game> try_get_game();
+
+	/**
 	 * Get the event loop for the gamestate.
 	 *
 	 * @return Event loop.

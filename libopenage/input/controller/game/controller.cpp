@@ -50,6 +50,12 @@ const std::vector<gamestate::entity_id_t> &Controller::get_selected() const {
 	return this->selected;
 }
 
+std::vector<gamestate::entity_id_t> Controller::get_selected_copy() const {
+	std::unique_lock lock{this->mutex};
+
+	return this->selected;
+}
+
 void Controller::set_selected(const std::vector<gamestate::entity_id_t> ids) {
 	std::unique_lock lock{this->mutex};
 

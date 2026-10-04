@@ -65,6 +65,15 @@ public:
 	const std::vector<gamestate::entity_id_t> &get_selected() const;
 
 	/**
+	 * Copy of the currently selected entities (XR fork). Unlike get_selected(),
+	 * the copy is made under the controller mutex, so other threads (e.g. a HUD)
+	 * can read the selection while the simulation thread changes it.
+	 *
+	 * @return Selected entities.
+	 */
+	std::vector<gamestate::entity_id_t> get_selected_copy() const;
+
+	/**
 	 * Set the currently selected entities.
 	 *
 	 * @param ids Selected entities.
