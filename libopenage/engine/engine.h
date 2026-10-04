@@ -46,6 +46,9 @@ class CVarManager;
 
 namespace gamestate {
 class GameSimulation;
+namespace prod {
+class Production;
+} // namespace prod
 } // namespace gamestate
 
 namespace presenter {
@@ -137,6 +140,15 @@ public:
 	HudInfo query_hud(uint64_t player) const;
 
 	/**
+	 * Production interface of the game (XR fork): what the selection can train or
+	 * build, training queues, placement mode, population, status messages.
+	 * Thread-safe, without Qt (gamestate/production.h).
+	 *
+	 * @return Production interface (valid for the lifetime of the engine).
+	 */
+	std::shared_ptr<gamestate::prod::Production> get_production() const;
+
+	/**
 	 * current simulation state variable.
 	 * to be set to false to stop the simulation loop.
 	 */
@@ -185,6 +197,9 @@ private:
 	std::shared_ptr<std::atomic<bool>> stop_presenter;
 	// selection of the presenter for query_hud() (XR fork), nullptr without presenter
 	std::shared_ptr<presenter::GameControllerSlot> controller_slot;
+
+	// XR fork (production): kept for the HUD after the simulation is gone
+	std::shared_ptr<gamestate::prod::Production> production;
 };
 
 } // namespace engine

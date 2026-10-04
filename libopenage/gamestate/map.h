@@ -143,6 +143,15 @@ public:
 	void unblock_tile(const coord::tile &tile, const time::time_t &time);
 
 	/**
+	 * Block a tile for everything that is not flying (XR fork, production:
+	 * foundations and buildings).
+	 *
+	 * @param tile Tile coordinates.
+	 * @param time Time of the change.
+	 */
+	void block_tile(const coord::tile &tile, const time::time_t &time);
+
+	/**
 	 * Make tiles passable again (XR fork: a building was destroyed): restore
 	 * the path costs of their terrain on all grids except air.
 	 *

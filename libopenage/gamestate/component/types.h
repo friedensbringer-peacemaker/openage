@@ -26,6 +26,11 @@ enum class component_t {
 	GATHER,
 	HARVESTABLE,
 	DROP_SITE,
+
+	// API, production (XR fork)
+	PRODUCTION_QUEUE,
+	CONSTRUCTABLE,
+	BUILDER,
 };
 
 } // namespace openage::gamestate::component

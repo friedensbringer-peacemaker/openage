@@ -454,6 +454,11 @@ if(OPENAGE_NATIVE_ENTRY)
 	target_link_libraries(openage-econ-check PRIVATE Threads::Threads)
 	add_test(NAME openage-econ-check COMMAND openage-econ-check)
 
+	# host test: production rules (dependency-free, parameter sweep; XR fork)
+	add_executable(openage-prod-check gamestate/production_check.cpp)
+	target_include_directories(openage-prod-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-prod-check COMMAND openage-prod-check)
+
 	# host test: combat rules and skirmish layout (dependency-free, parameter sweep)
 	add_executable(openage-combat-rules-check
 		gamestate/combat/rules_check.cpp

@@ -14,6 +14,7 @@
 #include "gamestate/event/send_command.h"
 #include "gamestate/event/spawn_entity.h"
 #include "gamestate/event/wait.h"
+#include "gamestate/production.h"
 #include "gamestate/terrain_factory.h"
 #include "time/clock.h"
 #include "time/time_loop.h"
@@ -36,7 +37,8 @@ GameSimulation::GameSimulation(const util::Path &root_dir,
 	terrain_factory{std::make_shared<gamestate::TerrainFactory>()},
 	mod_manager{std::make_shared<assets::ModManager>(this->root_dir / "assets" / "converted")},
 	spawner{std::make_shared<gamestate::event::Spawner>(this->event_loop)},
-	commander{std::make_shared<gamestate::event::Commander>(this->event_loop)} {
+	commander{std::make_shared<gamestate::event::Commander>(this->event_loop)},
+	production{std::make_shared<gamestate::prod::Production>()} {
 	auto mods = mod_manager->enumerate_modpacks(root_dir / "assets" / "converted");
 	for (const auto &mod : mods) {
 		this->mod_manager->register_modpack(mod);
@@ -52,6 +54,8 @@ void GameSimulation::run() {
 	while (this->running) {
 		time::time_t current_time = this->time_loop->get_clock()->get_time();
 		this->event_loop->reach_time(current_time, this->game->get_state());
+		// XR fork (production): requests of the HUD/input, training queues
+		this->production->update(this->game->get_state(), this->event_loop, this->entity_factory, current_time);
 
 		if (current_time == last_time) {
 			// The clock advances in whole milliseconds (and not at all while paused).
@@ -144,6 +148,11 @@ const std::shared_ptr<gamestate::event::Commander> GameSimulation::get_commander
 	std::shared_lock lock{this->mutex};
 
 	return this->commander;
+}
+
+const std::shared_ptr<gamestate::prod::Production> GameSimulation::get_production() {
+	// set in the constructor, never reassigned
+	return this->production;
 }
 
 void GameSimulation::attach_renderer(const std::shared_ptr<renderer::RenderFactory> &render_factory) {

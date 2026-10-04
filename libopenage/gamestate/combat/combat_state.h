@@ -143,6 +143,12 @@ public:
 	void scan(const std::shared_ptr<GameState> &state, const time::time_t &time);
 	void remove(const std::shared_ptr<GameState> &state, entity_id_t id, const time::time_t &time);
 
+	/**
+	 * Health of an entity changed outside of combat (XR fork, production: a foundation
+	 * gains health while it is built); refreshes the thread-safe health snapshot.
+	 */
+	void health_changed(entity_id_t id, int64_t health);
+
 	// ---- queries, simulation thread
 	bool is_dead(entity_id_t id) const;
 	std::shared_ptr<const CombatStats> get_stats(entity_id_t id) const;

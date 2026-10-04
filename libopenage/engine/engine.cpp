@@ -48,6 +48,7 @@ Engine::Engine(mode mode,
 
 	this->stop_simulation = this->simulation;
 	this->stop_time_loop = this->time_loop;
+	this->production = this->simulation->get_production();
 
 	// presenter (optional)
 	if (this->run_mode == mode::FULL) {
@@ -194,6 +195,10 @@ HudInfo Engine::query_hud(uint64_t player) const {
 	}
 
 	return info;
+}
+
+std::shared_ptr<gamestate::prod::Production> Engine::get_production() const {
+	return this->production;
 }
 
 void Engine::loop() {

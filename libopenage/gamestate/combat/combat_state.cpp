@@ -241,6 +241,14 @@ void CombatState::set_health_snapshot(entity_id_t id, int64_t health, int64_t ma
 	this->health_snapshot[id] = {id, health, max_health, alive};
 }
 
+void CombatState::health_changed(entity_id_t id, int64_t health) {
+	auto *combatant = this->find(id);
+	if (combatant == nullptr or combatant->dead) {
+		return;
+	}
+	this->set_health_snapshot(id, health, combatant->stats->max_health, health > 0);
+}
+
 // ---------------------------------------------------------------- orders
 
 bool CombatState::order_attack(const std::shared_ptr<GameState> &state,

@@ -7,4 +7,7 @@ add_sources(libopenage
     drop_site.cpp
     gather.cpp
     harvestable.cpp
+    builder.cpp
+    constructable.cpp
+    production_queue.cpp
 )

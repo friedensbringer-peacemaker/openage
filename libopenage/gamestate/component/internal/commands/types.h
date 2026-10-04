@@ -18,6 +18,9 @@ enum class command_t {
 	// economy (XR fork)
 	GATHER,
 
+	// production (XR fork)
+	BUILD,
+
 	/// XR fork: attack a game entity (combat::CombatState)
 	ATTACK,
 };
