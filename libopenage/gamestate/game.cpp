@@ -220,6 +220,13 @@ RandomMapObjects random_map_objects(const std::string &modpack) {
 	t(map_terrain_t::WATER) = terrain("water", "Water");
 	t(map_terrain_t::WATER_MEDIUM) = terrain("water3", "Water3");
 	t(map_terrain_t::WATER_DEEP) = terrain("water2", "Water2");
+	// landscape presets (map_biome_t); "desert" has no texture, palm_desert is the sand
+	t(map_terrain_t::SAND) = terrain("palm_desert", "PalmDesert");
+	t(map_terrain_t::SNOW) = terrain("snow", "Snow");
+	t(map_terrain_t::SNOW_GRASS) = terrain("snow_grass", "SnowGrass");
+	t(map_terrain_t::SNOW_DIRT) = terrain("snow_desert", "SnowDesert");
+	t(map_terrain_t::SNOW_FOREST) = terrain("snow_forest", "SnowForest");
+	t(map_terrain_t::ICE) = terrain("ice", "Ice");
 
 	auto o = [&](map_object_t kind) -> nyan::fqon_t & {
 		return result.objects[static_cast<size_t>(kind)];
@@ -231,6 +238,14 @@ RandomMapObjects random_map_objects(const std::string &modpack) {
 	o(map_object_t::BERRIES) = entity("berry_bush", "BerryBush");
 	o(map_object_t::TOWN_CENTER) = entity("town_center", "TownCenter");
 	o(map_object_t::VILLAGER) = entity("villager", "Villager");
+	// landscape presets: trees are wood (Harvestable), deer and fish food, cactus decoration
+	o(map_object_t::TREE_PALM) = entity("palm_tree", "PalmTree");
+	o(map_object_t::TREE_SNOW) = entity("snowy_conifer", "SnowyConifer");
+	o(map_object_t::TREE_BAMBOO) = entity("bamboo_forest", "BambooForest");
+	o(map_object_t::CACTUS) = entity("cactus", "Cactus");
+	o(map_object_t::DEER) = entity("deer", "Deer");
+	o(map_object_t::FISH_SHORE) = entity("shore_fish", "Shorefish");
+	o(map_object_t::FISH_OCEAN) = entity("ocean_fish", "OceanFish");
 	return result;
 }
 

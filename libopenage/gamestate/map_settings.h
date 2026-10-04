@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 
 
 namespace openage::gamestate {
@@ -21,6 +22,99 @@ enum class map_type_t {
 	/// map from the random map generator (gamestate/map_generator.h)
 	RANDOM,
 };
+
+/**
+ * Landscape preset of the random map generator (XR fork).
+ *
+ * GRASSLAND is the original random map (same seed = same map as before the
+ * presets existed). The other presets are our own layouts, inspired by the
+ * classic map kinds of the genre (no map scripts or texts of the original game).
+ */
+enum class map_biome_t : uint8_t {
+	/// green land, a few lakes, sometimes a river (the original random map)
+	GRASSLAND,
+	/// open dry land, little water, small groves, many low hills
+	STEPPE,
+	/// high hills with ridges and steep slopes, small flat start areas
+	HILLS,
+	/// dense forest everywhere, clearings at the starts, narrow paths between them
+	FOREST,
+	/// several rivers with fords divide the map
+	RIVERS,
+	/// sea along one side of the map
+	COAST,
+	/// large sea in the middle, land route around it
+	INLAND_SEA,
+	/// much water, islands connected by fords
+	ISLANDS,
+	/// central forest with a large gold field in the middle
+	GOLD_RUSH,
+	/// sand and dirt, oases with palms, cacti
+	DESERT,
+	/// snow, snowy conifers, frozen lakes, deer
+	WINTER,
+	/// lush green, dense jungle and bamboo, many lakes
+	JUNGLE,
+	COUNT,
+};
+
+/**
+ * Short name of a landscape preset (command line, logs, settings files).
+ */
+inline const char *map_biome_name(map_biome_t biome) {
+	switch (biome) {
+	case map_biome_t::GRASSLAND:
+		return "grass";
+	case map_biome_t::STEPPE:
+		return "steppe";
+	case map_biome_t::HILLS:
+		return "hills";
+	case map_biome_t::FOREST:
+		return "forest";
+	case map_biome_t::RIVERS:
+		return "rivers";
+	case map_biome_t::COAST:
+		return "coast";
+	case map_biome_t::INLAND_SEA:
+		return "inland-sea";
+	case map_biome_t::ISLANDS:
+		return "water";
+	case map_biome_t::GOLD_RUSH:
+		return "gold-rush";
+	case map_biome_t::DESERT:
+		return "desert";
+	case map_biome_t::WINTER:
+		return "winter";
+	case map_biome_t::JUNGLE:
+		return "jungle";
+	default:
+		return "?";
+	}
+}
+
+/**
+ * Landscape preset from its short name (map_biome_name, also "grassland", "islands").
+ *
+ * @return true if the name is known.
+ */
+inline bool map_biome_parse(std::string_view name, map_biome_t &biome) {
+	if (name == "grassland") {
+		biome = map_biome_t::GRASSLAND;
+		return true;
+	}
+	if (name == "islands") {
+		biome = map_biome_t::ISLANDS;
+		return true;
+	}
+	for (size_t k = 0; k < static_cast<size_t>(map_biome_t::COUNT); ++k) {
+		auto candidate = static_cast<map_biome_t>(k);
+		if (name == map_biome_name(candidate)) {
+			biome = candidate;
+			return true;
+		}
+	}
+	return false;
+}
 
 /**
  * Initial camera view, in scene coordinates of the map.
@@ -41,13 +135,17 @@ struct MapView {
 struct MapSettings {
 	/// map type, the fixed test map is the default
 	map_type_t type = map_type_t::TEST;
+	/// landscape preset of the random map (GRASSLAND = original random map)
+	map_biome_t biome = map_biome_t::GRASSLAND;
 	/// seed of the random map generator; same seed and size = same map
 	uint32_t seed = 1;
 	/// edge length of the random map in tiles (rounded to a multiple of 16, 48..256)
 	size_t size = 64;
-	/// upper limit for tree entities on the random map (performance on standalone headsets)
+	/// upper limit for tree entities on the random map (performance on standalone headsets;
+	/// FOREST and JUNGLE allow more, see map_biome_limits() in map_generator.h)
 	size_t max_trees = 800;
-	/// maximum terrain elevation of hills on the random map (tiles, 0 = flat)
+	/// maximum terrain elevation of hills on the random map (tiles, 0 = flat;
+	/// scaled per preset, e.g. HILLS x2.25, see map_biome_limits())
 	float max_elevation = 4.0f;
 	/// initial camera view; random maps look at the first start position if unset
 	std::optional<MapView> view{};
