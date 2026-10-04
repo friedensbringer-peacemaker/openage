@@ -16,6 +16,8 @@
  *                   [--map-trees N] [--map-elevation H] [--map-view ne,se[,zoom[,height]]]
  *                   [--map-skirmish]]
  *                  [--background r,g,b,a [--background-switch r,g,b,a]]
+ *                  [--ai on|off|auto] [--ai-difficulty easy|normal] [--ai-player N]
+ *                  [--ai-first-attack S] [--ai-attack-size N] [--sim-speed X] [--capture-at s1,s2,...]
  *
  * --gles selects an OpenGL ES 3.x context (like OPENAGE_GLES=1).
  * --render-check renders the game for --seconds (default 10) in a hidden
@@ -58,6 +60,13 @@
  * alpha 0 = transparent around the map). With --egl-sink-check,
  * --background-switch changes it at runtime through the frame sink
  * (FrameSink::poll_background) before the second capture (<png stem>-1920x1080.png).
+ *
+ * ai (XR fork): --ai switches the computer opponent (gamestate/ai, default auto:
+ * on for random maps with two starts; the replays switch it off unless --ai is
+ * given), --ai-difficulty/--ai-player/--ai-first-attack/--ai-attack-size set its
+ * parameters (MapSettings::ai). --sim-speed runs the simulation clock faster
+ * (e.g. 8 = 8 game seconds per second). --capture-at adds captures to
+ * --egl-sink-check at the given seconds (<png stem>-t<s>.png).
  *
  * <dir> must contain assets/ (with shaders and converted/{engine,<modpack>})
  * and cfg/. The converted modpacks (including the "engine" API modpack) are
@@ -104,6 +113,7 @@
 #include "renderer/resources/shader_source.h"
 #include "renderer/resources/shader_template.h"
 #include "renderer/window.h"
+#include "time/clock.h"
 #include "util/fslike/directory.h"
 #include "util/path.h"
 
@@ -129,6 +139,10 @@ struct native_args {
 	openage::gamestate::MapSettings map{};
 	std::optional<std::array<float, 4>> background{};
 	std::optional<std::array<float, 4>> background_switch{};
+	// ai (XR fork)
+	bool ai_explicit = false;
+	std::optional<double> sim_speed{};
+	std::vector<double> capture_at{};
 };
 
 /**
@@ -156,7 +170,9 @@ void usage(const char *argv0) {
 	             " [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --stop-in-resize] [--frames <n>]]"
 	             " [--map test|random [--map-seed <n>] [--map-size <n>] [--map-trees <n>]"
 	             " [--map-elevation <h>] [--map-view <ne,se[,zoom[,height]]>] [--map-skirmish]]"
-	             " [--background <r,g,b,a> [--background-switch <r,g,b,a>]]\n";
+	             " [--background <r,g,b,a> [--background-switch <r,g,b,a>]]"
+	             " [--ai on|off|auto] [--ai-difficulty easy|normal] [--ai-player <n>]"
+	             " [--ai-first-attack <s>] [--ai-attack-size <n>] [--sim-speed <x>] [--capture-at <s1,s2,...>]\n";
 }
 
 bool parse_args(int argc, char **argv, native_args &args) {
@@ -264,6 +280,58 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		else if (arg == "--background") {
 			args.background = parse_rgba(value(), arg);
 		}
+		// ---- ai (XR fork)
+		else if (arg == "--ai") {
+			auto mode = value();
+			args.ai_explicit = true;
+			if (mode == "on") {
+				args.map.ai.mode = openage::gamestate::ai_mode_t::ON;
+			}
+			else if (mode == "off") {
+				args.map.ai.mode = openage::gamestate::ai_mode_t::OFF;
+			}
+			else if (mode == "auto") {
+				args.map.ai.mode = openage::gamestate::ai_mode_t::AUTO;
+			}
+			else {
+				throw std::runtime_error("--ai: on, off or auto, not " + mode);
+			}
+		}
+		else if (arg == "--ai-difficulty") {
+			auto level = value();
+			if (level == "easy") {
+				args.map.ai.difficulty = openage::gamestate::ai_difficulty_t::EASY;
+			}
+			else if (level == "normal") {
+				args.map.ai.difficulty = openage::gamestate::ai_difficulty_t::NORMAL;
+			}
+			else {
+				throw std::runtime_error("--ai-difficulty: easy or normal, not " + level);
+			}
+		}
+		else if (arg == "--ai-player") {
+			args.map.ai.player = std::stoull(value());
+		}
+		else if (arg == "--ai-first-attack") {
+			args.map.ai.first_attack = std::stod(value());
+		}
+		else if (arg == "--ai-attack-size") {
+			args.map.ai.attack_size = std::stoul(value());
+		}
+		else if (arg == "--sim-speed") {
+			args.sim_speed = std::stod(value());
+			if (*args.sim_speed <= 0.0 or *args.sim_speed > 64.0) {
+				throw std::runtime_error("--sim-speed: 0 < x <= 64");
+			}
+		}
+		else if (arg == "--capture-at") {
+			std::istringstream in{value()};
+			std::string part;
+			while (std::getline(in, part, ',')) {
+				args.capture_at.push_back(std::stod(part));
+			}
+		}
+		// ---- end ai (XR fork)
 		else if (arg == "--background-switch") {
 			args.background_switch = parse_rgba(value(), arg);
 		}
@@ -566,6 +634,17 @@ bool egl_sink_check(const native_args &args,
 		shot.file = png.string();
 		steps.push_back(shot);
 	}
+	// ai (XR fork): extra captures (--capture-at)
+	for (double at : args.capture_at) {
+		TestFrameSink::Step shot;
+		shot.at = at;
+		shot.what = TestFrameSink::Step::kind::capture;
+		std::ostringstream name;
+		name << png.stem().string() << "-t" << static_cast<long>(std::lround(at)) << png.extension().string();
+		shot.file = (png.parent_path() / name.str()).string();
+		steps.push_back(shot);
+	}
+	std::stable_sort(steps.begin(), steps.end(), [](const auto &a, const auto &b) { return a.at < b.at; });
 	// size change while running, captured in the new size
 	const double last = steps.back().at;
 	if (args.background_switch) {
@@ -595,6 +674,10 @@ bool egl_sink_check(const native_args &args,
 	settings.sink = sink;
 
 	auto engine = std::make_unique<engine::Engine>(engine::Engine::mode::FULL, root, args.modpacks, settings, map_settings);
+	// ai (XR fork): faster simulation clock
+	if (args.sim_speed) {
+		engine->get_clock()->set_speed(time::speed_t::from_double(*args.sim_speed));
+	}
 
 	// written before the engine is stopped, read after its threads are joined
 	clock::time_point sink_stop_time{};
@@ -775,6 +858,11 @@ int main(int argc, char **argv) {
 
 	log::set_level(log::level::info);
 
+	// ai (XR fork): the input replays check the human side; keep the computer opponent out
+	if ((args.replay or args.replay_econ or args.replay_combat) and not args.ai_explicit) {
+		args.map.ai.mode = gamestate::ai_mode_t::OFF;
+	}
+
 	try {
 		// plain directory instead of the Python union filesystem
 		util::Path root{std::make_shared<util::fslike::Directory>(args.root), {}};
@@ -825,6 +913,10 @@ int main(int argc, char **argv) {
 		auto mode = args.headless ? engine::Engine::mode::HEADLESS
 		                          : engine::Engine::mode::FULL;
 		engine::Engine engine{mode, root, args.modpacks, win_settings, args.map};
+		// ai (XR fork): faster simulation clock
+		if (args.sim_speed) {
+			engine.get_clock()->set_speed(time::speed_t::from_double(*args.sim_speed));
+		}
 
 		std::jthread timer;
 		if (args.seconds > 0 and not render_check) {

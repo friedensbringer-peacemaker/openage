@@ -21,6 +21,8 @@ add_sources(libopenage
 )
 
 add_subdirectory(activity/)
+# ai (XR fork): computer opponent
+add_subdirectory(ai/)
 add_subdirectory(api/)
 add_subdirectory(combat/)
 add_subdirectory(component/)

@@ -2,9 +2,11 @@
 
 #include "game.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 #include <nyan/nyan.h>
@@ -14,6 +16,9 @@
 
 #include "assets/mod_manager.h"
 #include "assets/modpack.h"
+// ai (XR fork)
+#include "gamestate/ai/ai_player.h"
+#include "gamestate/ai/production_port.h"
 #include "gamestate/api/terrain.h"
 #include "gamestate/combat/combat_state.h"
 #include "gamestate/combat/skirmish.h"
@@ -70,6 +75,8 @@ Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 
 	if (map_settings.type == map_type_t::RANDOM
 	    and this->generate_random_map(event_loop, entity_factory, terrain_factory, map_settings)) {
+		// ai (XR fork): computer opponent
+		this->start_ai(event_loop, map_settings);
 		return;
 	}
 	this->generate_terrain(terrain_factory);
@@ -89,6 +96,47 @@ std::optional<resource_amounts_t> Game::get_player_resources(player_id_t player)
 	}
 	return this->state->get_player(player)->get_resources().get();
 }
+
+// ---- ai (XR fork) ----
+const std::vector<std::shared_ptr<ai::AiPlayer>> &Game::get_ai_players() const {
+	return this->ai_players;
+}
+
+void Game::start_ai(const std::shared_ptr<openage::event::EventLoop> &event_loop,
+                    const MapSettings &settings) {
+	const auto &s = settings.ai;
+	bool on = s.mode == ai_mode_t::ON or (s.mode == ai_mode_t::AUTO and this->start_count >= 2);
+	if (not on or this->start_count == 0) {
+		log::log(INFO << "AI: off (" << (s.mode == ai_mode_t::OFF ? "switched off" : "fewer than two start positions")
+		              << ")");
+		return;
+	}
+	const auto gaia = static_cast<player_id_t>(this->start_count);
+	const auto player = s.player.value_or(gaia - 1);
+	if (player >= gaia) {
+		log::log(WARN << "AI: no player " << player << " to control");
+		return;
+	}
+	auto params = ai::params_for(s.difficulty == ai_difficulty_t::NORMAL ? ai::difficulty_t::NORMAL
+	                                                                      : ai::difficulty_t::EASY);
+	if (s.first_attack) {
+		params.first_attack_earliest = std::max(0.0, *s.first_attack);
+		params.attack_anyway_after = std::max(params.attack_anyway_after, params.first_attack_earliest);
+	}
+	if (s.attack_size) {
+		params.attack_threshold = std::max<size_t>(1, *s.attack_size);
+	}
+	uint64_t seed = (s.seed != 0 ? s.seed : settings.seed) * 0x100000001b3ULL + player;
+	auto ai = std::make_shared<ai::AiPlayer>(event_loop,
+	                                         player,
+	                                         std::unordered_set<player_id_t>{gaia},
+	                                         params,
+	                                         seed,
+	                                         ai::make_production_port());
+	ai->start(this->state, time::TIME_ZERO);
+	this->ai_players.push_back(ai);
+}
+// ---- end ai (XR fork) ----
 
 void Game::attach_renderer(const std::shared_ptr<renderer::RenderFactory> &render_factory) {
 	this->universe->attach_renderer(render_factory);
@@ -345,6 +393,8 @@ bool Game::generate_random_map(const std::shared_ptr<openage::event::EventLoop> 
 
 	// XR fork (combat): gaia is never an enemy and does not count for the victory condition
 	this->state->get_combat()->set_neutral_players({static_cast<player_id_t>(generated.starts.size())});
+	// ai (XR fork): players and gaia for the computer opponent
+	this->start_count = generated.starts.size();
 
 	// objects as entities (villagers gather from trees, mines and bushes, see econ.h)
 	const auto time = time::TIME_ZERO;
