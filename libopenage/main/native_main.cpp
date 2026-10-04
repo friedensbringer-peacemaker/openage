@@ -12,7 +12,7 @@
  *                  [--seconds N] [--width W --height H] [--check]
  *                  [--gles] [--render-check <png>] [--shader-check]
  *                  [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --replay-prod | --stop-in-resize] [--frames N]]
- *                  [--map test|random [--map-seed N] [--map-size N]
+ *                  [--map test|random [--map-seed N] [--map-size N] [--map-biome B]
  *                   [--map-trees N] [--map-elevation H] [--map-view ne,se[,zoom[,height]]]
  *                   [--map-skirmish]]
  *                  [--background r,g,b,a [--background-switch r,g,b,a]]
@@ -55,7 +55,10 @@
  * of the fixed test map: deterministic per --map-seed, --map-size tiles (multiple
  * of 16), at most --map-trees tree entities, hills up to --map-elevation. The
  * camera looks at the first start position, or at --map-view (tile ne,se, zoom,
- * camera height; for render checks). --map-skirmish adds a small army per player
+ * camera height; for render checks). --map-biome selects the landscape preset
+ * (map_biome_t: grass (default, the original random map), steppe, hills, forest,
+ * rivers, coast, inland-sea, water, gold-rush, desert, winter, jungle).
+ * --map-skirmish adds a small army per player
  * between the starts (knights, militia, archers; gamestate/combat/skirmish.h) and
  * looks at the battlefield unless --map-view is given.
  *
@@ -162,7 +165,7 @@ void usage(const char *argv0) {
 	             " [--width <w> --height <h>] [--check]"
 	             " [--gles] [--render-check <png>] [--shader-check]"
 	             " [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --replay-prod | --stop-in-resize] [--frames <n>]]"
-	             " [--map test|random [--map-seed <n>] [--map-size <n>] [--map-trees <n>]"
+	             " [--map test|random [--map-seed <n>] [--map-size <n>] [--map-biome <name>] [--map-trees <n>]"
 	             " [--map-elevation <h>] [--map-view <ne,se[,zoom[,height]]>] [--map-skirmish]]"
 	             " [--background <r,g,b,a> [--background-switch <r,g,b,a>]]\n";
 }
@@ -245,6 +248,14 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		}
 		else if (arg == "--map-size") {
 			args.map.size = std::stoul(value());
+		}
+		else if (arg == "--map-biome") {
+			auto name = value();
+			if (not openage::gamestate::map_biome_parse(name, args.map.biome)) {
+				throw std::runtime_error("--map-biome: grass, steppe, hills, forest, rivers, coast, inland-sea, "
+				                         "water, gold-rush, desert, winter or jungle, not "
+				                         + name);
+			}
 		}
 		else if (arg == "--map-trees") {
 			args.map.max_trees = std::stoul(value());
@@ -477,7 +488,8 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> econ_replay_steps(co
 	};
 
 	const std::array<std::pair<const char *, std::vector<map_object_t>>, 3> jobs{{
-		{"wood", {map_object_t::TREE_PINE, map_object_t::TREE_JUNGLE}},
+		{"wood", {map_object_t::TREE_PINE, map_object_t::TREE_JUNGLE, map_object_t::TREE_PALM,
+		          map_object_t::TREE_SNOW, map_object_t::TREE_BAMBOO}},
 		{"food", {map_object_t::BERRIES}},
 		{"gold", {map_object_t::GOLD}},
 	}};
