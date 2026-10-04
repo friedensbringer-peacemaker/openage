@@ -1086,6 +1086,10 @@ void Production::update(const std::shared_ptr<GameState> &state,
 					}
 					return tile_state_t::BLOCKED;
 				}
+				// landscapes: ice and fords are land paths, but frozen/shallow water
+				if (not terrain_buildable(map->terrain_name(tile))) {
+					return tile_state_t::WATER;
+				}
 				if (unit_tiles.contains({t.ne, t.se})) {
 					return tile_state_t::OCCUPIED;
 				}

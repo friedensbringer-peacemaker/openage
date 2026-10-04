@@ -3,6 +3,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -132,6 +133,15 @@ public:
 	 * @return true if the tile is on the map and not impassable.
 	 */
 	bool is_passable(path::grid_id_t grid_id, const coord::tile &tile) const;
+
+	/**
+	 * Name of the terrain object of a tile (XR fork, landscapes: placement rules).
+	 *
+	 * @param tile Tile coordinates.
+	 *
+	 * @return nyan name of the terrain, empty outside the map.
+	 */
+	std::string terrain_name(const coord::tile &tile) const;
 
 	/**
 	 * Restore the terrain path costs of a tile that was blocked by an object

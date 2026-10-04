@@ -28,6 +28,7 @@
 #include "gamestate/game_state.h"
 #include "gamestate/map.h"
 #include "gamestate/player.h"
+#include "gamestate/production_math.h"
 
 
 namespace openage::gamestate::ai {
@@ -743,10 +744,16 @@ std::optional<std::pair<double, double>> AiPlayer::building_spot(const std::shar
 			for (long tx = t0x - 1; ok and tx < t0x + n + 1; ++tx) {
 				if (tx < 0 or ty < 0 or tx >= static_cast<long>(size[0]) or ty >= static_cast<long>(size[1])) {
 					ok = false;
+					continue;
 				}
-				else if (this->land_grid >= 0) {
-					ok = map->is_passable(static_cast<path::grid_id_t>(this->land_grid),
-					                      coord::tile{static_cast<coord::tile_t>(tx), static_cast<coord::tile_t>(ty)});
+				coord::tile tile{static_cast<coord::tile_t>(tx), static_cast<coord::tile_t>(ty)};
+				if (this->land_grid >= 0) {
+					ok = map->is_passable(static_cast<path::grid_id_t>(this->land_grid), tile);
+				}
+				// landscapes: no foundations on ice or fords (same rule as the production check)
+				bool inside = tx >= t0x and tx < t0x + n and ty >= t0y and ty < t0y + n;
+				if (ok and inside) {
+					ok = prod::terrain_buildable(map->terrain_name(tile));
 				}
 			}
 		}

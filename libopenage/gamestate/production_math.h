@@ -181,6 +181,24 @@ enum class tile_state_t {
 	OCCUPIED,
 };
 
+/**
+ * Terrain that carries foundations (XR fork, landscapes): land units cross ice and
+ * fords (shallows), but nothing is built on frozen or shallow water. Sand, beach,
+ * snow and forest floor are buildable. The rule looks at the nyan name of the
+ * terrain (e.g. "hd_base.data.terrain.ice.ice.Ice").
+ *
+ * @param fqon Terrain object name (empty: unknown terrain, buildable).
+ *
+ * @return true if a foundation may cover the tile.
+ */
+inline bool terrain_buildable(const std::string &fqon) {
+	auto ends_with = [&](const char *suffix) {
+		const std::string s{suffix};
+		return fqon.size() >= s.size() and fqon.compare(fqon.size() - s.size(), s.size(), s) == 0;
+	};
+	return not(ends_with(".Ice") or ends_with(".Shallows"));
+}
+
 /// result of the placement check
 enum class placement_t {
 	OK,

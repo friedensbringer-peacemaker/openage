@@ -139,6 +139,23 @@ void check_placement_rules() {
 	}
 	check(std::string{placement_message(placement_t::WATER)}.find("Wasser") != std::string::npos, "water message");
 	check(std::string{placement_message(placement_t::OK)}.empty(), "ok message empty");
+
+	// landscapes: ice and fords are passable, but not buildable
+	for (const char *modpack : {"hd_base", "aoe2_base"}) {
+		const std::string base = std::string{modpack} + ".data.terrain.";
+		for (const char *name : {"ice.ice.Ice", "shallows.shallows.Shallows"}) {
+			check(not terrain_buildable(base + name), std::string{"not buildable: "} + name);
+		}
+		for (const char *name : {"grass.grass.Grass", "palm_desert.palm_desert.PalmDesert", "beach.beach.Beach",
+		                         "snow.snow.Snow", "snow_desert.snow_desert.SnowDesert", "leaves.leaves.Leaves",
+		                         "snow_forest.snow_forest.SnowForest", "dirt3.dirt3.Dirt3"}) {
+			check(terrain_buildable(base + name), std::string{"buildable: "} + name);
+		}
+	}
+	check(terrain_buildable(""), "unknown terrain buildable");
+	check(terrain_buildable("Ice"), "bare name without module is not a nyan terrain");
+	check(not terrain_buildable("x.Ice"), "suffix match");
+	check(terrain_buildable("x.IceCream"), "only the whole last name");
 }
 
 void check_costs() {

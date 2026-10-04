@@ -185,6 +185,21 @@ bool Map::is_passable(path::grid_id_t grid_id, const coord::tile &tile) const {
 	return sector->get_cost_field()->get_cost(static_cast<size_t>(tile_idx)) != path::COST_IMPASSABLE;
 }
 
+std::string Map::terrain_name(const coord::tile &tile) const {
+	const auto size = this->get_size();
+	if (tile.ne < 0 or tile.se < 0
+	    or tile.ne >= static_cast<coord::tile_t>(size[0])
+	    or tile.se >= static_cast<coord::tile_t>(size[1])) {
+		return {};
+	}
+	auto chunk_size = this->terrain->get_chunk(0)->get_size();
+	const auto side = static_cast<coord::tile_t>(std::max(chunk_size[0], chunk_size[1]));
+	const auto chunks_ne = static_cast<coord::tile_t>(this->terrain->get_chunks_size()[0]);
+	auto chunk_idx = static_cast<size_t>((tile.ne / side) + (tile.se / side) * chunks_ne);
+	auto tile_idx = static_cast<size_t>((tile.ne % side) + (tile.se % side) * side);
+	return this->terrain->get_chunk(chunk_idx)->get_tile(tile_idx).terrain.get_name();
+}
+
 void Map::unblock_tile(const coord::tile &tile, const time::time_t &time) {
 	const auto size = this->get_size();
 	if (tile.ne < 0 or tile.se < 0
