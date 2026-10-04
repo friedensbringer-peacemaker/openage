@@ -56,9 +56,10 @@ class AoCMediaSubprocessor:
 
         # graphic ID -> (export request, image filename, texture metadata path in the modpack)
         handled_graphics: dict[int, tuple[MediaExportRequest, str, str]] = {}
+        # (graphic ID, offset x, offset y) -> texture metadata path of a shifted delta
+        handled_offsets: dict[tuple[int, int, int], str] = {}
 
         for sprite in combined_sprites:
-            ref_graphics = sprite.get_graphics()
             graphic_targetdirs = sprite.resolve_graphics_location()
             sprite_dir = sprite.resolve_sprite_location()
 
@@ -67,13 +68,15 @@ class AoCMediaSubprocessor:
             sprite_meta_export = SpriteMetadataExport(sprite_dir, sprite_meta_filename)
             full_data_set.metadata_exports.append(sprite_meta_export)
 
-            sprite_graphic_ids = set()
-            for graphic in ref_graphics:
+            sprite_layers = set()
+            for graphic, offset_x, offset_y in AoCMediaSubprocessor.get_sprite_layers(
+                    sprite, full_data_set):
                 graphic_id = graphic.get_id()
-                if graphic_id in sprite_graphic_ids:
+                layer_id = (graphic_id, offset_x, offset_y)
+                if layer_id in sprite_layers:
                     continue
 
-                sprite_graphic_ids.add(graphic_id)
+                sprite_layers.add(layer_id)
 
                 if graphic_id not in handled_graphics:
                     # Texture image file definiton
@@ -103,6 +106,25 @@ class AoCMediaSubprocessor:
                     )
 
                 export_request, target_filename, texture_meta_path = handled_graphics[graphic_id]
+
+                if offset_x or offset_y:
+                    # Graphic delta drawn with an offset (e.g. the parts of the
+                    # town center): the sprite format has no layer offsets, so
+                    # the delta gets its own texture metadata for the same image
+                    # with shifted hotspots.
+                    if layer_id not in handled_offsets:
+                        targetdir = texture_meta_path[:texture_meta_path.rindex("/") + 1]
+                        suffix = f"delta_{offset_x}_{offset_y}".replace("-", "m")
+                        shifted_filename = f"{target_filename[:-4]}_{suffix}.texture"
+                        shifted_export = TextureMetadataExport(
+                            targetdir, shifted_filename, hotspot_offset=(offset_x, offset_y)
+                        )
+                        full_data_set.metadata_exports.append(shifted_export)
+                        shifted_export.add_imagefile(target_filename)
+                        export_request.add_observer(shifted_export)
+                        handled_offsets[layer_id] = f"{targetdir}{shifted_filename}"
+
+                    texture_meta_path = handled_offsets[layer_id]
 
                 # Add metadata from graphics to animation metadata
                 sequence_type = graphic["sequence_type"].value
@@ -137,10 +159,37 @@ class AoCMediaSubprocessor:
                     frame_count,
                     angle_count,
                     mirror_mode,
+                    layer_key=f"{target_filename}:{offset_x}:{offset_y}",
                 )
 
                 # Notify metadata export about SLP metadata when the file is exported
                 export_request.add_observer(sprite_meta_export)
+
+    @staticmethod
+    def get_sprite_layers(sprite, full_data_set: GenieObjectContainer) -> list[tuple]:
+        """
+        Graphics of a sprite with their screen offsets: the head graphic and
+        its direct deltas (same order as CombinedSprite.get_graphics()), each
+        as (graphic, offset x, offset y). Only existing graphics.
+
+        The offsets of graphic deltas place parts of a building, e.g. the town
+        center's main building 48 px above its anchor and the roofs of the
+        annexes 24/48 px below it.
+        """
+        head = full_data_set.genie_graphics[sprite.get_id()]
+        layers = [(head, 0, 0)]
+        for delta in head["graphic_deltas"].value:
+            delta_id = delta["graphic_id"].value
+            if delta_id not in full_data_set.genie_graphics:
+                continue
+
+            layers.append((
+                full_data_set.genie_graphics[delta_id],
+                delta["offset_x"].value,
+                delta["offset_y"].value,
+            ))
+
+        return [layer for layer in layers if layer[0].exists]
 
     @staticmethod
     def create_graphics_requests(full_data_set: GenieObjectContainer) -> None:

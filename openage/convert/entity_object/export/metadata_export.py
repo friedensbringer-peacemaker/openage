@@ -61,6 +61,7 @@ class SpriteMetadataExport(MetadataExport):
         angle_count: int,
         mirror_mode: int,
         start_angle: int = 0,
+        layer_key: str | None = None,
     ):
         """
         Add metadata from the GenieGraphic object.
@@ -75,8 +76,11 @@ class SpriteMetadataExport(MetadataExport):
         :param angle_count: Number of angles in the animation.
         :param mirror_mode: Mirroring mode (0, 1). If 1, angles above 180 degrees are mirrored.
         :param start_angle: Angle used for the first frame in the .texture file.
+        :param layer_key: Key of the layer if the same image is used by several
+                          layers (graphic deltas with different offsets),
+                          default: the image filename.
         """
-        self.graphics_metadata[img_filename] = (
+        self.graphics_metadata[layer_key or img_filename] = (
             tex_filename,
             layer_mode,
             layer_pos,
@@ -86,6 +90,7 @@ class SpriteMetadataExport(MetadataExport):
             angle_count,
             mirror_mode,
             start_angle,
+            img_filename,
         )
 
     def dump(self) -> str:
@@ -99,8 +104,9 @@ class SpriteMetadataExport(MetadataExport):
         # if len(self.graphics_metadata) == 0:
         #     raise ValueError("No graphics metadata in sprite file.")
 
-        for img_filename, metadata in self.graphics_metadata.items():
+        for metadata in self.graphics_metadata.values():
             tex_filename = metadata[0]
+            img_filename = metadata[9]
             sprite_file.add_texture(tex_index, tex_filename)
             sprite_file.add_layer(tex_index, *metadata[1:5])
 
@@ -161,9 +167,16 @@ class TextureMetadataExport(MetadataExport):
     Export requests for texture definition files.
     """
 
-    def __init__(self, targetdir, target_filename):
+    def __init__(self, targetdir, target_filename, hotspot_offset: tuple[int, int] = (0, 0)):
+        """
+        :param hotspot_offset: Screen offset (x right, y down) of the image
+                               relative to the anchor, e.g. of a graphic delta.
+                               It is subtracted from the hotspots, so the image
+                               is drawn shifted by the offset.
+        """
         super().__init__(targetdir, target_filename)
 
+        self.hotspot_offset = hotspot_offset
         self.imagefile: str | None = None
         self.size: tuple[int, int] | None = None
         self.pxformat = "rgba8"
@@ -204,7 +217,12 @@ class TextureMetadataExport(MetadataExport):
         if message:
             texture_metadata = message[self.imagefile]
             self.size = texture_metadata["size"]
-            self.subtex_metadata = texture_metadata["subtex_metadata"]
+            offset_x, offset_y = self.hotspot_offset
+            self.subtex_metadata = [
+                {**subtex, "cx": subtex["cx"] - offset_x, "cy": subtex["cy"] - offset_y}
+                if (offset_x or offset_y) else subtex
+                for subtex in texture_metadata["subtex_metadata"]
+            ]
 
 
 class TerrainMetadataExport(MetadataExport):
