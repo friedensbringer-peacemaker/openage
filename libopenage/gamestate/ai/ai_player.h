@@ -215,6 +215,8 @@ private:
 	std::string last_plan;
 	/// last build request per building name (simulation seconds)
 	std::unordered_map<std::string, double> last_build;
+	/// villagers that fell idle again shortly after a gather order (no path): longer cooldown
+	std::unordered_map<entity_id_t, size_t> quick_idle;
 	/// last builder assignment per foundation (simulation seconds) and the assignments so far
 	std::unordered_map<entity_id_t, std::pair<double, size_t>> last_resume;
 	/// path grid of land units (passability of building spots), -1 = unknown

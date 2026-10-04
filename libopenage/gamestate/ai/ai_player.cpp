@@ -286,6 +286,7 @@ AiPlayer::World AiPlayer::observe(const std::shared_ptr<GameState> &state, const
 
 	// forget orders of units that are gone
 	std::erase_if(this->last_order, [&](const auto &entry) { return not this->last_health.contains(entry.first); });
+	std::erase_if(this->quick_idle, [&](const auto &entry) { return not this->last_health.contains(entry.first); });
 	return world;
 }
 
@@ -585,9 +586,18 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 				continue;
 			}
 		}
+		// idle again soon after the last order (no path to resource or drop site): wait longer each time
 		auto last = this->last_order.find(v.id);
-		if (last != this->last_order.end() and now - last->second < this->params.order_cooldown) {
+		auto &fails = this->quick_idle[v.id];
+		double cooldown = this->params.order_cooldown * static_cast<double>(1 + std::min<size_t>(fails, 10));
+		if (last != this->last_order.end() and now - last->second < cooldown) {
 			continue;
+		}
+		if (last != this->last_order.end() and now - last->second < cooldown + 15.0) {
+			fails += 1;
+		}
+		else {
+			fails = 0;
 		}
 		idle.push_back(&v);
 	}
@@ -683,7 +693,7 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 std::optional<std::pair<double, double>> AiPlayer::building_spot(const std::shared_ptr<GameState> &state,
                                                                  const World &world,
                                                                  double side,
-                                                                 const time::time_t & /* time */) {
+                                                                 const time::time_t &time) {
 	if (not world.has_home) {
 		return std::nullopt;
 	}
@@ -703,14 +713,34 @@ std::optional<std::pair<double, double>> AiPlayer::building_spot(const std::shar
 		}
 	}
 	auto size = map->get_size();
+	// mines and bushes near home: villagers walk between them and the town center
+	std::vector<std::pair<double, double>> keep_clear;
+	for (const auto &[id, entity] : state->get_game_entities()) {
+		if (not entity->has_component(component::component_t::HARVESTABLE)) {
+			continue;
+		}
+		auto harvestable = std::dynamic_pointer_cast<component::Harvestable>(
+			entity->get_component(component::component_t::HARVESTABLE));
+		if (harvestable->get_resource() == resource_t::WOOD or harvestable->is_depleted()) {
+			continue;
+		}
+		auto position = std::dynamic_pointer_cast<component::Position>(
+			entity->get_component(component::component_t::POSITION));
+		auto pos = position->get_positions().get(time);
+		if (dist(pos.ne.to_double(), pos.se.to_double(), world.home_ne, world.home_se) < 16.0) {
+			keep_clear.emplace_back(pos.ne.to_double(), pos.se.to_double());
+		}
+	}
+	std::sort(keep_clear.begin(), keep_clear.end());
 	auto spots = building_spots(world.home_ne, world.home_se, 5.0, 10.0, side, this->rng);
 	for (const auto &[x, y] : spots) {
 		bool ok = true;
 		long t0x = static_cast<long>(std::floor(x - side / 2.0 + 0.01));
 		long t0y = static_cast<long>(std::floor(y - side / 2.0 + 0.01));
 		long n = static_cast<long>(std::lround(side));
-		for (long ty = t0y; ok and ty < t0y + n; ++ty) {
-			for (long tx = t0x; ok and tx < t0x + n; ++tx) {
+		// the footprint and a ring of one tile around it must be free (no enclosed villagers)
+		for (long ty = t0y - 1; ok and ty < t0y + n + 1; ++ty) {
+			for (long tx = t0x - 1; ok and tx < t0x + n + 1; ++tx) {
 				if (tx < 0 or ty < 0 or tx >= static_cast<long>(size[0]) or ty >= static_cast<long>(size[1])) {
 					ok = false;
 				}
@@ -719,6 +749,10 @@ std::optional<std::pair<double, double>> AiPlayer::building_spot(const std::shar
 					                      coord::tile{static_cast<coord::tile_t>(tx), static_cast<coord::tile_t>(ty)});
 				}
 			}
+		}
+		// at least 3 tiles from mines and bushes
+		for (size_t i = 0; ok and i < keep_clear.size(); ++i) {
+			ok = dist(x, y, keep_clear[i].first, keep_clear[i].second) >= side / 2.0 + 3.0;
 		}
 		// keep a lane free around own buildings
 		for (size_t i = 0; ok and i < world.buildings.size(); ++i) {
