@@ -11,9 +11,10 @@
  *   openage-native --root <dir> [--modpack hd_base] [--headless]
  *                  [--seconds N] [--width W --height H] [--check]
  *                  [--gles] [--render-check <png>] [--shader-check]
- *                  [--egl-sink-check <png> [--replay | --replay-econ | --stop-in-resize] [--frames N]]
+ *                  [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --stop-in-resize] [--frames N]]
  *                  [--map test|random [--map-seed N] [--map-size N]
- *                   [--map-trees N] [--map-elevation H] [--map-view ne,se[,zoom[,height]]]]
+ *                   [--map-trees N] [--map-elevation H] [--map-view ne,se[,zoom[,height]]]
+ *                   [--map-skirmish]]
  *                  [--background r,g,b,a [--background-switch r,g,b,a]]
  *
  * --gles selects an OpenGL ES 3.x context (like OPENAGE_GLES=1).
@@ -30,7 +31,11 @@
  * Engine::stop() after at least --frames (default 1000) frames. --replay
  * plays input instead of the first plain capture: Ctrl+click spawns two
  * entities, a drag selects them (captured into <png> while the rectangle is
- * visible), a right click moves them. --stop-in-resize (regression check)
+ * visible), a right click moves them. --replay-combat (with --map-skirmish and
+ * --map-view on an enemy unit) captures <png stem>-before.png, selects all own
+ * units on screen, right-clicks the screen centre (attack), captures
+ * <png stem>-attack.png after 4 s and <png> after 30 s (before the size change).
+ * --stop-in-resize (regression check)
  * captures <png>, requests 1920x1080 and lets the consumer thread call
  * Engine::stop() while the presenter is inside acquire_target() for the new
  * size; the engine has to stop within 2 s (no second capture).
@@ -45,7 +50,9 @@
  * of the fixed test map: deterministic per --map-seed, --map-size tiles (multiple
  * of 16), at most --map-trees tree entities, hills up to --map-elevation. The
  * camera looks at the first start position, or at --map-view (tile ne,se, zoom,
- * camera height; for render checks).
+ * camera height; for render checks). --map-skirmish adds a small army per player
+ * between the starts (knights, militia, archers; gamestate/combat/skirmish.h) and
+ * looks at the battlefield unless --map-view is given.
  *
  * --background sets the color behind the map (RGBA 0..1, window_settings::background;
  * alpha 0 = transparent around the map). With --egl-sink-check,
@@ -113,6 +120,7 @@ struct native_args {
 	std::string egl_sink_check;
 	bool replay = false;
 	bool replay_econ = false;
+	bool replay_combat = false;
 	bool stop_in_resize = false;
 	uint64_t frames = 1000;
 	int seconds = 0;
@@ -145,9 +153,9 @@ void usage(const char *argv0) {
 	          << " --root <dir> [--modpack <id>]... [--headless] [--seconds <n>]"
 	             " [--width <w> --height <h>] [--check]"
 	             " [--gles] [--render-check <png>] [--shader-check]"
-	             " [--egl-sink-check <png> [--replay | --replay-econ | --stop-in-resize] [--frames <n>]]"
+	             " [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --stop-in-resize] [--frames <n>]]"
 	             " [--map test|random [--map-seed <n>] [--map-size <n>] [--map-trees <n>]"
-	             " [--map-elevation <h>] [--map-view <ne,se[,zoom[,height]]>]]"
+	             " [--map-elevation <h>] [--map-view <ne,se[,zoom[,height]]>] [--map-skirmish]]"
 	             " [--background <r,g,b,a> [--background-switch <r,g,b,a>]]\n";
 }
 
@@ -191,6 +199,9 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		else if (arg == "--replay-econ") {
 			args.replay_econ = true;
 		}
+		else if (arg == "--replay-combat") {
+			args.replay_combat = true;
+		}
 		else if (arg == "--stop-in-resize") {
 			args.stop_in_resize = true;
 		}
@@ -229,6 +240,9 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		}
 		else if (arg == "--map-elevation") {
 			args.map.max_elevation = std::stof(value());
+		}
+		else if (arg == "--map-skirmish") {
+			args.map.skirmish = true;
 		}
 		else if (arg == "--map-view") {
 			// ne,se[,zoom[,height]]
@@ -539,7 +553,10 @@ bool egl_sink_check(const native_args &args,
 	if (args.replay_econ and not args.stop_in_resize) {
 		steps = econ_replay_steps(args, map_settings, start, png.string());
 	}
-	else 	if (args.replay and not args.stop_in_resize) {
+	else if (args.replay_combat and not args.stop_in_resize) {
+		steps = TestFrameSink::combat_replay_steps(start, width, height, png.string());
+	}
+	else if (args.replay and not args.stop_in_resize) {
 		steps = TestFrameSink::replay_steps(start, width, height, png.string());
 	}
 	else {

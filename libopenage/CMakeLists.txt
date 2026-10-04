@@ -453,4 +453,21 @@ if(OPENAGE_NATIVE_ENTRY)
 	target_include_directories(openage-econ-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 	target_link_libraries(openage-econ-check PRIVATE Threads::Threads)
 	add_test(NAME openage-econ-check COMMAND openage-econ-check)
+
+	# host test: combat rules and skirmish layout (dependency-free, parameter sweep)
+	add_executable(openage-combat-rules-check
+		gamestate/combat/rules_check.cpp
+		gamestate/combat/skirmish.cpp
+		gamestate/map_generator.cpp)
+	target_include_directories(openage-combat-rules-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-combat-rules-check COMMAND openage-combat-rules-check)
+
+	# game state check of the combat with the converted modpack (--root <dir>, headless)
+	add_executable(openage-combat-check gamestate/combat/combat_check.cpp)
+	target_include_directories(openage-combat-check PRIVATE $<TARGET_PROPERTY:libopenage,INCLUDE_DIRECTORIES>)
+	add_dependencies(openage-combat-check cppgen)
+	target_link_libraries(openage-combat-check PRIVATE libopenage nyan::nyan Eigen3::Eigen Threads::Threads)
+	if(OPENAGE_QT)
+		target_link_libraries(openage-combat-check PRIVATE Qt6::Core Qt6::Gui)
+	endif()
 endif()

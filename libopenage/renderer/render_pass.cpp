@@ -107,6 +107,12 @@ void RenderPass::clear_renderables() {
 	}
 }
 
+void RenderPass::remove_renderables(const std::function<bool(const Renderable &)> &remove) {
+	for (auto &layer : this->renderables) {
+		std::erase_if(layer, remove);
+	}
+}
+
 void RenderPass::sort(const compare_func &compare) {
 	for (size_t i = 0; i < this->layers.size(); i++) {
 		std::stable_sort(this->renderables[i].begin(),

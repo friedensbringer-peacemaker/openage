@@ -142,6 +142,15 @@ public:
 	 */
 	void unblock_tile(const coord::tile &tile, const time::time_t &time);
 
+	/**
+	 * Make tiles passable again (XR fork: a building was destroyed): restore
+	 * the path costs of their terrain on all grids except air.
+	 *
+	 * @param tiles Tiles (outside the map: ignored).
+	 * @param time Time of the change.
+	 */
+	void unblock_tiles(const std::vector<coord::tile> &tiles, const time::time_t &time);
+
 private:
 	/**
 	 * Initialize the pathfinder from the terrain path costs and blocked tiles.

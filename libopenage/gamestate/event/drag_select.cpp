@@ -8,6 +8,7 @@
 #include "coord/pixel.h"
 #include "coord/scene.h"
 #include "curve/discrete.h"
+#include "gamestate/combat/combat_state.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
 #include "gamestate/game_entity.h"
@@ -55,6 +56,11 @@ void DragSelectHandler::invoke(openage::event::EventLoop & /* loop */,
 	for (auto &entity : gstate->get_game_entities()) {
 		if (not entity.second->has_component(component::component_t::SELECTABLE)) {
 			// skip entities that are not selectable
+			continue;
+		}
+
+		// XR fork: dead entities (death animation) cannot be selected
+		if (gstate->get_combat()->is_dead(entity.first)) {
 			continue;
 		}
 

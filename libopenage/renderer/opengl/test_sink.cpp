@@ -732,4 +732,61 @@ std::vector<TestFrameSink::Step> TestFrameSink::replay_steps(double start, int w
 	return steps;
 }
 
+std::vector<TestFrameSink::Step> TestFrameSink::combat_replay_steps(double start, int width, int height, const std::string &capture_file) {
+	std::vector<Step> steps;
+	auto add = [&](double at, int type, int x, int y, int button, int buttons) {
+		Step step;
+		step.at = start + at;
+		step.what = Step::kind::input;
+		step.event.type = type;
+		step.event.x = x;
+		step.event.y = y;
+		step.event.button = button;
+		step.event.buttons = buttons;
+		steps.push_back(step);
+	};
+	auto capture = [&](double at, const std::string &file) {
+		Step shot;
+		shot.at = start + at;
+		shot.what = Step::kind::capture;
+		shot.file = file;
+		steps.push_back(shot);
+	};
+	using E = SinkInputEvent;
+	constexpr int left = E::kLeftButton;
+	constexpr int right = E::kRightButton;
+	const std::filesystem::path png{capture_file};
+	const auto sibling = [&](const char *suffix) {
+		return (png.parent_path() / (png.stem().string() + suffix + png.extension().string())).string();
+	};
+
+	capture(0.0, sibling("-before"));
+
+	// drag over the whole image: selects all own units on screen
+	const int x0 = width / 50;
+	const int y0 = height / 50;
+	const int x1 = width - width / 50;
+	const int y1 = height - height / 50;
+	double t = 0.5;
+	add(t, E::kMouseMove, x0, y0, 0, 0);
+	add(t + 0.2, E::kMouseDown, x0, y0, left, left);
+	constexpr int drag_steps = 10;
+	for (int i = 1; i <= drag_steps; ++i) {
+		add(t + 0.2 + 0.1 * i, E::kMouseMove, x0 + (x1 - x0) * i / drag_steps, y0 + (y1 - y0) * i / drag_steps, 0, left);
+	}
+	add(t + 1.5, E::kMouseUp, x1, y1, left, 0);
+	t += 2.5;
+
+	// right click on the screen centre (the enemy the camera looks at): attack
+	const int cx = width / 2;
+	const int cy = height / 2;
+	add(t, E::kMouseMove, cx, cy, 0, 0);
+	add(t + 0.2, E::kMouseDown, cx, cy, right, right);
+	add(t + 0.4, E::kMouseUp, cx, cy, right, 0);
+
+	capture(t + 4.0, sibling("-attack"));
+	capture(t + 30.0, capture_file);
+	return steps;
+}
+
 } // namespace openage::renderer::opengl

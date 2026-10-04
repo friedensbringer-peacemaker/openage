@@ -216,4 +216,10 @@ void Map::unblock_tile(const coord::tile &tile, const time::time_t &time) {
 	}
 }
 
+void Map::unblock_tiles(const std::vector<coord::tile> &tiles, const time::time_t &time) {
+	for (const auto &tile : tiles) {
+		this->unblock_tile(tile, time);
+	}
+}
+
 } // namespace openage::gamestate

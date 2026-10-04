@@ -34,4 +34,13 @@ void Live::set_attribute(const time::time_t &time,
 		// TODO: fail here
 	}
 }
+
+std::optional<int64_t> Live::get_attribute(const time::time_t &time,
+                                           const nyan::fqon_t &attribute) const {
+	auto attribute_value = this->attribute_values.at(time, attribute);
+	if (not attribute_value) {
+		return std::nullopt;
+	}
+	return (**attribute_value)->get(time);
+}
 } // namespace openage::gamestate::component

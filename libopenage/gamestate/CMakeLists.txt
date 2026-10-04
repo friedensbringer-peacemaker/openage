@@ -8,6 +8,7 @@ add_sources(libopenage
 	manager.cpp
     map.cpp
     map_generator.cpp
+    pick.cpp
 	player.cpp
     simulation.cpp
 	terrain_chunk.cpp
@@ -21,6 +22,7 @@ add_sources(libopenage
 
 add_subdirectory(activity/)
 add_subdirectory(api/)
+add_subdirectory(combat/)
 add_subdirectory(component/)
 add_subdirectory(demo/)
 add_subdirectory(event/)

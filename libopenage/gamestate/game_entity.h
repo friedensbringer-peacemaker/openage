@@ -100,6 +100,12 @@ public:
 	bool has_component(component::component_t type);
 
 	/**
+	 * Remove the entity from the renderer (XR fork: the entity left the game).
+	 * Later render updates are ignored.
+	 */
+	void remove_render_entity();
+
+	/**
 	 * Update the render entity.
 	 *
 	 * @param time Simulation time of the update.

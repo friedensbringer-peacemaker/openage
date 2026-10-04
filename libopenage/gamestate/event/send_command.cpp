@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "coord/phys.h"
+#include "gamestate/combat/command.h"
 #include "gamestate/component/internal/command_queue.h"
 #include "gamestate/component/internal/commands/gather.h"
 #include "gamestate/component/internal/commands/idle.h"
@@ -67,11 +68,16 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 	// XR fork: INFO, embedders diagnose taps on headsets from the log
 	log::log(INFO << "Command " << static_cast<int>(command_type) << " for " << ids.size()
 	              << " entities, target tile (" << target.ne.to_float() << ", " << target.se.to_float() << ")");
+	// XR fork: a right click on an enemy attacks it (attackers leave ids), dead entities
+	// are dropped (gamestate/combat/command.h); priority: enemy, resource, ground
+	bool enemy_picked = combat::handle_command(gstate, time, command_type, ids, target, params);
+
 	// XR fork (economy): a right click (move) on a resource makes gatherers gather;
 	// GATHER commands name the resource ("target_entity") or pick it at the target
 	std::shared_ptr<GameEntity> gather_target;
-	if (command_type == component::command::command_t::MOVE
-	    or command_type == component::command::command_t::GATHER) {
+	if (not enemy_picked
+	    and (command_type == component::command::command_t::MOVE
+	         or command_type == component::command::command_t::GATHER)) {
 		auto picked = econ::pick_resource(gstate, params.get("target", coord::phys3{0, 0, 0}), time);
 		if (params.contains("target_entity")) {
 			picked = params.get<entity_id_t>("target_entity");

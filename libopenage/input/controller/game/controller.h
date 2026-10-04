@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -69,6 +70,13 @@ public:
 	 * @param ids Selected entities.
 	 */
 	void set_selected(const std::vector<gamestate::entity_id_t> ids);
+
+	/**
+	 * Drop entities from the selection (XR fork: entities that left the game).
+	 *
+	 * @param removed Returns true for entities to drop.
+	 */
+	void prune_selected(const std::function<bool(gamestate::entity_id_t)> &removed);
 
 	/**
 	 * Process an input event from the input manager.
