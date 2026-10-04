@@ -6,7 +6,11 @@
 #include "log/message.h"
 
 #include "cvar/cvar.h"
+#include "gamestate/combat/combat_state.h"
+#include "gamestate/game.h"
+#include "gamestate/game_state.h"
 #include "gamestate/simulation.h"
+#include "input/controller/game/controller.h"
 #include "presenter/presenter.h"
 #include "time/clock.h"
 #include "time/time_loop.h"
@@ -51,6 +55,7 @@ Engine::Engine(mode mode,
 		                                                         this->simulation,
 		                                                         this->time_loop);
 		this->stop_presenter = this->presenter->get_stop_flag();
+		this->controller_slot = this->presenter->get_game_controller_slot();
 	}
 
 	// spawn thread to run time loop
@@ -105,6 +110,90 @@ std::shared_ptr<time::Clock> Engine::get_clock() const {
 		return time_loop->get_clock();
 	}
 	return nullptr;
+}
+
+HudInfo Engine::query_hud(uint64_t player) const {
+	HudInfo info;
+	auto simulation = this->stop_simulation.lock();
+	if (not simulation) {
+		return info;
+	}
+	auto game = simulation->try_get_game();
+	if (not game) {
+		return info;
+	}
+	info.game = true;
+
+	if (auto resources = game->get_player_resources(player)) {
+		info.player = true;
+		for (size_t i = 0; i < info.resources.size() and i < resources->size(); ++i) {
+			info.resources[i] = (*resources)[i];
+		}
+	}
+
+	const auto &state = game->get_state();
+	auto combat = state ? state->get_combat() : nullptr;
+	if (combat) {
+		auto status = combat->get_match_status();
+		if (auto it = status.units.find(player); it != status.units.end()) {
+			info.units = it->second;
+		}
+		if (auto it = status.alive.find(player); it != status.alive.end()) {
+			info.units_and_buildings = it->second;
+		}
+		switch (status.result.state_for(player)) {
+		case gamestate::combat::match_state_t::VICTORY:
+			info.match = hud_match_t::VICTORY;
+			break;
+		case gamestate::combat::match_state_t::DEFEAT:
+			info.match = hud_match_t::DEFEAT;
+			break;
+		case gamestate::combat::match_state_t::DRAW:
+			info.match = hud_match_t::DRAW;
+			break;
+		default:
+			info.match = hud_match_t::RUNNING;
+			break;
+		}
+		if (info.match != hud_match_t::RUNNING) {
+			info.decided_at = status.decided_at.to_double();
+		}
+	}
+
+	auto controller = this->controller_slot ? this->controller_slot->get() : nullptr;
+	if (controller) {
+		auto selected = controller->get_selected_copy();
+		info.selected.reserve(selected.size());
+		for (auto id : selected) {
+			if (combat and combat->was_removed(id)) {
+				continue;
+			}
+			info.selected.push_back(id);
+		}
+		if (not info.selected.empty()) {
+			HudEntity first;
+			first.id = info.selected.front();
+			if (combat) {
+				if (auto stats = combat->get_stats_snapshot(first.id)) {
+					first.name = stats->name;
+					first.unit = stats->unit;
+					first.building = stats->building;
+					first.villager = stats->villager;
+					first.ranged = stats->ranged;
+					first.neutral_object = stats->ambient or stats->herdable;
+				}
+				auto health = combat->get_health({first.id});
+				if (not health.empty()) {
+					first.health = health.front().health;
+					first.max_health = health.front().max_health;
+					first.alive = health.front().alive;
+				}
+			}
+			info.first = first;
+		}
+	}
+
+	return info;
 }
 
 void Engine::loop() {

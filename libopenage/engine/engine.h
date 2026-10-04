@@ -8,6 +8,7 @@
 #include <thread>
 #include <vector>
 
+#include "engine/hud_info.h"
 #include "gamestate/map_settings.h"
 #include "renderer/window.h"
 #include "util/path.h"
@@ -48,6 +49,7 @@ class GameSimulation;
 } // namespace gamestate
 
 namespace presenter {
+class GameControllerSlot;
 class Presenter;
 } // namespace presenter
 
@@ -120,6 +122,21 @@ public:
 	std::shared_ptr<time::Clock> get_clock() const;
 
 	/**
+	 * Snapshot of resources, own units, selection and match state of a player
+	 * for a HUD (XR fork).
+	 *
+	 * Safe to call from any thread. Never waits for the simulation: while the
+	 * game is still being created (modpacks, map), the result has game = false.
+	 * Only short internal locks are taken (resource stock, combat snapshot,
+	 * selection), never the event loop.
+	 *
+	 * @param player Player ID (0 = first player, the one the presenter controls).
+	 *
+	 * @return HUD values (all empty without a game).
+	 */
+	HudInfo query_hud(uint64_t player) const;
+
+	/**
 	 * current simulation state variable.
 	 * to be set to false to stop the simulation loop.
 	 */
@@ -166,6 +183,8 @@ private:
 	std::weak_ptr<gamestate::GameSimulation> stop_simulation;
 	std::weak_ptr<time::TimeLoop> stop_time_loop;
 	std::shared_ptr<std::atomic<bool>> stop_presenter;
+	// selection of the presenter for query_hud() (XR fork), nullptr without presenter
+	std::shared_ptr<presenter::GameControllerSlot> controller_slot;
 };
 
 } // namespace engine
