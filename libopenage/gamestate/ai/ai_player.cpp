@@ -19,6 +19,7 @@
 #include "gamestate/component/api/gather.h"
 #include "gamestate/component/api/harvestable.h"
 #include "gamestate/component/internal/command_queue.h"
+#include "gamestate/component/internal/commands/build.h"
 #include "gamestate/component/internal/commands/gather.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
@@ -731,8 +732,99 @@ std::optional<std::pair<double, double>> AiPlayer::building_spot(const std::shar
 	return std::nullopt;
 }
 
+std::vector<const AiPlayer::Seen *> AiPlayer::free_builders(const std::shared_ptr<GameState> &state,
+                                                            const World &world,
+                                                            double ne,
+                                                            double se,
+                                                            const time::time_t &time) const {
+	const double now = time.to_double();
+	auto combat = state->get_combat();
+	std::vector<const Seen *> result;
+	for (const auto &v : world.villagers) {
+		auto last = this->last_order.find(v.id);
+		if (last != this->last_order.end() and now - last->second < 2.0 * this->params.order_cooldown) {
+			continue;
+		}
+		if (combat->get_target(v.id)) {
+			continue;
+		}
+		auto entity = state->get_game_entity(v.id);
+		if (not entity->has_component(component::component_t::BUILDER)) {
+			continue;
+		}
+		auto builder = std::dynamic_pointer_cast<component::Builder>(
+			entity->get_component(component::component_t::BUILDER));
+		if (builder->get_job().phase != component::Builder::phase_t::NONE) {
+			continue;
+		}
+		// walking units cannot take a build job reliably (no path from a moving position)
+		if (entity->has_component(component::component_t::GATHER)) {
+			auto gather = std::dynamic_pointer_cast<component::Gather>(
+				entity->get_component(component::component_t::GATHER));
+			auto phase = gather->get_job().phase;
+			if (phase != component::Gather::phase_t::NONE and phase != component::Gather::phase_t::GATHERING) {
+				continue;
+			}
+		}
+		result.push_back(&v);
+	}
+	std::stable_sort(result.begin(), result.end(), [&](const Seen *a, const Seen *b) {
+		return dist(a->ne, a->se, ne, se) < dist(b->ne, b->se, ne, se);
+	});
+	return result;
+}
+
+void AiPlayer::resume_foundations(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time) {
+	if (not this->production->enabled()) {
+		return;
+	}
+	const double now = time.to_double();
+	// foundations someone works on
+	std::unordered_set<entity_id_t> worked;
+	for (const auto &v : world.villagers) {
+		auto entity = state->get_game_entity(v.id);
+		if (entity->has_component(component::component_t::BUILDER)) {
+			auto builder = std::dynamic_pointer_cast<component::Builder>(
+				entity->get_component(component::component_t::BUILDER));
+			const auto &job = builder->get_job();
+			if (job.phase != component::Builder::phase_t::NONE and job.target) {
+				worked.insert(*job.target);
+			}
+		}
+	}
+	for (const auto &b : world.buildings) {
+		if (worked.contains(b.id) or this->production->is_complete(state, b.id, time)) {
+			continue;
+		}
+		// 10 s between assignments, longer after repeated failures (at most 60 s)
+		auto last = this->last_resume.find(b.id);
+		if (last != this->last_resume.end()
+		    and now - last->second.first < std::min(60.0, 10.0 * static_cast<double>(last->second.second))) {
+			continue;
+		}
+		auto candidates = this->free_builders(state, world, b.ne, b.se, time);
+		if (candidates.empty()) {
+			continue;
+		}
+		const auto *v = candidates.front();
+		state->get_combat()->cancel_attack(v->id, time);
+		auto queue = std::dynamic_pointer_cast<component::CommandQueue>(
+			state->get_game_entity(v->id)->get_component(component::component_t::COMMANDQUEUE));
+		queue->add_command(time, std::make_shared<component::command::BuildCommand>(b.id));
+		this->last_order[v->id] = now;
+		auto &resume = this->last_resume[b.id];
+		resume.first = now;
+		resume.second += 1;
+		log::log(INFO << "AI P" << this->player << ": villager " << v->id << " builds " << b.name << " "
+		              << b.id << " at (" << fmt1(b.ne) << ", " << fmt1(b.se) << "), assignment " << resume.second
+		              << ", t=" << fmt1(now) << " s");
+	}
+	std::erase_if(this->last_resume, [&](const auto &entry) { return not this->last_health.contains(entry.first); });
+}
+
 void AiPlayer::produce(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time) {
 	const double now = time.to_double();
+	this->resume_foundations(state, world, time);
 	EconomyView view;
 	std::vector<const Seen *> town_centers, barracks;
 	for (const auto &b : world.buildings) {
@@ -804,18 +896,18 @@ void AiPlayer::produce(const std::shared_ptr<GameState> &state, const World &wor
 			this->last_build[name] = now;
 			double side = house ? 2.0 : 3.0;
 			auto spot = this->building_spot(state, world, side, time);
-			if (not spot or world.villagers.empty()) {
+			if (not spot) {
 				detail = " (no free spot)";
 				break;
 			}
-			// nearest villagers build (one for a house, two for a barracks)
-			std::vector<const Seen *> by_distance;
-			for (const auto &v : world.villagers) {
-				by_distance.push_back(&v);
+			// nearest free villagers build (one for a house, two for a barracks)
+			auto by_distance = this->free_builders(state, world, spot->first, spot->second, time);
+			if (by_distance.empty()) {
+				// not placed: retry with the next decision
+				this->last_build.erase(name);
+				detail = " (no free villager)";
+				break;
 			}
-			std::stable_sort(by_distance.begin(), by_distance.end(), [&](const Seen *a, const Seen *b) {
-				return dist(a->ne, a->se, spot->first, spot->second) < dist(b->ne, b->se, spot->first, spot->second);
-			});
 			std::vector<entity_id_t> builders;
 			for (size_t i = 0; i < by_distance.size() and i < (house ? 1u : 2u); ++i) {
 				builders.push_back(by_distance[i]->id);

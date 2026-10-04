@@ -167,6 +167,11 @@ private:
 	void attack(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
 	void gather(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
 	void produce(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
+	/// villagers that may take a build job: no recent order, standing (idle or gathering), not fighting
+	std::vector<const Seen *> free_builders(const std::shared_ptr<GameState> &state, const World &world,
+	                                        double ne, double se, const time::time_t &time) const;
+	/// own foundations nobody works on get a builder again
+	void resume_foundations(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
 	void report(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
 	void schedule(const std::shared_ptr<GameState> &state, const time::time_t &time);
 
@@ -210,6 +215,8 @@ private:
 	std::string last_plan;
 	/// last build request per building name (simulation seconds)
 	std::unordered_map<std::string, double> last_build;
+	/// last builder assignment per foundation (simulation seconds) and the assignments so far
+	std::unordered_map<entity_id_t, std::pair<double, size_t>> last_resume;
 	/// path grid of land units (passability of building spots), -1 = unknown
 	long land_grid = -2;
 
