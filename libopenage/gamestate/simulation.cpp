@@ -2,6 +2,7 @@
 
 #include "simulation.h"
 
+#include <algorithm>
 #include <chrono>
 #include <thread>
 
@@ -51,11 +52,33 @@ GameSimulation::GameSimulation(const util::Path &root_dir,
 void GameSimulation::run() {
 	this->start();
 	time::time_t last_time = -1;
+	// XR fork: share of the time the simulation works (log every 5 s)
+	using clock_t = std::chrono::steady_clock;
+	auto stats_start = clock_t::now();
+	double busy = 0.0;
+	double busy_max = 0.0;
+	size_t steps = 0;
 	while (this->running) {
+		auto step_start = clock_t::now();
 		time::time_t current_time = this->time_loop->get_clock()->get_time();
 		this->event_loop->reach_time(current_time, this->game->get_state());
 		// XR fork (production): requests of the HUD/input, training queues
 		this->production->update(this->game->get_state(), this->event_loop, this->entity_factory, current_time);
+
+		auto step_end = clock_t::now();
+		double step = std::chrono::duration<double>(step_end - step_start).count();
+		busy += step;
+		busy_max = std::max(busy_max, step);
+		steps += 1;
+		double elapsed = std::chrono::duration<double>(step_end - stats_start).count();
+		if (elapsed >= 5.0) {
+			log::log(INFO << "Simulation: busy " << static_cast<int>(100.0 * busy / elapsed + 0.5) << " % of "
+			              << elapsed << " s, " << steps << " steps, longest " << 1000.0 * busy_max << " ms, game time "
+			              << current_time.to_double() << " s");
+			stats_start = step_end;
+			busy = busy_max = 0.0;
+			steps = 0;
+		}
 
 		if (current_time == last_time) {
 			// The clock advances in whole milliseconds (and not at all while paused).

@@ -11,6 +11,8 @@
 #include "log/log.h"
 
 #if WITH_QT
+	#include <dlfcn.h>
+
 	#include <QOffscreenSurface>
 	#include <QOpenGLContext>
 	#include <QOpenGLDebugLogger>
@@ -23,6 +25,32 @@
 namespace openage::renderer::opengl {
 
 #if WITH_QT
+namespace {
+
+/**
+ * Keep the Direct3D 12 libraries of WSLg loaded (XR fork).
+ *
+ * Mesa's d3d12 driver (GALLIUM_DRIVER=d3d12, the GPU under WSLg) loads
+ * libd3d12.so, which loads libd3d12core.so; both are unloaded when the last
+ * GL context of the driver is gone (probing contexts, the end of the game).
+ * Threads that used a context keep thread-local data of these libraries,
+ * whose destructors then run in unmapped code when the thread exits: SIGSEGV
+ * at the end of every game. RTLD_NODELETE keeps the loaded libraries mapped.
+ * With other drivers (llvmpipe, Android) they are not loaded and the calls
+ * do nothing.
+ */
+void pin_d3d12_libraries() {
+	static bool logged = false;
+	for (const char *name : {"libd3d12.so", "libd3d12core.so"}) {
+		if (dlopen(name, RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE) != nullptr and not logged) {
+			log::log(MSG(info) << "GL: " << name << " stays loaded (WSLg d3d12 driver)");
+		}
+	}
+	logged = true;
+}
+
+} // namespace
+
 /// The first element is the lowest version we need, last is highest version we support.
 static constexpr std::array<std::pair<int, int>, 1> gl_versions = {{{3, 3}}}; // for now we don't need any higher versions
 
@@ -78,6 +106,14 @@ void check_context(const gl_context_spec &specs) {
 
 	log::log(MSG(info) << "Created " << (specs.gles ? "OpenGL ES" : "OpenGL") << " context version " << specs.major_version << "." << specs.minor_version);
 
+	// XR fork: which driver renders (WSLg: d3d12 = GPU, llvmpipe = software)
+	auto gl_string = [](GLenum name) {
+		auto str = reinterpret_cast<const char *>(glGetString(name));
+		return std::string{str ? str : "?"};
+	};
+	log::log(MSG(info) << "GL_RENDERER " << gl_string(GL_RENDERER) << ", GL_VENDOR " << gl_string(GL_VENDOR)
+	                   << ", GL_VERSION " << gl_string(GL_VERSION));
+
 	// To quote the standard doc: 'The value gives a rough estimate of the
 	// largest texture that the GL can handle'
 	// -> wat?  anyways, we need at least 1024x1024.
@@ -131,6 +167,7 @@ gl_context_spec GlContext::find_spec(bool gles) {
 
 		test_context.setFormat(test_format);
 		test_context.create();
+		pin_d3d12_libraries();
 
 		if (!test_context.isValid()) {
 			if (i_ver == 0) {
@@ -189,6 +226,7 @@ GlContext::GlContext(const std::shared_ptr<QWindow> &window,
 	}
 
 	this->gl_context->makeCurrent(window.get());
+	pin_d3d12_libraries();
 
 	if (debug) {
 		// Log handler requires a current context, so we start it after associating

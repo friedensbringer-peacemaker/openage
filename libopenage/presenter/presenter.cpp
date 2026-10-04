@@ -4,6 +4,8 @@
 
 #include "config.h"
 
+#include "presenter/frame_stats.h"
+
 #include <chrono>
 #include <eigen3/Eigen/Dense>
 #include <iostream>
@@ -83,10 +85,18 @@ void Presenter::run(const renderer::window_settings window_settings) {
 
 	this->init_input();
 
-	const auto start = std::chrono::steady_clock::now();
+	using clock_t = std::chrono::steady_clock;
+	auto seconds = [](clock_t::time_point from, clock_t::time_point to) {
+		return std::chrono::duration<double>(to - from).count();
+	};
+	const auto start = clock_t::now();
 	size_t frames = 0;
+	// XR fork: frame rate and frame times in the log every 5 s
+	FrameStats stats;
+	auto stats_start = start;
 
 	while (not this->window->should_close() and not *this->stop_requested) {
+		const auto t_frame = clock_t::now();
 #if WITH_QT
 		if (this->gui_app) {
 			this->gui_app->process_events();
@@ -94,9 +104,11 @@ void Presenter::run(const renderer::window_settings window_settings) {
 #endif
 		// TODO: pass button presses and events from GUI to controller
 
+		const auto t_render = clock_t::now();
 		this->render();
 
 		this->renderer->check_error();
+		const auto t_present = clock_t::now();
 
 		frames += 1;
 		if (not window_settings.capture_file.empty()) {
@@ -110,6 +122,16 @@ void Presenter::run(const renderer::window_settings window_settings) {
 		}
 
 		this->window->update();
+
+		const auto t_end = clock_t::now();
+		stats.add(seconds(t_frame, t_render), seconds(t_render, t_present), seconds(t_present, t_end));
+		if (stats.due(seconds(stats_start, t_end))) {
+			auto size = this->window->get_size();
+			log::log(INFO << "Presenter: " << stats.report(seconds(stats_start, t_end)) << ", window "
+			              << size[0] << "x" << size[1]);
+			stats.reset();
+			stats_start = t_end;
+		}
 	}
 
 	log::log(MSG(info) << "Presenter: Draw loop exited");
@@ -155,7 +177,7 @@ void Presenter::init_graphics(const renderer::window_settings &window_settings) 
 	this->sink = window_settings.sink;
 
 	// Window and renderer
-	this->window = renderer::Window::create("openage presenter test", window_settings);
+	this->window = renderer::Window::create("xr.ages", window_settings);
 	this->renderer = this->window->make_renderer();
 
 	// Asset mangement
