@@ -228,7 +228,7 @@ int main() {
 						if (seen.contains(plan_t::BUILD_HOUSE)) {
 							check(e.population + easy.house_margin >= e.population_cap, "house only near the limit");
 						}
-						if (villagers > 0 and e.population + easy.house_margin >= e.population_cap and wood >= 25.0) {
+						if (villagers > 0 and e.population + easy.house_margin >= e.population_cap and wood >= 30.0) {
 							check(seen.contains(plan_t::BUILD_HOUSE), "house at the limit with wood");
 						}
 						if (villagers < 15 and e.population < e.population_cap and food >= 50.0) {

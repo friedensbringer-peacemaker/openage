@@ -89,6 +89,9 @@ void GameSimulation::start() {
 		this->pending_render_factory = nullptr;
 	}
 
+	// ai (XR fork): computer opponents train and build through the production
+	this->game->connect_ai_production(this->production);
+
 	this->running = not this->stop_requested;
 
 	log::log(MSG(info) << "Game simulation started");

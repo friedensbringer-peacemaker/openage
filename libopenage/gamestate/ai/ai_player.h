@@ -127,6 +127,12 @@ public:
 	/// thread-safe status snapshot
 	AiStatus get_status() const;
 
+	/**
+	 * Replace the training/building (the simulation connects its production
+	 * after the game was created, before the first decision).
+	 */
+	void set_production(const std::shared_ptr<ProductionPort> &production);
+
 private:
 	/// own or enemy entity seen in one decision round
 	struct Seen {
@@ -202,6 +208,8 @@ private:
 	/// last logged decision per topic (log when it changes)
 	std::string last_attack_wait;
 	std::string last_plan;
+	/// last build request per building name (simulation seconds)
+	std::unordered_map<std::string, double> last_build;
 	/// path grid of land units (passability of building spots), -1 = unknown
 	long land_grid = -2;
 

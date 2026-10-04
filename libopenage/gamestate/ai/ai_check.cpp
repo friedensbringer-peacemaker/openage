@@ -10,9 +10,13 @@
  * 50 ms through the event loop as fast as possible (like GameSimulation::run).
  * The AI controls player 1, player 0 is the human.
  *
+ *  All games except A0 run the production of the simulation (training, building).
+ *  A0. economy with the production stub (no spending): the AI villagers
+ *     gather, the resources of player 1 rise.
  *  A. passive human (easy AI): the army of player 0 is removed at t=0, its
- *     villagers stand still. The AI villagers gather (resources of player 1
- *     rise, player 0 unchanged), no attack before 8 min, then an attack wave
+ *     villagers stand still. The AI villagers gather (player 0 unchanged),
+ *     the AI trains villagers/militia and builds houses/barracks, no attack
+ *     before 8 min, then an attack wave
  *     on the town center; the match ends within --limit (default 1800 s
  *     simulation time) with victory for player 1.
  *  B. determinism: same seed again up to 150 s -> same resources, orders and
@@ -55,6 +59,7 @@
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/player.h"
+#include "gamestate/production.h"
 #include "gamestate/terrain_factory.h"
 #include "log/log.h"
 #include "util/fslike/directory.h"
@@ -87,9 +92,12 @@ struct World {
 	std::shared_ptr<Game> game;
 	std::shared_ptr<GameState> state;
 	std::shared_ptr<gamestate::event::Commander> commander;
+	std::shared_ptr<EntityFactory> factory;
+	/// production of the simulation (training, building), updated every step like GameSimulation::run
+	std::shared_ptr<prod::Production> production;
 	time::time_t now = time::TIME_ZERO;
 
-	World(const Options &opt, const AiSettings &ai) {
+	World(const Options &opt, const AiSettings &ai, bool with_production = true) {
 		this->loop = std::make_shared<openage::event::EventLoop>();
 		auto mod_manager = std::make_shared<assets::ModManager>(opt.root / "assets" / "converted");
 		for (const auto &mod : assets::ModManager::enumerate_modpacks(opt.root / "assets" / "converted")) {
@@ -97,6 +105,7 @@ struct World {
 		}
 		mod_manager->activate_modpacks({"engine", opt.modpack});
 		auto entity_factory = std::make_shared<EntityFactory>();
+		this->factory = entity_factory;
 		auto terrain_factory = std::make_shared<TerrainFactory>();
 		// same handlers as GameSimulation::init_event_handlers (the AI registers its own)
 		this->loop->add_event_handler(std::make_shared<gamestate::event::DragSelectHandler>());
@@ -115,6 +124,10 @@ struct World {
 		settings.ai = ai;
 		this->game = std::make_shared<Game>(this->loop, mod_manager, entity_factory, terrain_factory, settings);
 		this->state = this->game->get_state();
+		this->production = std::make_shared<prod::Production>();
+		if (with_production) {
+			this->game->connect_ai_production(this->production);
+		}
 		this->loop->reach_time(this->now, this->state);
 	}
 
@@ -123,6 +136,7 @@ struct World {
 		while (this->now < until) {
 			this->now = std::min(until, this->now + time::time_t::from_double(0.05));
 			this->loop->reach_time(this->now, this->state);
+			this->production->update(this->state, this->loop, this->factory, this->now);
 		}
 	}
 
@@ -259,6 +273,30 @@ int main(int argc, char **argv) {
 
 	try {
 		std::string fingerprint_a;
+		// ---- A0. economy alone (production stub: nothing is spent)
+		{
+			std::cout << "A0. economy with the production stub" << std::endl;
+			World w{opt, AiSettings{}, false};
+			auto ai = w.ai();
+			check(ai != nullptr, "AI exists");
+			if (not ai) {
+				std::cout << "ai check FAILED (no AI)" << std::endl;
+				return EXIT_FAILURE;
+			}
+			auto start1 = w.resources(1);
+			w.advance(120.0);
+			auto r1 = w.resources(1);
+			std::cout << "  t=120 s player 1: " << amounts(r1) << " (start " << amounts(start1) << ")" << std::endl;
+			size_t rising = 0;
+			for (size_t k = 0; k < 3; ++k) {
+				rising += r1[k] > start1[k] ? 1 : 0;
+			}
+			auto st = ai->get_status();
+			check(st.gather_orders > 0, "AI orders idle villagers to gather (" + std::to_string(st.gather_orders) + ")");
+			check(total(r1) > total(start1) and rising >= 2, "AI resources rise (" + std::to_string(rising) + " kinds)");
+			check(st.production_requests > 0 and st.production_done == 0, "stub: wishes logged, no effect");
+		}
+
 		// ---- A. passive human, easy AI
 		{
 			std::cout << "A. passive human, easy AI (seed " << opt.seed << ")" << std::endl;
@@ -288,25 +326,18 @@ int main(int argc, char **argv) {
 					std::cout << "  tc" << pl << " " << pos.ne.to_double() << "," << pos.se.to_double() << std::endl;
 				}
 			}
-			auto start1 = w.resources(1);
 			auto start0 = w.resources(0);
 			auto army1 = w.find(1, true);
 			check(army1.size() >= p.attack_threshold, "AI army reaches the threshold from the start");
 
 			w.advance(120.0);
-			auto r1 = w.resources(1);
 			auto r0 = w.resources(0);
-			std::cout << "  t=120 s player 1: " << amounts(r1) << " (start " << amounts(start1) << ")" << std::endl;
-			size_t rising = 0;
-			for (size_t k = 0; k < 3; ++k) {
-				rising += r1[k] > start1[k] ? 1 : 0;
-			}
+			std::cout << "  t=120 s player 1: " << amounts(w.resources(1)) << std::endl;
 			auto st = ai->get_status();
 			check(st.gather_orders > 0, "AI orders idle villagers to gather (" + std::to_string(st.gather_orders) + ")");
-			check(total(r1) > total(start1) and rising >= 2, "AI resources rise (" + std::to_string(rising) + " kinds)");
 			check(r0 == start0, "passive player 0 resources unchanged");
-			check(st.production_requests > 0 and st.production_done == 0,
-			      "production wishes logged, no effect (stub)");
+			check(st.production_requests > 0 and st.production_done > 0,
+			      "production wishes passed to the production (" + std::to_string(st.production_done) + ")");
 
 			w.advance(30.0);
 			fingerprint_a = w.fingerprint();
@@ -337,6 +368,16 @@ int main(int argc, char **argv) {
 			check(w.combat()->get_match_state(1) == combat::match_state_t::VICTORY, "state player 1: victory");
 			w.advance(5.0);
 			check(not ai->get_status().running and ai->get_status().phase == "over", "AI stops after the match");
+			size_t houses = 0, villagers = 0, militia = 0;
+			for (auto id : w.find(1, false)) {
+				const auto &name = w.combat()->get_stats(id)->name;
+				houses += name == "House" ? 1 : 0;
+				villagers += name == "Villager" ? 1 : 0;
+				militia += name == "Militia" ? 1 : 0;
+			}
+			std::cout << "  AI at the end: " << villagers << " villagers, " << militia << " militia, " << houses
+			          << " houses (with foundations), production requests " << st.production_requests << std::endl;
+			check(villagers > 3 or houses > 0, "AI trained villagers or built houses");
 			std::cout << "  game A: " << std::chrono::duration<double>(clock::now() - t0).count() << " s" << std::endl;
 		}
 

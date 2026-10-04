@@ -333,7 +333,7 @@ inline const char *to_string(plan_t plan) {
 /// AoE II costs (food, wood, gold, stone); the real costs come from nyan once production exists
 constexpr std::array<double, 4> COST_VILLAGER{50.0, 0.0, 0.0, 0.0};
 constexpr std::array<double, 4> COST_MILITIA{60.0, 0.0, 20.0, 0.0};
-constexpr std::array<double, 4> COST_HOUSE{0.0, 25.0, 0.0, 0.0};
+constexpr std::array<double, 4> COST_HOUSE{0.0, 30.0, 0.0, 0.0};
 constexpr std::array<double, 4> COST_BARRACKS{0.0, 175.0, 0.0, 0.0};
 
 inline bool affordable(const std::array<double, 4> &stock, const std::array<double, 4> &cost) {

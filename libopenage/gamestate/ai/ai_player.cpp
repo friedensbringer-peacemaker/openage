@@ -15,6 +15,7 @@
 #include "gamestate/ai/events.h"
 #include "gamestate/ai/production_port.h"
 #include "gamestate/combat/combat_state.h"
+#include "gamestate/component/api/builder.h"
 #include "gamestate/component/api/gather.h"
 #include "gamestate/component/api/harvestable.h"
 #include "gamestate/component/internal/command_queue.h"
@@ -103,6 +104,13 @@ const AiParams &AiPlayer::get_params() const {
 AiStatus AiPlayer::get_status() const {
 	std::lock_guard<std::mutex> lock{this->status_mutex};
 	return this->status;
+}
+
+void AiPlayer::set_production(const std::shared_ptr<ProductionPort> &production) {
+	if (production) {
+		this->production = production;
+		log::log(INFO << "AI P" << this->player << ": production " << production->name());
+	}
 }
 
 void AiPlayer::start(const std::shared_ptr<GameState> &state, const time::time_t &time) {
@@ -568,6 +576,14 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 		if (combat->get_target(v.id)) {
 			continue;
 		}
+		// builders (production) are busy too
+		if (entity->has_component(component::component_t::BUILDER)) {
+			auto builder = std::dynamic_pointer_cast<component::Builder>(
+				entity->get_component(component::component_t::BUILDER));
+			if (builder->get_job().phase != component::Builder::phase_t::NONE) {
+				continue;
+			}
+		}
 		auto last = this->last_order.find(v.id);
 		if (last != this->last_order.end() and now - last->second < this->params.order_cooldown) {
 			continue;
@@ -778,6 +794,14 @@ void AiPlayer::produce(const std::shared_ptr<GameState> &state, const World &wor
 		case plan_t::BUILD_HOUSE:
 		case plan_t::BUILD_BARRACKS: {
 			bool house = wish == plan_t::BUILD_HOUSE;
+			std::string name = house ? "House" : "Barracks";
+			// one placement per building kind every 15 s (rejected spots are retried later)
+			auto last = this->last_build.find(name);
+			if (last != this->last_build.end() and now - last->second < 15.0) {
+				detail = " (waiting for the last placement)";
+				break;
+			}
+			this->last_build[name] = now;
 			double side = house ? 2.0 : 3.0;
 			auto spot = this->building_spot(state, world, side, time);
 			if (not spot or world.villagers.empty()) {
@@ -797,7 +821,11 @@ void AiPlayer::produce(const std::shared_ptr<GameState> &state, const World &wor
 				builders.push_back(by_distance[i]->id);
 			}
 			coord::phys3 where{coord::phys_t{spot->first}, coord::phys_t{spot->second}, coord::phys_t{0}};
-			done = this->production->build(state, this->player, house ? "House" : "Barracks", builders, where, time);
+			done = this->production->build(state, this->player, name, builders, where, time);
+			for (auto id : builders) {
+				// builders are not sent gathering before their build command arrives
+				this->last_order[id] = now;
+			}
 			detail = " at (" + fmt1(spot->first) + ", " + fmt1(spot->second) + ") by " + std::to_string(builders.size())
 			         + " villager" + (builders.size() == 1 ? "" : "s");
 		} break;

@@ -15,6 +15,10 @@
 namespace openage::gamestate {
 class GameState;
 
+namespace prod {
+class Production;
+}
+
 namespace ai {
 
 /// population of a player
@@ -26,12 +30,11 @@ struct Population {
 /**
  * Training and construction for the computer opponent (XR fork).
  *
- * The production branch (xr-prod: gamestate/production.h, prod::Production)
- * is not merged into this branch yet. Until then make_production_port()
- * returns a stub without any effect: the AI still decides and logs what it
- * would train or build. After the merge only make_production_port() and a
- * bridge class implementing this interface are needed, see
- * production_port.cpp ("after the merge with xr-prod").
+ * Two implementations (production_port.cpp): the bridge to the production of
+ * the simulation (gamestate/production.h, prod::Production: train_for(),
+ * place_for(), population_of(), queued_in(), is_finished()), and a stub
+ * without any effect for games without production (host checks): the AI
+ * still decides and logs what it would train or build.
  *
  * All methods are called from the simulation thread (AI think events).
  */
@@ -98,10 +101,10 @@ public:
 };
 
 /**
- * Production for the AI: the stub (no effect) until the production branch
- * is connected (compile definition OPENAGE_AI_PRODUCTION, see the .cpp).
+ * Production for the AI: the bridge to \p production, or the stub (no
+ * effect) without it.
  */
-std::shared_ptr<ProductionPort> make_production_port();
+std::shared_ptr<ProductionPort> make_production_port(const std::shared_ptr<prod::Production> &production = nullptr);
 
 } // namespace ai
 } // namespace openage::gamestate

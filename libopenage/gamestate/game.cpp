@@ -102,6 +102,12 @@ const std::vector<std::shared_ptr<ai::AiPlayer>> &Game::get_ai_players() const {
 	return this->ai_players;
 }
 
+void Game::connect_ai_production(const std::shared_ptr<prod::Production> &production) {
+	for (const auto &ai : this->ai_players) {
+		ai->set_production(ai::make_production_port(production));
+	}
+}
+
 void Game::start_ai(const std::shared_ptr<openage::event::EventLoop> &event_loop,
                     const MapSettings &settings) {
 	const auto &s = settings.ai;

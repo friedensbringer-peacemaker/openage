@@ -43,6 +43,9 @@ class Universe;
 namespace ai {
 class AiPlayer;
 }
+namespace prod {
+class Production;
+}
 
 /**
  * Manages a game session (settings, win conditions, etc.).
@@ -112,6 +115,12 @@ public:
 	 * The objects live as long as the game; get_status() is thread-safe.
 	 */
 	const std::vector<std::shared_ptr<ai::AiPlayer>> &get_ai_players() const;
+
+	/**
+	 * Let the computer opponents train and build through the production of
+	 * the simulation (before that they only log their wishes).
+	 */
+	void connect_ai_production(const std::shared_ptr<prod::Production> &production);
 	// ---- end ai (XR fork) ----
 
 private:

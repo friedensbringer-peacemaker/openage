@@ -1128,7 +1128,7 @@ int main(int argc, char **argv) {
 	log::set_level(log::level::info);
 
 	// ai (XR fork): the input replays check the human side; keep the computer opponent out
-	if ((args.replay or args.replay_econ or args.replay_combat) and not args.ai_explicit) {
+	if ((args.replay or args.replay_econ or args.replay_combat or args.replay_prod) and not args.ai_explicit) {
 		args.map.ai.mode = gamestate::ai_mode_t::OFF;
 	}
 

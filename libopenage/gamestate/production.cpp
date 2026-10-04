@@ -811,6 +811,50 @@ void Production::place(const std::string &id, const coord::phys3 &ground_hit) {
 	this->push(std::move(request));
 }
 
+// ---- ai (XR fork)
+void Production::train_for(player_id_t player, entity_id_t building, const std::string &id) {
+	Request request;
+	request.kind = Request::kind_t::TRAIN_IN;
+	request.id = id;
+	request.building = building;
+	request.for_player = player;
+	this->push(std::move(request));
+}
+
+void Production::place_for(player_id_t player,
+                           const std::vector<entity_id_t> &builders,
+                           const std::string &id,
+                           const coord::phys3 &ground_hit) {
+	Request request;
+	request.kind = Request::kind_t::PLACE;
+	request.id = id;
+	request.pos = ground_hit;
+	request.for_player = player;
+	request.builders = builders;
+	this->push(std::move(request));
+}
+
+PlayerPopulation population_of(const std::shared_ptr<GameState> &state,
+                               player_id_t player,
+                               const time::time_t &time) {
+	auto all = count_population(state, time);
+	auto it = all.find(player);
+	if (it == all.end()) {
+		return {};
+	}
+	return {it->second.used(), it->second.cap()};
+}
+
+size_t queued_in(const std::shared_ptr<GameEntity> &building) {
+	auto production = component_of<ProductionComp>(building, component::component_t::PRODUCTION_QUEUE);
+	return production == nullptr ? 0 : production->get_queue().size();
+}
+
+bool is_finished(const std::shared_ptr<GameEntity> &building) {
+	return is_complete(building);
+}
+// ---- end ai (XR fork)
+
 void Production::push(Request &&request) {
 	std::lock_guard<std::mutex> lock{this->mutex};
 	this->requests.push_back(std::move(request));
@@ -884,6 +928,12 @@ void Production::update(const std::shared_ptr<GameState> &state,
 
 	// --- requests ---
 	for (const auto &request : todo) {
+		// ai (XR fork): requests of a computer opponent leave the HUD status alone
+		auto status = [&](const std::string &text, status_t kind) {
+			if (not request.for_player) {
+				this->set_status(text, kind);
+			}
+		};
 		switch (request.kind) {
 		case Request::kind_t::TRAIN:
 		case Request::kind_t::TRAIN_IN: {
@@ -891,7 +941,9 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			std::vector<std::shared_ptr<GameEntity>> candidates;
 			if (request.kind == Request::kind_t::TRAIN_IN) {
 				auto building = find_entity(state, request.building);
-				if (building != nullptr) {
+				// ai (XR fork): a computer opponent trains in its own buildings only
+				if (building != nullptr
+				    and (not request.for_player or owner_of(building, now) == *request.for_player)) {
 					candidates.push_back(building);
 				}
 			}
@@ -918,7 +970,7 @@ void Production::update(const std::shared_ptr<GameState> &state,
 				}
 			}
 			if (best == nullptr) {
-				this->set_status(request.id.empty() ? "Die Auswahl kann nichts ausbilden"
+				status(request.id.empty() ? "Die Auswahl kann nichts ausbilden"
 				                                    : "Die Auswahl kann " + label_of(request.id) + " nicht ausbilden",
 				                 status_t::warn);
 				break;
@@ -926,13 +978,13 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			auto production = component_of<ProductionComp>(best, component::component_t::PRODUCTION_QUEUE);
 			auto owner = owner_of(best, now);
 			if (production->get_queue().size() >= MAX_QUEUE) {
-				this->set_status("Warteschlange voll", status_t::warn);
+				status("Warteschlange voll", status_t::warn);
 				break;
 			}
 			auto &stock = state->get_player(owner)->get_resources();
 			if (not stock.spend(creatable->cost)) {
 				auto missing = missing_resource(stock.get(), creatable->cost);
-				this->set_status(missing ? missing_message(*missing) : "Nicht genug Rohstoffe", status_t::warn);
+				status(missing ? missing_message(*missing) : "Nicht genug Rohstoffe", status_t::warn);
 				log::log(INFO << "Production: player " << owner << " cannot afford " << creatable->name);
 				break;
 			}
@@ -946,7 +998,7 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			              << entity_name(best) << " (entity " << best->get_id() << ", queue "
 			              << production->get_queue().size() << "/" << MAX_QUEUE << ", "
 			              << creatable->time << " s), " << cost_str(creatable->cost));
-			this->set_status(label_of(creatable->name) + " wird ausgebildet", status_t::info);
+			status(label_of(creatable->name) + " wird ausgebildet", status_t::info);
 		} break;
 
 		case Request::kind_t::CANCEL: {
@@ -964,19 +1016,31 @@ void Production::update(const std::shared_ptr<GameState> &state,
 				}
 				log::log(INFO << "Production: player " << owner << " cancels " << item->name << " in entity "
 				              << entity->get_id() << ", refunded");
-				this->set_status(label_of(item->name) + " abgebrochen", status_t::info);
+				status(label_of(item->name) + " abgebrochen", status_t::info);
 				done = true;
 				break;
 			}
 			if (not done) {
-				this->set_status("Nichts in Ausbildung", status_t::info);
+				status("Nichts in Ausbildung", status_t::info);
 			}
 		} break;
 
 		case Request::kind_t::PLACE: {
 			std::vector<std::shared_ptr<GameEntity>> builders;
 			const BuilderComp::Buildable *buildable = nullptr;
-			for (const auto &entity : own) {
+			// ai (XR fork): builders of a computer opponent instead of the HUD selection
+			std::vector<std::shared_ptr<GameEntity>> ai_builders;
+			if (request.for_player) {
+				for (auto id : request.builders) {
+					auto entity = find_entity(state, id);
+					if (entity != nullptr and entity->has_component(component::component_t::OWNERSHIP)
+					    and owner_of(entity, now) == *request.for_player
+					    and not (state->get_combat() != nullptr and state->get_combat()->is_dead(id))) {
+						ai_builders.push_back(entity);
+					}
+				}
+			}
+			for (const auto &entity : request.for_player ? ai_builders : own) {
 				auto builder = component_of<BuilderComp>(entity, component::component_t::BUILDER);
 				if (builder == nullptr) {
 					continue;
@@ -991,7 +1055,7 @@ void Production::update(const std::shared_ptr<GameState> &state,
 				builders.push_back(entity);
 			}
 			if (buildable == nullptr) {
-				this->set_status("Keine Dorfbewohner ausgewählt", status_t::warn);
+				status("Keine Dorfbewohner ausgewählt", status_t::warn);
 				break;
 			}
 			auto map = state->get_map();
@@ -1029,7 +1093,7 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			});
 			coord::phys3 anchor{coord::phys_t{ane}, coord::phys_t{ase}, coord::phys_t{0.0}};
 			if (result != placement_t::OK) {
-				this->set_status(placement_message(result), status_t::warn);
+				status(placement_message(result), status_t::warn);
 				log::log(INFO << "Production: " << request.id << " at tile " << tile_str(anchor)
 				              << " rejected: " << placement_message(result));
 				break;
@@ -1038,7 +1102,7 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			auto &stock = state->get_player(owner)->get_resources();
 			if (not stock.spend(buildable->cost)) {
 				auto missing = missing_resource(stock.get(), buildable->cost);
-				this->set_status(missing ? missing_message(*missing) : "Nicht genug Rohstoffe", status_t::warn);
+				status(missing ? missing_message(*missing) : "Nicht genug Rohstoffe", status_t::warn);
 				log::log(INFO << "Production: player " << owner << " cannot afford " << buildable->name);
 				break;
 			}
@@ -1089,7 +1153,7 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			              << building->get_id() << ") at tile " << tile_str(anchor) << ", " << tiles.size()
 			              << " tiles, " << builders.size() << " builders, build time " << buildable->time
 			              << " s, " << cost_str(buildable->cost));
-			this->set_status(label_of(buildable->name) + " wird gebaut", status_t::info);
+			status(label_of(buildable->name) + " wird gebaut", status_t::info);
 		} break;
 
 		default:
