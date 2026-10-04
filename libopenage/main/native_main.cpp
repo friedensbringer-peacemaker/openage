@@ -11,7 +11,7 @@
  *   openage-native --root <dir> [--modpack hd_base] [--headless]
  *                  [--seconds N] [--width W --height H] [--check]
  *                  [--gles] [--render-check <png>] [--shader-check]
- *                  [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --stop-in-resize] [--frames N]]
+ *                  [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --replay-prod | --stop-in-resize] [--frames N]]
  *                  [--map test|random [--map-seed N] [--map-size N]
  *                   [--map-trees N] [--map-elevation H] [--map-view ne,se[,zoom[,height]]]
  *                   [--map-skirmish]]
@@ -44,6 +44,11 @@
  * --replay-econ (XR fork, economy; with --map random) selects each villager of the
  * first player and right clicks a tree, berries and gold next to it (gathering),
  * captures <png> after 45 s and <png stem>-econ2.png after 90 s.
+ * --replay-prod (XR fork, production; with --map random) selects the town centre of the
+ * first player and presses T twice (2 villagers), selects a villager, presses Y (house)
+ * and clicks a free spot (foundation); then tries to place a house on water through
+ * the production interface (rejected). Logs the HUD snapshot every 5 s, captures
+ * <png> after 20 s (training, construction) and <png stem>-prod2.png after 70 s.
  * A hanging engine fails the check instead of blocking: no new frame for
  * 60 s stops it, and if it did not stop 10 s after Engine::stop(), the
  * process exits with an error.
@@ -101,6 +106,7 @@
 #include "gamestate/heightmap.h"
 #include "gamestate/map_generator.h"
 #include "gamestate/map_settings.h"
+#include "gamestate/production.h"
 #include "log/log.h"
 #if WITH_QT
 	#include "renderer/gui/integration/public/gui_application_with_logger.h"
@@ -130,6 +136,8 @@ struct native_args {
 	std::string egl_sink_check;
 	bool replay = false;
 	bool replay_econ = false;
+	// XR fork (production)
+	bool replay_prod = false;
 	bool replay_combat = false;
 	bool stop_in_resize = false;
 	uint64_t frames = 1000;
@@ -167,7 +175,7 @@ void usage(const char *argv0) {
 	          << " --root <dir> [--modpack <id>]... [--headless] [--seconds <n>]"
 	             " [--width <w> --height <h>] [--check]"
 	             " [--gles] [--render-check <png>] [--shader-check]"
-	             " [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --stop-in-resize] [--frames <n>]]"
+	             " [--egl-sink-check <png> [--replay | --replay-econ | --replay-combat | --replay-prod | --stop-in-resize] [--frames <n>]]"
 	             " [--map test|random [--map-seed <n>] [--map-size <n>] [--map-trees <n>]"
 	             " [--map-elevation <h>] [--map-view <ne,se[,zoom[,height]]>] [--map-skirmish]]"
 	             " [--background <r,g,b,a> [--background-switch <r,g,b,a>]]"
@@ -211,6 +219,9 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		}
 		else if (arg == "--replay") {
 			args.replay = true;
+		}
+		else if (arg == "--replay-prod") {
+			args.replay_prod = true;
 		}
 		else if (arg == "--replay-econ") {
 			args.replay_econ = true;
@@ -596,6 +607,226 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> econ_replay_steps(co
 #endif
 
 #if WITH_EGL
+/// a water tile of the generated map for the placement check (XR fork, production)
+struct ProdReplayTargets {
+	std::optional<std::array<double, 2>> water;
+};
+
+/**
+ * Input replay of the production check (--replay-prod, XR fork): on the random map,
+ * select the first town centre and press T twice, select a villager, press Y and
+ * click a free 2x2 spot next to the town centre (house foundation).
+ * Captures <png> after 20 s and <png stem>-prod2 after 70 s.
+ */
+std::vector<openage::renderer::opengl::TestFrameSink::Step> prod_replay_steps(const native_args &args,
+                                                                               openage::gamestate::MapSettings &map_settings,
+                                                                               double start,
+                                                                               const std::string &capture_file,
+                                                                               ProdReplayTargets &targets) {
+	using namespace openage;
+	using renderer::opengl::TestFrameSink;
+	using gamestate::map_object_t;
+	using gamestate::map_terrain_t;
+	using E = renderer::SinkInputEvent;
+
+	const auto map = gamestate::generate_map(map_settings);
+	const gamestate::Heightmap heights{map.width, map.height, map.corners};
+	const auto tc = map.starts.at(0);
+	if (not map_settings.view) {
+		gamestate::MapView start_view;
+		start_view.ne = tc[0];
+		start_view.se = tc[1];
+		start_view.zoom = 1.5f;
+		map_settings.view = start_view;
+	}
+	const gamestate::MapView view = *map_settings.view;
+
+	const int width = static_cast<int>(args.width);
+	const int height = static_cast<int>(args.height);
+	auto camera = std::make_shared<renderer::camera::Camera>(nullptr, util::Vector2s{args.width, args.height});
+	camera->look_at_coord(coord::scene3{10.0, 10.0, 0});
+	camera->move_to(Eigen::Vector3f{0.0f, view.height, 0.0f});
+	camera->look_at_coord(coord::scene3{view.ne, view.se, 0});
+	camera->set_zoom(view.zoom);
+	const Eigen::Matrix4f matrix = camera->get_projection_matrix() * camera->get_view_matrix();
+
+	auto pixel = [&](double ne, double se, double up) {
+		double ground = heights.is_flat() ? 0.0 : heights.at(ne, se);
+		coord::phys3 pos{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{ground + up}};
+		auto w = pos.to_scene3().to_world_space();
+		Eigen::Vector4f clip = matrix * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+		int x = static_cast<int>(std::lround((clip.x() + 1.0) * 0.5 * width));
+		int y = static_cast<int>(std::lround(height - (clip.y() + 1.0) * 0.5 * height));
+		return std::pair{x, y};
+	};
+	auto on_screen = [&](std::pair<int, int> p) {
+		return p.first >= 40 and p.second >= 40 and p.first < width - 40 and p.second < height - 40;
+	};
+	auto tile_kind = [&](long ne, long se) {
+		return map.tiles[static_cast<size_t>(ne) + static_cast<size_t>(se) * map.width];
+	};
+	auto is_water = [](map_terrain_t kind) {
+		return kind == map_terrain_t::WATER or kind == map_terrain_t::WATER_MEDIUM
+		       or kind == map_terrain_t::WATER_DEEP;
+	};
+
+	// tiles a house must not cover: objects, villagers (and their neighbours), water, shore
+	std::vector<uint8_t> bad(map.width * map.height, 0);
+	for (auto idx : map.blocked) {
+		bad[idx] = 1;
+	}
+	const gamestate::MapObject *villager = nullptr;
+	for (const auto &o : map.objects) {
+		if (o.kind == map_object_t::VILLAGER) {
+			if (villager == nullptr and o.owner == 0) {
+				villager = &o;
+			}
+			for (long dy = -1; dy <= 1; ++dy) {
+				for (long dx = -1; dx <= 1; ++dx) {
+					long x = static_cast<long>(std::floor(o.ne)) + dx;
+					long y = static_cast<long>(std::floor(o.se)) + dy;
+					if (x >= 0 and y >= 0 and x < static_cast<long>(map.width) and y < static_cast<long>(map.height)) {
+						bad[static_cast<size_t>(x) + static_cast<size_t>(y) * map.width] = 1;
+					}
+				}
+			}
+		}
+	}
+	for (size_t i = 0; i < bad.size(); ++i) {
+		auto kind = map.tiles[i];
+		if (is_water(kind) or kind == map_terrain_t::BEACH or kind == map_terrain_t::SHALLOWS) {
+			bad[i] = 1;
+		}
+	}
+	// house anchor (tile corner): the 2x2 tiles around it free, 5..9 tiles from the town centre
+	std::optional<std::array<double, 2>> house;
+	double best = 1e9;
+	for (long y = 1; y < static_cast<long>(map.height); ++y) {
+		for (long x = 1; x < static_cast<long>(map.width); ++x) {
+			double d = std::hypot(x - tc[0], y - tc[1]);
+			if (d < 5.0 or d > 9.0) {
+				continue;
+			}
+			bool free = true;
+			for (long dy = -2; dy <= 1 and free; ++dy) {
+				for (long dx = -2; dx <= 1 and free; ++dx) {
+					long tx = x + dx;
+					long ty = y + dy;
+					// footprint plus a free ring (the villager walks around it)
+					free = tx >= 0 and ty >= 0 and tx < static_cast<long>(map.width) and ty < static_cast<long>(map.height)
+					       and not bad[static_cast<size_t>(tx) + static_cast<size_t>(ty) * map.width];
+				}
+			}
+			if (free and on_screen(pixel(x, y, 0.0)) and d < best) {
+				best = d;
+				house = std::array<double, 2>{static_cast<double>(x), static_cast<double>(y)};
+			}
+		}
+	}
+	// water tile next to the start for the rejected placement
+	best = 1e9;
+	for (long y = 0; y < static_cast<long>(map.height); ++y) {
+		for (long x = 0; x < static_cast<long>(map.width); ++x) {
+			if (not is_water(tile_kind(x, y))) {
+				continue;
+			}
+			double d = std::hypot(x + 0.5 - tc[0], y + 0.5 - tc[1]);
+			if (d < best) {
+				best = d;
+				targets.water = std::array<double, 2>{x + 0.5, y + 0.5};
+			}
+		}
+	}
+
+	std::vector<TestFrameSink::Step> steps;
+	auto add = [&](double at, int type, int x, int y, int button, int buttons, int key = 0) {
+		TestFrameSink::Step step;
+		step.at = start + at;
+		step.what = TestFrameSink::Step::kind::input;
+		step.event.type = type;
+		step.event.x = x;
+		step.event.y = y;
+		step.event.button = button;
+		step.event.buttons = buttons;
+		step.event.key = key;
+		steps.push_back(step);
+	};
+	auto select_box = [&](double t, std::pair<int, int> p, int box) {
+		add(t, E::kMouseMove, p.first - box, p.second - box, 0, 0);
+		add(t + 0.1, E::kMouseDown, p.first - box, p.second - box, E::kLeftButton, E::kLeftButton);
+		for (int i = 1; i <= 4; ++i) {
+			add(t + 0.1 + 0.05 * i, E::kMouseMove, p.first - box + box * i / 2, p.second - box + box * i / 2, 0, E::kLeftButton);
+		}
+		add(t + 0.4, E::kMouseUp, p.first + box, p.second + box, E::kLeftButton, 0);
+	};
+	auto key = [&](double t, int code, std::pair<int, int> p) {
+		add(t, E::kKeyDown, p.first, p.second, 0, 0, code);
+		add(t + 0.05, E::kKeyUp, p.first, p.second, 0, 0, code);
+	};
+	constexpr int key_t = 0x54;
+	constexpr int key_y = 0x59;
+
+	auto tp = pixel(tc[0], tc[1], 0.0);
+	log::log(INFO << "prod replay: town centre at tile (" << tc[0] << ", " << tc[1] << ") pixel ("
+	              << tp.first << ", " << tp.second << ")");
+	select_box(0.0, tp, 6);
+	key(0.8, key_t, tp);
+	key(1.1, key_t, tp);
+	if (villager != nullptr and house) {
+		auto vp = pixel(villager->ne, villager->se, 0.0);
+		auto hp = pixel((*house)[0], (*house)[1], 0.0);
+		log::log(INFO << "prod replay: villager at tile (" << villager->ne << ", " << villager->se << ") pixel ("
+		              << vp.first << ", " << vp.second << "), house at tile (" << (*house)[0] << ", " << (*house)[1]
+		              << ") pixel (" << hp.first << ", " << hp.second << ")");
+		select_box(2.0, vp, 6);
+		key(2.8, key_y, vp);
+		add(3.2, E::kMouseMove, hp.first, hp.second, 0, 0);
+		add(3.3, E::kMouseDown, hp.first, hp.second, E::kLeftButton, E::kLeftButton);
+		add(3.4, E::kMouseUp, hp.first, hp.second, E::kLeftButton, 0);
+	}
+	else {
+		log::log(WARN << "prod replay: no villager or no free house spot on screen");
+	}
+
+	const std::filesystem::path png{capture_file};
+	TestFrameSink::Step early;
+	early.at = start + 20.0;
+	early.what = TestFrameSink::Step::kind::capture;
+	early.file = capture_file;
+	steps.push_back(early);
+	TestFrameSink::Step later;
+	later.at = start + 70.0;
+	later.what = TestFrameSink::Step::kind::capture;
+	later.file = (png.parent_path() / (png.stem().string() + "-prod2" + png.extension().string())).string();
+	steps.push_back(later);
+	return steps;
+}
+
+/// one log line of the production HUD snapshot
+void log_prod_snapshot(const openage::gamestate::prod::Snapshot &snap) {
+	using namespace openage;
+	std::ostringstream options;
+	for (const auto &o : snap.options) {
+		options << " " << o.id << "(" << o.code << (o.available ? "" : ", " + o.reason) << ")";
+	}
+	std::ostringstream queue;
+	if (snap.queue) {
+		queue << snap.queue->label << " " << snap.queue->items.size() << " items, progress "
+		      << static_cast<int>(std::lround(100.0 * snap.queue->progress)) << " %"
+		      << (snap.queue->waiting_for_housing ? ", waits for housing" : "");
+	}
+	else {
+		queue << "-";
+	}
+	log::log(INFO << "prod hud: t=" << snap.time << " food " << snap.resources[0] << " wood " << snap.resources[1]
+	              << " gold " << snap.resources[2] << " stone " << snap.resources[3] << " population "
+	              << snap.population << "/" << snap.population_cap << " selection " << snap.selection_count
+	              << " " << snap.selection_label
+	              << (snap.construction ? " (construction " + std::to_string(static_cast<int>(100.0 * *snap.construction)) + " %)" : "")
+	              << " options" << options.str() << " queue " << queue.str()
+	              << " placement '" << snap.placement << "' status '" << snap.status << "'");
+}
+
 /**
  * Render into a test frame sink without any window system (see file header).
  *
@@ -618,7 +849,11 @@ bool egl_sink_check(const native_args &args,
 
 	auto map_settings = args.map;
 	std::vector<TestFrameSink::Step> steps;
-	if (args.replay_econ and not args.stop_in_resize) {
+	ProdReplayTargets prod_targets;
+	if (args.replay_prod and not args.stop_in_resize) {
+		steps = prod_replay_steps(args, map_settings, start, png.string(), prod_targets);
+	}
+	else if (args.replay_econ and not args.stop_in_resize) {
 		steps = econ_replay_steps(args, map_settings, start, png.string());
 	}
 	else if (args.replay_combat and not args.stop_in_resize) {
@@ -677,6 +912,36 @@ bool egl_sink_check(const native_args &args,
 	// ai (XR fork): faster simulation clock
 	if (args.sim_speed) {
 		engine->get_clock()->set_speed(time::speed_t::from_double(*args.sim_speed));
+	}
+
+	// production check (XR fork): HUD snapshot every 5 s through the thread-safe interface,
+	// a house on water after the first house was paid (must be rejected)
+	std::atomic<bool> prod_driver_stop{false};
+	std::thread prod_driver;
+	if (args.replay_prod) {
+		prod_driver = std::thread{[&prod_driver_stop, production = engine->get_production(), water = prod_targets.water]() {
+			auto last_log = clock::now() - std::chrono::seconds(10);
+			bool water_done = false;
+			while (not prod_driver_stop) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(250));
+				auto snap = production->snapshot();
+				if (clock::now() - last_log >= std::chrono::seconds(5)) {
+					last_log = clock::now();
+					log_prod_snapshot(snap);
+				}
+				if (not water_done and snap.time > 1.0 and snap.resources[1] < 199.5) {
+					water_done = true;
+					if (water) {
+						log::log(INFO << "prod replay: house on water at tile (" << (*water)[0] << ", " << (*water)[1] << ")");
+						production->place("House", coord::phys3{coord::phys_t{(*water)[0]}, coord::phys_t{(*water)[1]}, coord::phys_t{0.0}});
+					}
+					else {
+						log::log(WARN << "prod replay: no water on the map");
+					}
+				}
+			}
+			log_prod_snapshot(production->snapshot());
+		}};
 	}
 
 	// written before the engine is stopped, read after its threads are joined
@@ -763,6 +1028,10 @@ bool egl_sink_check(const native_args &args,
 		engine->stop();
 	}
 	loop_finished = true;
+	if (prod_driver.joinable()) {
+		prod_driver_stop = true;
+		prod_driver.join();
+	}
 	{
 		// the watcher calls engine->stop() once more: destroy the engine only after that
 		std::unique_lock<std::mutex> lock{shutdown_mutex};

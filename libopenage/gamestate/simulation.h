@@ -35,6 +35,10 @@ class EntityFactory;
 class Game;
 class TerrainFactory;
 
+namespace prod {
+class Production;
+} // namespace prod
+
 namespace event {
 class Commander;
 class Spawner;
@@ -100,6 +104,14 @@ public:
 	const std::shared_ptr<gamestate::Game> get_game();
 
 	/**
+	 * Get the game without waiting (XR fork): start() holds the lock while the
+	 * game is created (modpacks, map), a HUD in another thread must not block.
+	 *
+	 * @return Game instance, nullptr if there is none yet or the lock is busy.
+	 */
+	std::shared_ptr<gamestate::Game> try_get_game();
+
+	/**
 	 * Get the event loop for the gamestate.
 	 *
 	 * @return Event loop.
@@ -123,6 +135,13 @@ public:
 	 * @return Commander for sending commands.
 	 */
 	const std::shared_ptr<gamestate::event::Commander> get_commander();
+
+	/**
+	 * Production interface for the HUD and the input bindings (XR fork, thread-safe).
+	 *
+	 * @return Production interface (exists before the game starts).
+	 */
+	const std::shared_ptr<gamestate::prod::Production> get_production();
 
 	/**
 	 * Attach a renderer to the simulation.
@@ -207,6 +226,9 @@ private:
 	// TODO: move somewhere sensible or remove
 	std::shared_ptr<gamestate::event::Spawner> spawner;
 	std::shared_ptr<gamestate::event::Commander> commander;
+
+	// XR fork (production): training, construction, HUD interface
+	std::shared_ptr<gamestate::prod::Production> production;
 
 	// TODO: The game run by the engine
 	std::shared_ptr<gamestate::Game> game;

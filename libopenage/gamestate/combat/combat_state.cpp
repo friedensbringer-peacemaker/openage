@@ -106,6 +106,10 @@ void CombatState::register_entity(const std::shared_ptr<GameEntity> &entity,
 	combatant.stats = stats;
 	this->combatants[entity->get_id()] = std::move(combatant);
 	this->set_health_snapshot(entity->get_id(), health, stats->max_health, true);
+	{
+		std::lock_guard<std::mutex> lock{this->shared_mutex};
+		this->stats_snapshot[entity->get_id()] = stats;
+	}
 }
 
 void CombatState::start(const std::shared_ptr<GameState> &state, const time::time_t &time) {
@@ -235,6 +239,14 @@ std::string describe(const std::shared_ptr<GameEntity> &entity, const CombatStat
 void CombatState::set_health_snapshot(entity_id_t id, int64_t health, int64_t max_health, bool alive) {
 	std::lock_guard<std::mutex> lock{this->shared_mutex};
 	this->health_snapshot[id] = {id, health, max_health, alive};
+}
+
+void CombatState::health_changed(entity_id_t id, int64_t health) {
+	auto *combatant = this->find(id);
+	if (combatant == nullptr or combatant->dead) {
+		return;
+	}
+	this->set_health_snapshot(id, health, combatant->stats->max_health, health > 0);
 }
 
 // ---------------------------------------------------------------- orders
@@ -575,6 +587,7 @@ void CombatState::remove(const std::shared_ptr<GameState> &state, entity_id_t id
 		std::lock_guard<std::mutex> lock{this->shared_mutex};
 		this->removed.insert(id);
 		this->health_snapshot.erase(id);
+		this->stats_snapshot.erase(id);
 	}
 	log::log(DBG << "Combat: entity " << id << " removed at t=" << time.to_double());
 }
@@ -626,8 +639,10 @@ void CombatState::scan(const std::shared_ptr<GameState> &state, const time::time
 
 void CombatState::update_match(const time::time_t &time) {
 	std::map<player_id_t, size_t> alive;
+	std::map<player_id_t, size_t> units;
 	for (auto player : this->participants) {
 		alive[player] = 0;
+		units[player] = 0;
 	}
 	for (const auto &[id, c] : this->combatants) {
 		if (c.dead or not c.stats->counts_for_victory()) {
@@ -638,6 +653,9 @@ void CombatState::update_match(const time::time_t &time) {
 			continue;
 		}
 		alive[owner] += 1;
+		if (c.stats->unit and not c.stats->building) {
+			units[owner] += 1;
+		}
 		this->participants.insert(owner);
 	}
 	auto result = evaluate_match(alive);
@@ -655,6 +673,7 @@ void CombatState::update_match(const time::time_t &time) {
 			}
 		}
 		this->match_status.alive = alive;
+		this->match_status.units = units;
 		this->match_status.result = result;
 		if (result.over and not this->match_over) {
 			this->match_over = true;
@@ -718,6 +737,12 @@ std::vector<HealthInfo> CombatState::get_health(const std::vector<entity_id_t> &
 		}
 	}
 	return result;
+}
+
+std::shared_ptr<const CombatStats> CombatState::get_stats_snapshot(entity_id_t id) const {
+	std::lock_guard<std::mutex> lock{this->shared_mutex};
+	auto it = this->stats_snapshot.find(id);
+	return it == this->stats_snapshot.end() ? nullptr : it->second;
 }
 
 MatchStatus CombatState::get_match_status() const {

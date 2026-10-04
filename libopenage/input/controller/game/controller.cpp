@@ -13,6 +13,7 @@
 #include "gamestate/event/spawn_entity.h"
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
+#include "gamestate/production.h"
 #include "gamestate/simulation.h"
 #include "input/controller/game/binding_context.h"
 #include "time/clock.h"
@@ -45,6 +46,12 @@ size_t Controller::get_controlled() const {
 }
 
 const std::vector<gamestate::entity_id_t> &Controller::get_selected() const {
+	std::unique_lock lock{this->mutex};
+
+	return this->selected;
+}
+
+std::vector<gamestate::entity_id_t> Controller::get_selected_copy() const {
 	std::unique_lock lock{this->mutex};
 
 	return this->selected;
@@ -166,6 +173,11 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 
 	binding_func_t move_entity{[&](const event_arguments &args,
 	                               const std::shared_ptr<Controller> controller) {
+		// XR fork (production): a right click ends the placement mode
+		if (simulation->get_production()->placement_active()) {
+			simulation->get_production()->cancel_placement();
+			return std::shared_ptr<event::Event>{};
+		}
 		auto mouse_pos = args.mouse.to_phys3(camera);
 		// XR fork: drop entities that died; the handler attacks an enemy under the
 		// cursor instead of moving (gamestate/combat/command.h), picked in screen space
@@ -222,6 +234,16 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 	binding_func_t drag_selection{
 		[&](const event_arguments &args,
 	        const std::shared_ptr<Controller> controller) {
+			// XR fork (production): in the placement mode a left click places the foundation
+			if (simulation->get_production()->placement_active()) {
+				controller->reset_drag_select();
+				auto ground = args.mouse.to_phys3(camera);
+				log::log(INFO << "Input: left click at pixel (" << args.mouse.x << ", " << args.mouse.y
+				              << ") -> place building at tile (" << ground.ne.to_float() << ", "
+				              << ground.se.to_float() << ")");
+				simulation->get_production()->place_at(ground);
+				return std::shared_ptr<event::Event>{};
+			}
 			Eigen::Matrix4f cam_matrix = camera->get_projection_matrix() * camera->get_view_matrix();
 			event::EventHandler::param_map::map_t params{
 				{"controlled", controller->get_controlled()},
@@ -230,9 +252,11 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 				{"camera_matrix", cam_matrix},
 				{"select_cb",
 		         std::function<void(const std::vector<gamestate::entity_id_t> ids)>{
-					 [controller](
+					 [controller, production = simulation->get_production()](
 						 const std::vector<gamestate::entity_id_t> ids) {
 						 controller->set_selected(ids);
+						 // XR fork (production): the HUD shows what the selection can do
+						 production->set_selection(ids);
 					 }}},
 			};
 
@@ -257,6 +281,24 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 		event_type::MouseButtonRelease};
 
 	ctx->bind(ev_mouse_lmb_release, drag_selection_action);
+
+	// production (XR fork): keys of cfg/keybinds.oac (TRAIN_OBJECT t, ENABLE_BUILDING_PLACEMENT y),
+	// Esc ends the placement mode, Backspace cancels the last queued unit
+	auto production = simulation->get_production();
+	auto bind_key = [&](int key, std::function<void()> action, const char *what) {
+		binding_func_t func{[action, what](const event_arguments & /* args */,
+		                                   const std::shared_ptr<Controller> /* controller */) {
+			log::log(INFO << "Input: key " << what);
+			action();
+			return std::shared_ptr<event::Event>{};
+		}};
+		ctx->bind(Event{event_class::KEYBOARD, key, modifier::NoModifier, event_type::KeyPress},
+		          binding_action{forward_action_t::CLEAR, func});
+	};
+	bind_key(key::Key_T, [production]() { production->train(); }, "T -> train");
+	bind_key(key::Key_Y, [production]() { production->start_placement(); }, "Y -> place building");
+	bind_key(key::Key_Escape, [production]() { production->cancel_placement(); }, "Esc -> cancel placement");
+	bind_key(key::Key_Backspace, [production]() { production->cancel_training(); }, "Backspace -> cancel training");
 }
 
 

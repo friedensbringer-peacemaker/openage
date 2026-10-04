@@ -20,6 +20,10 @@ enum class system_id_t {
 	GATHER_COMMAND,
 	GATHER_STEP,
 
+	// production (XR fork)
+	BUILD_COMMAND,
+	BUILD_STEP,
+
 	ACTIVITY_ADVANCE,
 };
 

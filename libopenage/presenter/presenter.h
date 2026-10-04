@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "renderer/window.h"
@@ -22,6 +23,9 @@ class GameSimulation;
 
 namespace input {
 class InputManager;
+namespace game {
+class Controller;
+} // namespace game
 }
 
 namespace time {
@@ -72,6 +76,31 @@ class AssetManager;
 
 namespace presenter {
 
+/**
+ * Thread-safe handle to the game controller of a presenter (XR fork).
+ *
+ * The presenter creates its game controller in its own thread (init_input)
+ * and is destroyed there. Other threads (e.g. the HUD of an embedder) keep
+ * this slot instead of a reference to the presenter.
+ */
+class GameControllerSlot {
+public:
+	/// the game controller, nullptr before init_input or after the presenter is gone
+	std::shared_ptr<input::game::Controller> get() const {
+		std::lock_guard<std::mutex> lock{this->mutex};
+		return this->controller.lock();
+	}
+
+	void set(const std::shared_ptr<input::game::Controller> &controller) {
+		std::lock_guard<std::mutex> lock{this->mutex};
+		this->controller = controller;
+	}
+
+private:
+	mutable std::mutex mutex;
+	std::weak_ptr<input::game::Controller> controller;
+};
+
 class Presenter {
 public:
 	/**
@@ -105,6 +134,12 @@ public:
 	 * a reference to the presenter (it must be destroyed in its own GL thread).
 	 */
 	std::shared_ptr<std::atomic<bool>> get_stop_flag() const;
+
+	/**
+	 * Slot of the game controller (XR fork), filled once the input is set up.
+	 * Safe to keep and read from any thread.
+	 */
+	std::shared_ptr<GameControllerSlot> get_game_controller_slot() const;
 
 	/**
 	 * Set the game simulation controlled by this presenter.
@@ -203,6 +238,11 @@ protected:
 	 * Set by stop(), checked once per frame by run().
 	 */
 	std::shared_ptr<std::atomic<bool>> stop_requested = std::make_shared<std::atomic<bool>>(false);
+
+	/**
+	 * Game controller for other threads (XR fork), see get_game_controller_slot().
+	 */
+	std::shared_ptr<GameControllerSlot> controller_slot = std::make_shared<GameControllerSlot>();
 
 	/**
 	 * openage's graphics renderer.
