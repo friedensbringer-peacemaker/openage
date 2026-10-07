@@ -6731,9 +6731,17 @@ class AoCAbilitySubprocessor:
             ability_sprite = dataset.combined_sprites[animation_id]
 
         else:
-            ability_sprite = CombinedSprite(
-                animation_id, (f"{filename_prefix}{name_lookup_dict[head_unit_id][1]}"), dataset
-            )
+            filename = f"{filename_prefix}{name_lookup_dict[head_unit_id][1]}"
+            # XR fork: one unit can use the same prefix for several graphics, e.g. the
+            # carry animations of a villager (one Move override per resource container,
+            # graphics 1515/1536/1552/2117/2592/3980). The PNG and .texture files carry
+            # the graphic id, the .sprite file did not and was overwritten by each
+            # later animation: every container pointed to the last one. Give the later
+            # sprites a unique file name.
+            if any(sprite.get_filename() == filename for sprite in dataset.combined_sprites.values()):
+                filename = f"{filename}_{animation_id}"
+
+            ability_sprite = CombinedSprite(animation_id, filename, dataset)
             dataset.combined_sprites.update({ability_sprite.get_id(): ability_sprite})
 
         ability_sprite.add_reference(animation_raw_api_object)
