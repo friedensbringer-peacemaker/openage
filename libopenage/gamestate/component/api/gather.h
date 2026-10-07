@@ -36,6 +36,12 @@ public:
 		double capacity = 10.0;
 		/// gather animation (empty: none)
 		std::string animation{};
+		/// walk animation with the load (Move override of the container's carry
+		/// progress, empty: none), shown on the way to the drop site
+		std::string carry_animation{};
+		/// fraction of the capacity from which the carry animation is shown
+		/// (Progress.left_boundary / 100, AoE: 0.2)
+		double carry_from = 0.2;
 	};
 
 	enum class phase_t {

@@ -435,6 +435,19 @@ time::time_t go_drop_off(const std::shared_ptr<GameEntity> &entity,
 	}
 	job.phase = phase_t::TO_DROP_SITE;
 	job.drop_site = site->get_id();
+	// the walk shows the Move animation (Move::move_default); with enough load the
+	// data's carry graphics (Move override of the container's carry progress, e.g.
+	// a bundle of wood or a basket) replace it on the way to the drop site. The walk
+	// back starts in continue_at_resource with the plain Move animation again.
+	const auto &skill = gather.get_skill(gather.get_carried_type());
+	if (*walk > 0 and not skill.carry_animation.empty()
+	    and gather.get_carried() >= skill.carry_from * skill.capacity - 1e-6) {
+		entity->render_update(time, skill.carry_animation);
+		log::log(INFO << "Gather: unit " << entity->get_id() << " carries " << gather.get_carried() << " "
+		              << to_string(gather.get_carried_type()) << " to drop site " << site->get_id()
+		              << " (carry animation " << skill.carry_animation.substr(skill.carry_animation.rfind('/') + 1)
+		              << ")");
+	}
 	// at least a short step, the event loop must advance
 	return std::max(*walk, time::time_t::from_double(0.1));
 }

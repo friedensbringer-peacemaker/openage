@@ -93,6 +93,49 @@ std::string animation_of(const nyan::Object &ability) {
 	return {};
 }
 
+/**
+ * Walk animation with the load: the Move override of the first carry progress of
+ * the Gather ability's container (ResourceContainer.carry_progress ->
+ * Progress.properties[Animated].overrides[*].animations[0].sprite).
+ *
+ * @param container ResourceContainer of the Gather ability.
+ * @param carry_from Set to Progress.left_boundary / 100 if the progress has one.
+ * @return Sprite path (empty: no carry graphics in the data).
+ */
+std::string carry_animation_of(const nyan::Object &container, double &carry_from) {
+	auto db_view = container.get_view();
+	auto object_of = [&db_view](const nyan::ValueHolder &value) {
+		return db_view->get_object(std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr())->get_name());
+	};
+	for (const auto &progress_val : container.get_set("ResourceContainer.carry_progress")) {
+		auto progress = object_of(progress_val);
+		auto properties = progress.get_dict("Progress.properties");
+		for (const auto &[key, value] : properties) {
+			auto key_name = std::dynamic_pointer_cast<nyan::ObjectValue>(key.get_ptr())->get_name();
+			if (key_name != "engine.util.progress.property.type.Animated") {
+				continue;
+			}
+			auto animated = object_of(value);
+			for (const auto &override_val : animated.get_set("Animated.overrides")) {
+				auto override_obj = object_of(override_val);
+				for (const auto &animation_val : override_obj.get_set("AnimationOverride.animations")) {
+					auto animation = object_of(animation_val);
+					auto path = fix_shared_path(api::APIAnimation::get_animation_path(animation));
+					if (path.empty()) {
+						continue;
+					}
+					double left = progress.get_float("Progress.left_boundary");
+					if (left >= 0.0 and left <= 100.0) {
+						carry_from = left / 100.0;
+					}
+					return path;
+				}
+			}
+		}
+	}
+	return {};
+}
+
 /// true for the gather ability that is preferred for food (berries, the start resource)
 bool preferred_food_ability(const nyan::fqon_t &name) {
 	const std::string suffix = ".CollectBerries";
@@ -147,6 +190,12 @@ void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
 					skill.capacity = capacity;
 				}
 				skill.animation = animation_of(ability_obj);
+				try {
+					skill.carry_animation = carry_animation_of(container, skill.carry_from);
+				}
+				catch (std::exception &err) {
+					log::log(WARN << "Economy: carry animation of " << ability_fqon << " not usable: " << err.what());
+				}
 
 				if (not gather) {
 					gather = std::make_shared<component::Gather>(loop, ability_obj);
