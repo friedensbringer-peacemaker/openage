@@ -4,6 +4,8 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -149,6 +151,20 @@ public:
 	std::shared_ptr<gamestate::prod::Production> get_production() const;
 
 	/**
+	 * Stop the engine and remember map settings for a new game (XR fork, game
+	 * menu "Neue Karte"): the embedder (openage-native, the Quest app) reads
+	 * them with take_restart() after loop() returned and starts a new engine.
+	 * Safe to call from any thread.
+	 */
+	void request_restart(const gamestate::MapSettings &settings);
+
+	/**
+	 * Map settings of a requested restart (once), nothing if the engine was
+	 * stopped for another reason.
+	 */
+	std::optional<gamestate::MapSettings> take_restart();
+
+	/**
 	 * current simulation state variable.
 	 * to be set to false to stop the simulation loop.
 	 */
@@ -200,6 +216,10 @@ private:
 
 	// XR fork (production): kept for the HUD after the simulation is gone
 	std::shared_ptr<gamestate::prod::Production> production;
+
+	// XR fork: restart requested by the game user interface
+	std::mutex restart_mutex;
+	std::optional<gamestate::MapSettings> restart_request;
 };
 
 } // namespace engine

@@ -100,12 +100,17 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 	              << " entities, target tile (" << target.ne.to_float() << ", " << target.se.to_float() << ")");
 	// XR fork: a right click on an enemy attacks it (attackers leave ids), dead entities
 	// are dropped (gamestate/combat/command.h); priority: enemy, resource, ground
-	bool enemy_picked = combat::handle_command(gstate, time, command_type, ids, target, params);
+	// XR fork (game user interface): a plain move ignores enemies, resources and
+	// foundations under the cursor (context menu "Hierher bewegen")
+	const bool plain = params.get<bool>("plain", false);
+	bool enemy_picked = combat::handle_command(gstate, time,
+	                                           plain ? component::command::command_t::IDLE : command_type,
+	                                           ids, target, params);
 
 	// XR fork (economy): a right click (move) on a resource makes gatherers gather;
 	// GATHER commands name the resource ("target_entity") or pick it at the target
 	std::shared_ptr<GameEntity> gather_target;
-	if (not enemy_picked
+	if (not enemy_picked and not plain
 	    and (command_type == component::command::command_t::MOVE
 	         or command_type == component::command::command_t::GATHER)) {
 		auto picked = econ::pick_resource(gstate, params.get("target", coord::phys3{0, 0, 0}), time);
@@ -120,7 +125,7 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 
 	// XR fork (production): a right click on an own foundation makes villagers build it
 	std::shared_ptr<GameEntity> build_target;
-	if (command_type == component::command::command_t::MOVE and not ids.empty()
+	if (command_type == component::command::command_t::MOVE and not plain and not ids.empty()
 	    and gstate->get_game_entities().contains(ids.front())) {
 		auto first = gstate->get_game_entity(ids.front());
 		auto owner = std::dynamic_pointer_cast<component::Ownership>(

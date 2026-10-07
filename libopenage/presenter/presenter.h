@@ -3,6 +3,8 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -32,12 +34,29 @@ namespace time {
 class TimeLoop;
 }
 
+namespace engine {
+struct HudInfo;
+}
+
+namespace gamestate {
+struct MapSettings;
+}
+
+namespace ui {
+class GameUiController;
+enum class ui_command_t;
+} // namespace ui
+
 namespace renderer {
 class RenderPass;
 class Renderer;
 class Texture2d;
 class ShaderProgram;
 class Window;
+
+namespace ui {
+class UiRenderStage;
+}
 
 namespace camera {
 class Camera;
@@ -142,6 +161,20 @@ public:
 	std::shared_ptr<GameControllerSlot> get_game_controller_slot() const;
 
 	/**
+	 * Engine access of the game user interface (XR fork, window_settings::ui).
+	 * Call before run().
+	 *
+	 * @param query_hud HUD snapshot of the controlled player (Engine::query_hud).
+	 * @param restart Restart the engine with other map settings.
+	 * @param quit Quit the game.
+	 * @param map Map settings of the running game.
+	 */
+	void set_ui_hooks(std::function<engine::HudInfo()> query_hud,
+	                  std::function<void(const gamestate::MapSettings &)> restart,
+	                  std::function<void()> quit,
+	                  const gamestate::MapSettings &map);
+
+	/**
 	 * Set the game simulation controlled by this presenter.
 	 *
 	 * @param simulation Game simulation.
@@ -221,6 +254,23 @@ protected:
 	void update_selection_markers();
 
 	/**
+	 * Game user interface in the engine image (XR fork): controller and render
+	 * stage after the HUD pass, if window_settings::ui is set.
+	 */
+	void init_ui(const renderer::window_settings &window_settings);
+
+	/**
+	 * Command of the context menu for the selection at a window pixel (XR fork):
+	 * sent like the right click of the game controller.
+	 */
+	void send_ui_command(ui::ui_command_t type, int x, int y);
+
+	/**
+	 * Wall clock seconds since the presenter started (steady).
+	 */
+	double now() const;
+
+	/**
 	 * Render all configured render passes in sequence.
 	 */
 	void render();
@@ -293,6 +343,17 @@ protected:
 	 * Graphics output for the HUD.
 	 */
 	std::shared_ptr<renderer::hud::HudRenderStage> hud_renderer;
+
+	/**
+	 * Game user interface (XR fork), null without window_settings::ui.
+	 */
+	std::shared_ptr<ui::GameUiController> ui_controller;
+	std::shared_ptr<renderer::ui::UiRenderStage> ui_renderer;
+	std::function<engine::HudInfo()> ui_query_hud;
+	std::function<void(const gamestate::MapSettings &)> ui_restart;
+	std::function<void()> ui_quit;
+	std::shared_ptr<gamestate::MapSettings> ui_map;
+	std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now();
 
 	/**
 	 * Final graphics output to the window screen.

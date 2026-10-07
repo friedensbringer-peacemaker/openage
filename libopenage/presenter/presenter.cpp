@@ -12,9 +12,19 @@
 #include <string>
 #include <vector>
 
+#include "coord/pixel.h"
+#include "engine/hud_info.h"
+#include "event/event_loop.h"
+#include "event/evententity.h"
+#include "event/eventhandler.h"
+#include "event/state.h"
+#include "gamestate/event/send_command.h"
+#include "gamestate/combat/combat_state.h"
+#include "gamestate/component/internal/commands/types.h"
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
 #include "gamestate/map.h"
+#include "gamestate/map_settings.h"
 #include "gamestate/simulation.h"
 #include "input/controller/camera/binding_context.h"
 #include "input/controller/camera/controller.h"
@@ -44,9 +54,12 @@
 #include "renderer/stages/screen/render_stage.h"
 #include "renderer/stages/skybox/render_stage.h"
 #include "renderer/stages/terrain/render_stage.h"
+#include "renderer/stages/ui/render_stage.h"
 #include "renderer/stages/world/render_stage.h"
 #include "renderer/texture.h"
+#include "time/clock.h"
 #include "time/time_loop.h"
+#include "ui/game_ui_controller.h"
 #include "util/path.h"
 
 
@@ -76,6 +89,102 @@ std::shared_ptr<std::atomic<bool>> Presenter::get_stop_flag() const {
 
 std::shared_ptr<GameControllerSlot> Presenter::get_game_controller_slot() const {
 	return this->controller_slot;
+}
+
+void Presenter::set_ui_hooks(std::function<engine::HudInfo()> query_hud,
+                             std::function<void(const gamestate::MapSettings &)> restart,
+                             std::function<void()> quit,
+                             const gamestate::MapSettings &map) {
+	this->ui_query_hud = std::move(query_hud);
+	this->ui_restart = std::move(restart);
+	this->ui_quit = std::move(quit);
+	this->ui_map = std::make_shared<gamestate::MapSettings>(map);
+}
+
+double Presenter::now() const {
+	return std::chrono::duration<double>(std::chrono::steady_clock::now() - this->start_time).count();
+}
+
+void Presenter::init_ui(const renderer::window_settings &window_settings) {
+	if (not window_settings.ui) {
+		return;
+	}
+	ui::UiHooks hooks;
+	hooks.query_hud = this->ui_query_hud;
+	hooks.production = this->simulation ? this->simulation->get_production() : nullptr;
+	hooks.clock = this->time_loop ? this->time_loop->get_clock() : nullptr;
+	hooks.send_command = [this](ui::ui_command_t type, int x, int y) {
+		this->send_ui_command(type, x, y);
+	};
+	hooks.restart = this->ui_restart;
+	hooks.quit = this->ui_quit;
+	if (not hooks.quit) {
+		hooks.quit = [this]() { this->stop(); };
+	}
+	gamestate::MapSettings map = this->ui_map ? *this->ui_map : gamestate::MapSettings{};
+	this->ui_controller = std::make_shared<ui::GameUiController>(map, std::move(hooks), window_settings.ui_demo);
+	this->ui_controller->init();
+	this->ui_renderer = std::make_shared<renderer::ui::UiRenderStage>(
+		this->window,
+		this->renderer,
+		this->root_dir["assets"]["shaders"],
+		this->ui_controller);
+	this->render_passes.push_back(this->ui_renderer->get_render_pass());
+}
+
+void Presenter::send_ui_command(ui::ui_command_t type, int x, int y) {
+	auto controller = this->controller_slot->get();
+	if (not this->simulation or not controller or not this->camera or not this->time_loop) {
+		return;
+	}
+	auto game = this->simulation->get_game();
+	if (not game) {
+		return;
+	}
+	// like the right click of input/controller/game/controller.cpp
+	if (auto state = game->get_state()) {
+		if (auto combat = state->get_combat()) {
+			controller->prune_selected([&combat](gamestate::entity_id_t id) {
+				return combat->was_removed(id);
+			});
+		}
+	}
+	coord::input mouse{x, y};
+	auto mouse_pos = mouse.to_phys3(this->camera);
+	using command_t = gamestate::component::command::command_t;
+	command_t command = command_t::MOVE;
+	bool plain = false;
+	switch (type) {
+	case ui::ui_command_t::MOVE_PLAIN:
+		plain = true;
+		break;
+	case ui::ui_command_t::GATHER:
+		command = command_t::GATHER;
+		break;
+	case ui::ui_command_t::ATTACK:
+		command = command_t::ATTACK;
+		break;
+	default:
+		break;
+	}
+	log::log(INFO << "Input: context menu command " << static_cast<int>(command) << (plain ? " (plain)" : "")
+	              << " at pixel (" << x << ", " << y << ") for " << controller->get_selected().size() << " selected");
+	Eigen::Matrix4f cam_matrix = this->camera->get_projection_matrix() * this->camera->get_view_matrix();
+	event::EventHandler::param_map::map_t params{
+		{"type", command},
+		{"target", mouse_pos},
+		{"entity_ids", controller->get_selected_copy()},
+		{"controlled", controller->get_controlled()},
+		{"camera_matrix", cam_matrix},
+		{"pick_ndc", Eigen::Vector2f{mouse.to_viewport(this->camera).to_ndc_space(this->camera)}},
+		{"plain", plain},
+	};
+	this->simulation->get_event_loop()->create_event(
+		"game.send_command",
+		this->simulation->get_commander(),
+		game->get_state(),
+		this->time_loop->get_clock()->get_time() + time::time_t::from_double(0.001),
+		params);
 }
 
 void Presenter::run(const renderer::window_settings window_settings) {
@@ -248,6 +357,9 @@ void Presenter::init_graphics(const renderer::window_settings &window_settings) 
 		this->time_loop->get_clock());
 	this->render_passes.push_back(this->hud_renderer->get_render_pass());
 
+	// game user interface in the image (XR fork), after the HUD pass
+	this->init_ui(window_settings);
+
 	// the GUI is optional (XR fork): builds without Qt have none, and a
 	// missing QML setup only disables it
 	if (this->gui_app) {
@@ -321,10 +433,21 @@ void Presenter::init_input() {
 
 	this->input_manager = std::make_shared<input::InputManager>();
 
-	this->window->add_key_callback([&](const renderer::WindowEvent &ev) {
+	// XR fork: the game user interface (window_settings::ui) sees every event
+	// first; events on its menus and buttons do not reach the game
+	auto ui_takes = [this](const renderer::WindowEvent &ev) {
+		return this->ui_controller and this->ui_controller->on_event(ev, this->now());
+	};
+	this->window->add_key_callback([this, ui_takes](const renderer::WindowEvent &ev) {
+		if (ui_takes(ev)) {
+			return;
+		}
 		this->input_manager->process(input::Event{ev});
 	});
-	this->window->add_mouse_button_callback([&](const renderer::WindowEvent &ev) {
+	this->window->add_mouse_button_callback([this, ui_takes](const renderer::WindowEvent &ev) {
+		if (ui_takes(ev)) {
+			return;
+		}
 		// XR fork: every button release in the log (which clicks reach the engine)
 		if (ev.type == input::event_type::MouseButtonRelease) {
 			log::log(INFO << "Input: button " << ev.button << " released at pixel (" << ev.x << ", " << ev.y
@@ -332,11 +455,17 @@ void Presenter::init_input() {
 		}
 		this->input_manager->process(input::Event{ev});
 	});
-	this->window->add_mouse_move_callback([&](const renderer::WindowEvent &ev) {
+	this->window->add_mouse_move_callback([this, ui_takes](const renderer::WindowEvent &ev) {
 		this->input_manager->set_mouse(static_cast<int>(ev.x), static_cast<int>(ev.y));
+		if (ui_takes(ev)) {
+			return;
+		}
 		this->input_manager->process(input::Event{ev});
 	});
-	this->window->add_mouse_wheel_callback([&](const renderer::WindowEvent &ev) {
+	this->window->add_mouse_wheel_callback([this, ui_takes](const renderer::WindowEvent &ev) {
+		if (ui_takes(ev)) {
+			return;
+		}
 		this->input_manager->process(input::Event{ev});
 	});
 
@@ -564,6 +693,9 @@ void Presenter::render() {
 	this->world_renderer->update();
 	this->update_selection_markers();
 	this->hud_renderer->update();
+	if (this->ui_renderer) {
+		this->ui_renderer->update(this->now());
+	}
 #if WITH_QT
 	if (this->gui) {
 		this->gui->render();

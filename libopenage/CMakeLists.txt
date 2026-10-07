@@ -415,6 +415,7 @@ add_subdirectory("renderer")
 add_subdirectory("rng")
 add_subdirectory("testing")
 add_subdirectory("time")
+add_subdirectory("ui")
 add_subdirectory("util")
 add_subdirectory("versions")
 

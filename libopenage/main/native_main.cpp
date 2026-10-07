@@ -81,6 +81,18 @@
  * (e.g. 8 = 8 game seconds per second). --capture-at adds captures to
  * --egl-sink-check at the given seconds (<png stem>-t<s>.png).
  *
+ * Game user interface (XR fork, ui/game_ui_controller.h): the plain game draws
+ * the HUD bar, context menu (right button held, Alt + right click, middle click),
+ * game menu (Esc / F10) and match board into the image (--no-ui switches it off);
+ * the checks keep it off unless --ui is given. --ui-demo "board@12,restart@8"
+ * shows a demo match board / restarts with the next map number after N seconds.
+ * --replay-ui (with --egl-sink-check and --map random) clicks the town centre, a
+ * HUD button, a villager, holds the right button (context menu), picks "Hierher
+ * bewegen", opens and closes the game menu and captures each state
+ * (<png stem>-hud/-train/-context/-menu/-board.png). "Neue Karte" of the game
+ * menu stops the engine with a restart request; this entry point then starts a
+ * new engine with the chosen map (Engine::take_restart()).
+ *
  * <dir> must contain assets/ (with shaders and converted/{engine,<modpack>})
  * and cfg/. The converted modpacks (including the "engine" API modpack) are
  * produced offline with `python -m openage convert` and
@@ -128,6 +140,9 @@
 #include "renderer/resources/shader_template.h"
 #include "renderer/window.h"
 #include "time/clock.h"
+#include "ui/agesxr/xr_game_ui.h"
+#include "ui/agesxr/xr_hud_layout.h"
+#include "ui/game_ui_controller.h"
 #include "util/fslike/directory.h"
 #include "util/path.h"
 
@@ -161,6 +176,10 @@ struct native_args {
 	bool ai_explicit = false;
 	std::optional<double> sim_speed{};
 	std::vector<double> capture_at{};
+	// game user interface (XR fork): default on for the plain game, off for checks
+	std::optional<bool> ui{};
+	std::string ui_demo{};
+	bool replay_ui = false;
 };
 
 /**
@@ -190,7 +209,8 @@ void usage(const char *argv0) {
 	             " [--map-elevation <h>] [--map-view <ne,se[,zoom[,height]]>] [--map-skirmish]]"
 	             " [--background <r,g,b,a> [--background-switch <r,g,b,a>]]"
 	             " [--ai on|off|auto] [--ai-difficulty easy|normal] [--ai-player <n>]"
-	             " [--ai-first-attack <s>] [--ai-attack-size <n>] [--sim-speed <x>] [--capture-at <s1,s2,...>]\n";
+	             " [--ai-first-attack <s>] [--ai-attack-size <n>] [--sim-speed <x>] [--capture-at <s1,s2,...>]"
+	             " [--ui | --no-ui] [--ui-demo <what@s,...>] [--replay-ui]\n";
 }
 
 bool parse_args(int argc, char **argv, native_args &args) {
@@ -366,6 +386,20 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		// ---- end ai (XR fork)
 		else if (arg == "--background-switch") {
 			args.background_switch = parse_rgba(value(), arg);
+		}
+		// ---- game user interface (XR fork)
+		else if (arg == "--ui") {
+			args.ui = true;
+		}
+		else if (arg == "--no-ui") {
+			args.ui = false;
+		}
+		else if (arg == "--ui-demo") {
+			args.ui_demo = value();
+		}
+		else if (arg == "--replay-ui") {
+			args.replay_ui = true;
+			args.ui = true;
 		}
 		else if (arg == "--help" or arg == "-h") {
 			return false;
@@ -1007,6 +1041,162 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> prod_replay_steps(co
 	return steps;
 }
 
+#if WITH_EGL
+/**
+ * Input replay of the game user interface check (--replay-ui, XR fork; with --map
+ * random): clicks the own town centre (HUD shows its production buttons, captured
+ * as <png stem>-hud), clicks the HUD button "Dorfbewohner" (training queued,
+ * food -50), clicks a villager and holds the right button on free ground next to
+ * it (context menu, <png stem>-context), clicks "Hierher bewegen" (plain move
+ * command), presses Esc (game menu, <png stem>-menu) and Esc again; the demo
+ * schedule shows the match board (<png stem>-board). <png> is captured at the end.
+ */
+std::vector<openage::renderer::opengl::TestFrameSink::Step> ui_replay_steps(const native_args &args,
+                                                                             openage::gamestate::MapSettings &map_settings,
+                                                                             double start,
+                                                                             const std::string &capture_file,
+                                                                             std::string &ui_demo) {
+	using namespace openage;
+	using renderer::opengl::TestFrameSink;
+	using gamestate::map_object_t;
+	using E = renderer::SinkInputEvent;
+
+	const auto map = gamestate::generate_map(map_settings);
+	const gamestate::Heightmap heights{map.width, map.height, map.corners};
+	const auto tc = map.starts.at(0);
+	if (not map_settings.view) {
+		gamestate::MapView start_view;
+		start_view.ne = tc[0];
+		start_view.se = tc[1];
+		start_view.zoom = 1.5f;
+		map_settings.view = start_view;
+	}
+	const gamestate::MapView view = *map_settings.view;
+
+	const int width = static_cast<int>(args.width);
+	const int height = static_cast<int>(args.height);
+	auto camera = std::make_shared<renderer::camera::Camera>(nullptr, util::Vector2s{args.width, args.height});
+	camera->look_at_coord(coord::scene3{10.0, 10.0, 0});
+	camera->move_to(Eigen::Vector3f{0.0f, view.height, 0.0f});
+	camera->look_at_coord(coord::scene3{view.ne, view.se, 0});
+	camera->set_zoom(view.zoom);
+	const Eigen::Matrix4f matrix = camera->get_projection_matrix() * camera->get_view_matrix();
+
+	auto pixel = [&](double ne, double se, double up) {
+		double ground = heights.is_flat() ? 0.0 : heights.at(ne, se);
+		coord::phys3 pos{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{ground + up}};
+		auto w = pos.to_scene3().to_world_space();
+		Eigen::Vector4f clip = matrix * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+		int x = static_cast<int>(std::lround((clip.x() + 1.0) * 0.5 * width));
+		int y = static_cast<int>(std::lround(height - (clip.y() + 1.0) * 0.5 * height));
+		return std::pair{x, y};
+	};
+	// the HUD bar covers the top of the window
+	const int hud_bottom = static_cast<int>(std::lround(
+		static_cast<double>(width) / ui::GameUiController::hud_texture_width() * ui::GameUiController::hud_texture_height()));
+	auto on_screen = [&](std::pair<int, int> p) {
+		return p.first >= 40 and p.second >= hud_bottom + 40 and p.first < width - 40 and p.second < height - 40;
+	};
+
+	// a villager of the first player that is on screen below the HUD
+	const gamestate::MapObject *villager = nullptr;
+	for (const auto &o : map.objects) {
+		if (o.kind == map_object_t::VILLAGER and o.owner == 0 and on_screen(pixel(o.ne, o.se, 0.0))) {
+			villager = &o;
+			break;
+		}
+	}
+
+	std::vector<TestFrameSink::Step> steps;
+	auto add = [&](double at, int type, int x, int y, int button, int buttons, int key = 0, int modifiers = 0) {
+		TestFrameSink::Step step;
+		step.at = start + at;
+		step.what = TestFrameSink::Step::kind::input;
+		step.event.type = type;
+		step.event.x = x;
+		step.event.y = y;
+		step.event.button = button;
+		step.event.buttons = buttons;
+		step.event.key = key;
+		step.event.modifiers = modifiers;
+		steps.push_back(step);
+	};
+	auto click = [&](double t, std::pair<int, int> p, int button) {
+		add(t, E::kMouseMove, p.first, p.second, 0, 0);
+		add(t + 0.1, E::kMouseDown, p.first, p.second, button, button);
+		add(t + 0.2, E::kMouseUp, p.first, p.second, button, 0);
+	};
+	auto capture = [&](double t, const char *suffix) {
+		const std::filesystem::path png{capture_file};
+		TestFrameSink::Step shot;
+		shot.at = start + t;
+		shot.what = TestFrameSink::Step::kind::capture;
+		shot.file = suffix == nullptr ? capture_file
+		                              : (png.parent_path() / (png.stem().string() + suffix + png.extension().string())).string();
+		steps.push_back(shot);
+	};
+	auto key = [&](double t, int code) {
+		add(t, E::kKeyDown, 0, 0, 0, 0, code);
+		add(t + 0.05, E::kKeyUp, 0, 0, 0, 0, code);
+	};
+
+	// 1. town centre -> HUD with production buttons, click "Dorfbewohner" (first button)
+	auto tp = pixel(tc[0], tc[1], 1.2);
+	const double hud_scale = static_cast<double>(width) / ui::GameUiController::hud_texture_width();
+	const std::pair<int, int> button0{
+		static_cast<int>(std::lround((agesxr::hudlayout::buttonX0(0) + agesxr::hudlayout::kBtnW / 2) * hud_scale)),
+		static_cast<int>(std::lround((agesxr::hudlayout::kBotY0 + agesxr::hudlayout::kBotY1) / 2 * hud_scale))};
+	log::log(INFO << "ui replay: town centre at tile (" << tc[0] << ", " << tc[1] << ") pixel (" << tp.first << ", "
+	              << tp.second << "), HUD button 0 at pixel (" << button0.first << ", " << button0.second
+	              << "), HUD bottom " << hud_bottom);
+	click(0.0, tp, E::kLeftButton);
+	capture(1.0, "-hud");
+	click(1.2, button0, E::kLeftButton);
+	capture(2.2, "-train");
+
+	// 2. villager, right button held on free ground next to it -> context menu, "Hierher bewegen"
+	if (villager != nullptr) {
+		auto vp = pixel(villager->ne, villager->se, 0.6);
+		std::pair<int, int> ground{std::min(vp.first + 120, width - 60), std::min(vp.second + 40, height - 60)};
+		log::log(INFO << "ui replay: villager at tile (" << villager->ne << ", " << villager->se << ") pixel ("
+		              << vp.first << ", " << vp.second << "), context menu at pixel (" << ground.first << ", "
+		              << ground.second << ")");
+		click(3.0, vp, E::kLeftButton);
+		add(3.6, E::kMouseMove, ground.first, ground.second, 0, 0);
+		add(3.7, E::kMouseDown, ground.first, ground.second, E::kRightButton, E::kRightButton);
+		capture(4.5, "-context");
+		add(4.6, E::kMouseUp, ground.first, ground.second, E::kRightButton, 0);
+		// first item of the villager menu (5 items), computed with the same layout code
+		agesxr::GameUi layout;
+		layout.resize(width, height);
+		layout.openContext(ground.first, ground.second, "x", std::vector<agesxr::GameUiItem>(5, agesxr::GameUiItem{1, "x", true}));
+		auto item = layout.contextItemRect(0);
+		std::pair<int, int> item0{(item.x0 + item.x1) / 2, (item.y0 + item.y1) / 2};
+		log::log(INFO << "ui replay: context item 0 at pixel (" << item0.first << ", " << item0.second << ")");
+		click(4.8, item0, E::kLeftButton);
+	}
+	else {
+		log::log(WARN << "ui replay: no villager of player 0 on screen");
+	}
+
+	// 3. game menu (Esc), closed with Esc
+	key(5.5, 0x01000000);
+	capture(6.5, "-menu");
+	key(6.7, 0x01000000);
+
+	// 4. match board of the demo schedule
+	if (ui_demo.empty()) {
+		std::ostringstream demo;
+		// presenter seconds (it starts about 1-2 s before the sink reads the first frame)
+		demo << "board@" << (start + 12.0);
+		ui_demo = demo.str();
+	}
+	capture(14.0, "-board");
+	capture(14.5, nullptr);
+	return steps;
+}
+#endif
+
 /// one log line of the production HUD snapshot
 void log_prod_snapshot(const openage::gamestate::prod::Snapshot &snap) {
 	using namespace openage;
@@ -1055,7 +1245,13 @@ bool egl_sink_check(const native_args &args,
 	auto map_settings = args.map;
 	std::vector<TestFrameSink::Step> steps;
 	ProdReplayTargets prod_targets;
-	if (args.replay_prod and not args.stop_in_resize) {
+	// game user interface (XR fork): only on request, the Quest app draws its own
+	std::string ui_demo = args.ui_demo;
+	settings.ui = args.ui.value_or(false);
+	if (args.replay_ui and not args.stop_in_resize) {
+		steps = ui_replay_steps(args, map_settings, start, png.string(), ui_demo);
+	}
+	else if (args.replay_prod and not args.stop_in_resize) {
 		steps = prod_replay_steps(args, map_settings, start, png.string(), prod_targets);
 	}
 	else if (args.replay_econ and not args.stop_in_resize) {
@@ -1118,6 +1314,7 @@ bool egl_sink_check(const native_args &args,
 	// declared before the engine: destroyed after the engine threads are joined
 	auto sink = std::make_shared<TestFrameSink>(width, height, steps, args.frames);
 	settings.sink = sink;
+	settings.ui_demo = ui_demo;
 
 	auto engine = std::make_unique<engine::Engine>(engine::Engine::mode::FULL, root, args.modpacks, settings, map_settings);
 	// ai (XR fork): faster simulation clock
@@ -1129,8 +1326,10 @@ bool egl_sink_check(const native_args &args,
 	// a house on water after the first house was paid (must be rejected)
 	std::atomic<bool> prod_driver_stop{false};
 	std::thread prod_driver;
-	if (args.replay_prod) {
-		prod_driver = std::thread{[&prod_driver_stop, production = engine->get_production(), water = prod_targets.water]() {
+	if (args.replay_prod or args.replay_ui) {
+		// the UI replay only logs the snapshots (no house on water)
+		auto water = args.replay_prod ? prod_targets.water : std::nullopt;
+		prod_driver = std::thread{[&prod_driver_stop, production = engine->get_production(), water]() {
 			auto last_log = clock::now() - std::chrono::seconds(10);
 			bool water_done = false;
 			while (not prod_driver_stop) {
@@ -1339,7 +1538,7 @@ int main(int argc, char **argv) {
 	log::set_level(log::level::info);
 
 	// ai (XR fork): the input replays check the human side; keep the computer opponent out
-	if ((args.replay or args.replay_econ or args.replay_combat or args.replay_prod or args.replay_select)
+	if ((args.replay or args.replay_econ or args.replay_combat or args.replay_prod or args.replay_select or args.replay_ui)
 	    and not args.ai_explicit) {
 		args.map.ai.mode = gamestate::ai_mode_t::OFF;
 	}
@@ -1393,23 +1592,39 @@ int main(int argc, char **argv) {
 
 		auto mode = args.headless ? engine::Engine::mode::HEADLESS
 		                          : engine::Engine::mode::FULL;
-		engine::Engine engine{mode, root, args.modpacks, win_settings, args.map};
-		// ai (XR fork): faster simulation clock
-		if (args.sim_speed) {
-			engine.get_clock()->set_speed(time::speed_t::from_double(*args.sim_speed));
-		}
+		// game user interface (XR fork): on for the plain game, off for the checks
+		win_settings.ui = args.ui.value_or(not args.headless and not render_check);
+		win_settings.ui_demo = args.ui_demo;
 
-		std::jthread timer;
-		if (args.seconds > 0 and not render_check) {
-			timer = std::jthread{[&engine, seconds = args.seconds]() {
-				std::this_thread::sleep_for(std::chrono::seconds(seconds));
-				log::log(INFO << "--seconds reached, stopping engine");
-				engine.stop();
-			}};
-		}
+		// the game menu restarts the engine with other map settings (XR fork)
+		auto map_settings = args.map;
+		for (int run = 1;; ++run) {
+			engine::Engine engine{mode, root, args.modpacks, win_settings, map_settings};
+			// ai (XR fork): faster simulation clock
+			if (args.sim_speed) {
+				engine.get_clock()->set_speed(time::speed_t::from_double(*args.sim_speed));
+			}
 
-		engine.loop();
-		log::log(INFO << "engine loop finished");
+			std::jthread timer;
+			if (args.seconds > 0 and not render_check) {
+				timer = std::jthread{[&engine, seconds = args.seconds]() {
+					std::this_thread::sleep_for(std::chrono::seconds(seconds));
+					log::log(INFO << "--seconds reached, stopping engine");
+					engine.stop();
+				}};
+			}
+
+			engine.loop();
+			log::log(INFO << "engine loop finished (run " << run << ")");
+			auto restart = engine.take_restart();
+			if (not restart) {
+				break;
+			}
+			map_settings = *restart;
+			log::log(INFO << "restarting the engine with a new map (seed " << map_settings.seed << ", "
+			              << map_settings.size << "x" << map_settings.size << ")");
+			// the window and GL context of the old engine are gone once it is destroyed
+		}
 
 		if (render_check and not std::filesystem::exists(win_settings.capture_file)) {
 			throw Error{MSG(err) << "render check: no frame stored to " << win_settings.capture_file};

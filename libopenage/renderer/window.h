@@ -75,6 +75,12 @@ struct window_settings {
 	// where alpha = 0), e.g. for an XR compositor layer in front of
 	// passthrough. A frame sink can change it at runtime (poll_background()).
 	std::array<float, 4> background{1.0f, 0.5f, 0.0f, 1.0f};
+	// Game user interface drawn into the engine image (XR fork, ui/game_ui_controller.h):
+	// HUD bar, context menu, game menu, match board. On for the desktop; the Quest
+	// app keeps it off and draws its VR HUD and VR menu instead.
+	bool ui = false;
+	// Test schedule of the interface ("board@12,restart@8", see GameUiController).
+	std::string ui_demo{};
 };
 
 

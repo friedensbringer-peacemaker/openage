@@ -57,6 +57,12 @@ Engine::Engine(mode mode,
 		                                                         this->time_loop);
 		this->stop_presenter = this->presenter->get_stop_flag();
 		this->controller_slot = this->presenter->get_game_controller_slot();
+		// XR fork: game user interface in the image (window_settings.ui)
+		this->presenter->set_ui_hooks(
+			[this]() { return this->query_hud(0); },
+			[this](const gamestate::MapSettings &settings) { this->request_restart(settings); },
+			[this]() { this->stop(); },
+			map_settings);
 	}
 
 	// spawn thread to run time loop
@@ -199,6 +205,22 @@ HudInfo Engine::query_hud(uint64_t player) const {
 
 std::shared_ptr<gamestate::prod::Production> Engine::get_production() const {
 	return this->production;
+}
+
+void Engine::request_restart(const gamestate::MapSettings &settings) {
+	{
+		std::lock_guard<std::mutex> lock{this->restart_mutex};
+		this->restart_request = settings;
+	}
+	log::log(INFO << "Engine: restart requested (map seed " << settings.seed << ", size " << settings.size << ")");
+	this->stop();
+}
+
+std::optional<gamestate::MapSettings> Engine::take_restart() {
+	std::lock_guard<std::mutex> lock{this->restart_mutex};
+	auto request = this->restart_request;
+	this->restart_request.reset();
+	return request;
 }
 
 void Engine::loop() {
