@@ -498,3 +498,8 @@ if(OPENAGE_NATIVE_ENTRY)
 	endif()
 	# ---- end ai (XR fork) ----
 endif()
+
+# XR fork: the in-engine UI (libopenage/ui/agesxr) logs via __android_log_print
+if(ANDROID)
+	target_link_libraries(libopenage PRIVATE log)
+endif()
