@@ -13,6 +13,7 @@
 #include "gamestate/component/types.h"
 #include "gamestate/production_math.h"
 #include "gamestate/resources.h"
+#include "gamestate/types.h"
 
 
 namespace openage::gamestate::component {
@@ -51,6 +52,22 @@ public:
 
 	/// rally point of new units (none: they stay next to the building)
 	std::optional<coord::phys3> rally_point{};
+
+	/// what the rally point is on (XR fork): new villagers gather a resource, units
+	/// walk to an own entity, military attacks an enemy; the ground otherwise
+	enum class rally_t {
+		GROUND,
+		RESOURCE,
+		ENTITY,
+		ENEMY,
+	};
+	struct RallyTarget {
+		rally_t kind = rally_t::GROUND;
+		entity_id_t entity = 0;
+		/// resource type of a RESOURCE target (the next spot of this type if it is empty)
+		resource_t resource = resource_t::FOOD;
+	};
+	std::optional<RallyTarget> rally_target{};
 
 private:
 	std::vector<Creatable> creatables;

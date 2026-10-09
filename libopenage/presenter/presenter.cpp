@@ -702,6 +702,24 @@ void Presenter::update_selection_markers() {
 		markers.push_back(renderer::hud::SelectionMarker{box.ndc, box.player == controlled});
 	}
 	this->hud_renderer->set_selection_markers(std::move(markers));
+
+	// rally point flag of the selected building (XR fork)
+	std::optional<Eigen::Vector2f> flag;
+	if (not selected.empty() and this->simulation) {
+		auto snapshot = this->simulation->get_production()->snapshot();
+		if (snapshot.queue and snapshot.queue->rally
+		    and std::find(selected.begin(), selected.end(), snapshot.queue->building) != selected.end()) {
+			const auto &r = *snapshot.queue->rally;
+			coord::phys3 pos{coord::phys_t{r[0]}, coord::phys_t{r[1]}, coord::phys_t{r[2]}};
+			auto w = pos.to_scene3().to_world_space();
+			Eigen::Matrix4f m = this->camera->get_projection_matrix() * this->camera->get_view_matrix();
+			Eigen::Vector4f clip = m * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+			if (clip.w() != 0.0f) {
+				flag = Eigen::Vector2f{clip.x() / clip.w(), clip.y() / clip.w()};
+			}
+		}
+	}
+	this->hud_renderer->set_rally_flag(flag);
 }
 
 void Presenter::apply_map_view() {

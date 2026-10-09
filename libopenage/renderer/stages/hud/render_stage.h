@@ -4,6 +4,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <vector>
 
@@ -104,6 +105,13 @@ public:
 	void set_selection_markers(std::vector<SelectionMarker> &&markers);
 
 	/**
+	 * Rally point flag of the selected building (XR fork): foot of the flag in
+	 * normalized device coordinates, nothing = no flag. Drawn with the own
+	 * selection frames (white).
+	 */
+	void set_rally_flag(std::optional<Eigen::Vector2f> ndc);
+
+	/**
 	 * Update the render entities and render positions.
 	 */
 	void update();
@@ -166,6 +174,7 @@ private:
 	 * the geometry + uniforms in the render pass.
 	 */
 	std::vector<SelectionMarker> selection_markers;
+	std::optional<Eigen::Vector2f> rally_flag{};
 	std::array<std::shared_ptr<renderer::Geometry>, 2> marker_geometry;
 	std::array<std::shared_ptr<renderer::UniformInput>, 2> marker_uniforms;
 	std::array<size_t, 2> marker_vertices{0, 0};

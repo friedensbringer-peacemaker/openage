@@ -1043,6 +1043,30 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> prod_replay_steps(co
 	log::log(INFO << "prod replay: town centre at tile (" << tc[0] << ", " << tc[1] << ") pixel ("
 	              << tp.first << ", " << tp.second << ")");
 	select_box(0.0, tp, 6);
+	// rally point on the nearest berry bush (XR fork): the new villagers gather food there
+	const gamestate::MapObject *berries = nullptr;
+	double berries_d = 1e9;
+	for (const auto &o : map.objects) {
+		if (o.kind != map_object_t::BERRIES) {
+			continue;
+		}
+		double d = std::hypot(o.ne - tc[0], o.se - tc[1]);
+		if (d < berries_d and on_screen(pixel(o.ne, o.se, 0.3))) {
+			berries_d = d;
+			berries = &o;
+		}
+	}
+	if (berries != nullptr) {
+		auto bp = pixel(berries->ne, berries->se, 0.3);
+		log::log(INFO << "prod replay: berry bush at tile (" << berries->ne << ", " << berries->se << ") pixel ("
+		              << bp.first << ", " << bp.second << "): rally point");
+		add(0.5, E::kMouseMove, bp.first, bp.second, 0, 0);
+		add(0.55, E::kMouseDown, bp.first, bp.second, E::kRightButton, E::kRightButton);
+		add(0.65, E::kMouseUp, bp.first, bp.second, E::kRightButton, 0);
+	}
+	else {
+		log::log(WARN << "prod replay: no berry bush on screen for the rally point");
+	}
 	key(0.8, key_t, tp);
 	key(1.1, key_t, tp);
 	if (villager != nullptr and house) {
@@ -1468,6 +1492,12 @@ bool save_check(const native_args &args, const openage::util::Path &root) {
 						++orders_given;
 					}
 				}
+				// rally point of the town centre on the nearest food (saved and restored with its target)
+				if (town_center and not villagers.empty()) {
+					if (auto food = nearest_resource(villagers.front(), resource_t::FOOD)) {
+						prod::set_rally_point(state, town_center, position_of(food), food, time);
+					}
+				}
 				if (town_center) {
 					production->train_for(0, town_center->get_id(), "Villager");
 					production->train_for(0, town_center->get_id(), "Villager");
@@ -1506,11 +1536,14 @@ bool save_check(const native_args &args, const openage::util::Path &root) {
 	size_t a_orders = 0;
 	size_t a_queue = 0;
 	size_t a_foundations = 0;
+	size_t a_rally = 0;
 	for (const auto &e : a.entities) {
 		a_orders += e.order.empty() ? 0 : 1;
 		a_queue += e.queue.size();
 		a_foundations += e.construction ? 1 : 0;
+		a_rally += e.rally_kind == "resource" ? 1 : 0;
 	}
+	expect(a_rally == 1, "Sammelpunkt auf Nahrung gespeichert (" + std::to_string(a_rally) + ")");
 	std::printf("  a.save: t=%.3f s, %zu Spieler, %zu Entities (%zu mit Befehl, %zu in Ausbildung, %zu Fundamente), %zu entfernt\n",
 	            a.game_time, a.players.size(), a.entities.size(), a_orders, a_queue, a_foundations, a.removed.size());
 	// the job runs with the time of the simulation step, which may be one step (< 1 s) behind the clock

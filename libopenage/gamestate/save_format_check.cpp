@@ -102,6 +102,11 @@ SaveData sample(uint32_t seed, size_t entities) {
 				e.queue.push_back(item);
 			}
 			e.rally = std::array<double, 2>{12.0, 13.5};
+			if (i % 3 == 0) {
+				e.rally_kind = i % 2 == 0 ? "resource" : "enemy";
+				e.rally_entity = 40 + i;
+				e.rally_resource = static_cast<int>(i % RESOURCE_COUNT);
+			}
 		}
 		switch (i % 6) {
 		case 0:
@@ -206,6 +211,8 @@ void check_damaged() {
 	CHECK(not parse("[save]\nversion = 1\ngame_time = nan\n[map]\ntype = random\n", back, error),
 	      "nan time rejected: %s", error.c_str());
 	CHECK(not parse("[save]\nversion = 1\n[map]\ntype = moon\n", back, error), "bad map type rejected");
+	CHECK(not parse("[save]\nversion = 1\n[map]\ntype = random\n[entity]\nfqon = x\nrally_target = moon 1 0\n", back, error),
+	      "bad rally target rejected: %s", error.c_str());
 	CHECK(not parse("[save]\nversion = 1\n[map]\ntype = random\nsize = 7\n", back, error), "bad size rejected");
 	CHECK(not parse("[save]\nversion = 1\n[map]\ntype = random\n[entity]\nid = 3\n", back, error)
 	          and error.find("ohne Typ") != std::string::npos,

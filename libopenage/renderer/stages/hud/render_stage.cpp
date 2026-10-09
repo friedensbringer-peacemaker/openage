@@ -77,6 +77,11 @@ void HudRenderStage::set_selection_markers(std::vector<SelectionMarker> &&marker
 	this->selection_markers = std::move(markers);
 }
 
+void HudRenderStage::set_rally_flag(std::optional<Eigen::Vector2f> ndc) {
+	std::unique_lock lock{this->mutex};
+	this->rally_flag = ndc;
+}
+
 void HudRenderStage::update_selection_markers() {
 	// frame width 2 px, 3 px away from the sprite
 	auto viewport = this->camera->get_viewport_size();
@@ -107,6 +112,16 @@ void HudRenderStage::update_selection_markers() {
 			rect(l, t - line_y, r, t);
 			rect(l, b, l + line_x, t);
 			rect(r - line_x, b, r, t);
+		}
+		if (own and this->rally_flag) {
+			// rally point (XR fork): pole 30 px high, pennant to the right, small foot
+			const float x = this->rally_flag->x();
+			const float y = this->rally_flag->y();
+			const float top = y + 30.0f * px_y;
+			rect(x - px_x, y, x + px_x, top);
+			rect(x - 5.0f * px_x, y - px_y, x + 5.0f * px_x, y + px_y);
+			const float flag[6] = {x + px_x, top, x + px_x, top - 12.0f * px_y, x + 18.0f * px_x, top - 6.0f * px_y};
+			verts.insert(verts.end(), flag, flag + 6);
 		}
 
 		const size_t vertex_count = verts.size() / 2;

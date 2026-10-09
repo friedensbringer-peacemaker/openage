@@ -98,6 +98,10 @@ struct SavedEntity {
 	double build_time = 0.0;
 	std::vector<SavedQueueItem> queue{};
 	std::optional<std::array<double, 2>> rally{};
+	/// what the rally point is on: "", "resource", "entity", "enemy" (then rally_entity, rally_resource)
+	std::string rally_kind{};
+	uint64_t rally_entity = 0;
+	int rally_resource = 0;
 	/// current order: "", "move", "gather", "build", "attack"
 	std::string order{};
 	uint64_t order_target = 0;
@@ -274,6 +278,9 @@ inline std::string serialize(const SaveData &d) {
 		}
 		if (e.rally) {
 			out << "rally = " << fmt_double((*e.rally)[0]) << " " << fmt_double((*e.rally)[1]) << "\n";
+			if (not e.rally_kind.empty()) {
+				out << "rally_target = " << e.rally_kind << " " << e.rally_entity << " " << e.rally_resource << "\n";
+			}
 		}
 		if (not e.order.empty()) {
 			out << "order = " << e.order << " " << e.order_target << " " << fmt_double(e.order_ne) << " "
@@ -543,6 +550,13 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 					return fail("Sammelpunkt");
 				}
 				e.rally = r;
+			}
+			else if (key == "rally_target") {
+				if (not(v >> e.rally_kind >> e.rally_entity >> e.rally_resource)
+				    or (e.rally_kind != "resource" and e.rally_kind != "entity" and e.rally_kind != "enemy")
+				    or e.rally_resource < 0 or e.rally_resource >= static_cast<int>(RESOURCE_COUNT)) {
+					return fail("Sammelpunkt-Ziel");
+				}
 			}
 			else if (key == "order") {
 				if (not(v >> e.order >> e.order_target >> e.order_ne >> e.order_se)) {

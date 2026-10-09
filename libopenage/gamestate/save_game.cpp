@@ -284,6 +284,15 @@ SaveData capture(const std::shared_ptr<GameState> &state,
 			if (production->rally_point) {
 				e.rally = std::array<double, 2>{production->rally_point->ne.to_double(),
 				                                production->rally_point->se.to_double()};
+				if (production->rally_target) {
+					using rally_t = component::ProductionQueue::rally_t;
+					const auto kind = production->rally_target->kind;
+					e.rally_kind = kind == rally_t::RESOURCE ? "resource" : kind == rally_t::ENTITY ? "entity"
+					             : kind == rally_t::ENEMY    ? "enemy"
+					                                         : "";
+					e.rally_entity = production->rally_target->entity;
+					e.rally_resource = static_cast<int>(production->rally_target->resource);
+				}
 			}
 		}
 		// foundation
@@ -456,7 +465,19 @@ RestoreResult restore(const SaveData &data,
 				queue->get_queue().restore(item);
 			}
 			if (e->rally) {
-				queue->rally_point = coord::phys3{coord::phys_t{(*e->rally)[0]}, coord::phys_t{(*e->rally)[1]}, coord::phys_t{0.0}};
+				queue->rally_point = map->on_terrain(
+					coord::phys3{coord::phys_t{(*e->rally)[0]}, coord::phys_t{(*e->rally)[1]}, coord::phys_t{0.0}});
+				if (not e->rally_kind.empty()) {
+					using rally_t = component::ProductionQueue::rally_t;
+					component::ProductionQueue::RallyTarget rally;
+					rally.kind = e->rally_kind == "resource" ? rally_t::RESOURCE
+					           : e->rally_kind == "entity"   ? rally_t::ENTITY
+					                                         : rally_t::ENEMY;
+					auto it = id_map.find(e->rally_entity);
+					rally.entity = it != id_map.end() ? it->second : e->rally_entity;
+					rally.resource = static_cast<resource_t>(e->rally_resource);
+					queue->rally_target = rally;
+				}
 			}
 		}
 	}

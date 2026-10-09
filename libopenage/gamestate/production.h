@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <array>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -103,6 +104,21 @@ PlayerPopulation population_of(const std::shared_ptr<GameState> &state,
 /// units queued in a building (0 without a training queue)
 size_t queued_in(const std::shared_ptr<GameEntity> &building);
 
+/**
+ * Set the rally point of a building (XR fork, right click with a building selected):
+ * on a resource (new villagers gather it), an own entity (units walk there), an
+ * enemy (military attacks it) or the ground. Simulation thread.
+ *
+ * @param target_entity Entity under the cursor (resource, own entity or enemy), if any.
+ *
+ * @return false if the entity has no training queue.
+ */
+bool set_rally_point(const std::shared_ptr<GameState> &state,
+                     const std::shared_ptr<GameEntity> &building,
+                     const coord::phys3 &ground,
+                     const std::shared_ptr<GameEntity> &target_entity,
+                     const time::time_t &time);
+
 /// the building is finished (no foundation)
 bool is_finished(const std::shared_ptr<GameEntity> &building);
 
@@ -174,6 +190,10 @@ struct QueueState {
 	double progress = 0.0;
 	/// the first item waits for a free population slot
 	bool waiting_for_housing = false;
+	/// rally point (tiles ne, se, up), shown as a flag while the building is selected
+	std::optional<std::array<double, 3>> rally{};
+	/// what the rally point is on: "ground", "resource", "entity", "enemy"
+	std::string rally_kind{};
 };
 
 /// state for the HUD, refreshed by the simulation thread
