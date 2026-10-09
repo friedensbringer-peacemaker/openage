@@ -11,6 +11,7 @@
 
 #include "engine/hud_info.h"
 #include "gamestate/map_settings.h"
+#include "gamestate/save_format.h"
 #include "renderer/window_events.h"
 #include "ui/agesxr/hud_feed.h"
 #include "ui/agesxr/xr_game_ui.h"
@@ -59,6 +60,12 @@ struct UiHooks {
 	std::function<void(const gamestate::MapSettings &settings)> restart{};
 	/// quit the game (game menu "Beenden", confirmed)
 	std::function<void()> quit{};
+	/// save games (gamestate/save_format.h): save into a slot, load a slot (restart), list the slots
+	std::function<bool(int slot)> save_slot{};
+	std::function<std::string(int slot)> load_slot{};
+	std::function<std::vector<gamestate::save::SlotInfo>()> list_slots{};
+	/// camera to an entity and select it (orders bar)
+	std::function<void(uint64_t id)> focus_entity{};
 };
 
 /**
@@ -137,6 +144,9 @@ private:
 	void menu_action(agesxr::GameUi::Result result);
 	void open_menu(bool open);
 	void production_command(int code, const std::string &label);
+	void refresh_slots();
+	void save_slot(int slot, const char *why);
+	void load_slot(int slot, const char *why);
 	std::string map_info() const;
 	gamestate::MapSettings menu_map_settings() const;
 	void run_demo(double now);
@@ -167,6 +177,8 @@ private:
 	bool left_held = false;
 	// keys whose press we consumed (their release is consumed too)
 	std::vector<int> swallowed_keys{};
+	// autosave every AUTOSAVE_SECONDS of game time
+	gamestate::save::AutosaveTimer autosave{};
 	// demo schedule
 	struct DemoStep {
 		std::string what;

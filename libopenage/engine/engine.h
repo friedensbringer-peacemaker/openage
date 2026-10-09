@@ -3,6 +3,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -12,6 +13,8 @@
 
 #include "engine/hud_info.h"
 #include "gamestate/map_settings.h"
+#include "gamestate/save_format.h"
+#include "gamestate/simulation.h"
 #include "renderer/window.h"
 #include "util/path.h"
 
@@ -164,6 +167,69 @@ public:
 	 */
 	std::optional<gamestate::MapSettings> take_restart();
 
+	// ---- save games (XR fork, gamestate/save_game.h) ----
+
+	/**
+	 * Save the game into a slot of the save directory (window_settings::save_dir).
+	 * Runs in the simulation thread; a HUD status message reports the result.
+	 * Safe to call from any thread.
+	 *
+	 * @param slot 1..SLOT_COUNT or AUTOSAVE_SLOT.
+	 *
+	 * @return false if there is no save directory or no game.
+	 */
+	bool save_slot(int slot);
+
+	/**
+	 * Save the game into a file (checks, scripts). Safe to call from any thread.
+	 *
+	 * @param file Save file.
+	 * @param title Title for the slot list.
+	 * @param done Called in the simulation thread with the result (may be empty).
+	 *
+	 * @return false if there is no game.
+	 */
+	bool save_file(const std::string &file,
+	               const std::string &title,
+	               std::function<void(bool ok, const std::string &message)> done = {});
+
+	/**
+	 * Load a slot: stop the engine and request a restart with the map settings
+	 * of the file; the new engine restores the state (MapSettings::load_file).
+	 *
+	 * @return Empty if the restart was requested, else the error message.
+	 */
+	std::string load_slot(int slot);
+
+	/**
+	 * Same for a file.
+	 */
+	std::string load_file(const std::string &file);
+
+	/**
+	 * Slots of the save directory (empty without one).
+	 */
+	std::vector<gamestate::save::SlotInfo> list_save_slots() const;
+
+	/**
+	 * Camera to an entity and select it (XR fork, orders bar). Safe to call
+	 * from any thread; nothing without a presenter.
+	 */
+	void focus_entity(uint64_t id);
+
+	/**
+	 * Map settings of this run.
+	 */
+	const gamestate::MapSettings &get_map_settings() const;
+
+	/**
+	 * Work for the simulation thread (checks, scripts): runs after the next
+	 * simulation step. Safe to call from any thread.
+	 *
+	 * @return false without a simulation.
+	 */
+	bool post(gamestate::GameSimulation::Job job);
+
 	/**
 	 * current simulation state variable.
 	 * to be set to false to stop the simulation loop.
@@ -220,6 +286,11 @@ private:
 	// XR fork: restart requested by the game user interface
 	std::mutex restart_mutex;
 	std::optional<gamestate::MapSettings> restart_request;
+
+	// XR fork (save games): map of this run and the slot directory
+	gamestate::MapSettings map_settings;
+	std::string save_dir;
+	std::weak_ptr<presenter::Presenter> focus_presenter;
 };
 
 } // namespace engine

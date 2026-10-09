@@ -4,7 +4,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <exception>
+#include <optional>
 #include <thread>
+
+#include "log/log.h"
+#include "log/message.h"
 
 #include "assets/mod_manager.h"
 #include "event/event_loop.h"
@@ -16,6 +21,8 @@
 #include "gamestate/event/spawn_entity.h"
 #include "gamestate/event/wait.h"
 #include "gamestate/production.h"
+#include "gamestate/save_format.h"
+#include "gamestate/save_game.h"
 #include "gamestate/terrain_factory.h"
 #include "time/clock.h"
 #include "time/time_loop.h"
@@ -64,6 +71,8 @@ void GameSimulation::run() {
 		this->event_loop->reach_time(current_time, this->game->get_state());
 		// XR fork (production): requests of the HUD/input, training queues
 		this->production->update(this->game->get_state(), this->event_loop, this->entity_factory, current_time);
+		// XR fork: posted jobs (save games, lookups)
+		this->run_jobs(current_time);
 
 		auto step_end = clock_t::now();
 		double step = std::chrono::duration<double>(step_end - step_start).count();
@@ -97,12 +106,33 @@ void GameSimulation::start() {
 
 	this->init_event_handlers();
 
+	// XR fork (save games): the file is read first, the game starts at its time
+	std::optional<save::SaveData> load;
+	time::time_t start_time = time::TIME_ZERO;
+	if (not this->map_settings.load_file.empty()) {
+		save::SaveData data;
+		std::string error;
+		if (save::read_save(this->map_settings.load_file, data, error)) {
+			load = std::move(data);
+			start_time = time::time_t::from_double(load->game_time);
+			log::log(INFO << "Load: " << this->map_settings.load_file << " (" << load->title << ", " << load->created
+			              << ", t=" << load->game_time << " s, " << load->entities.size() << " entities)");
+			// the clock continues from the saved time (entities are created at that time)
+			this->time_loop->get_clock()->set_time(start_time);
+		}
+		else {
+			log::log(ERR << "Load: " << this->map_settings.load_file << ": " << error << " - starting a new game");
+			this->production->notify("Laden fehlgeschlagen: " + error, prod::status_t::warn);
+		}
+	}
+
 	// TODO: wait for presenter to initialize before starting?
 	this->game = std::make_shared<gamestate::Game>(event_loop,
 	                                               this->mod_manager,
 	                                               this->entity_factory,
 	                                               this->terrain_factory,
-	                                               this->map_settings);
+	                                               this->map_settings,
+	                                               start_time);
 
 	// XR fork: the presenter may attach its renderer before the game exists
 	if (this->pending_render_factory) {
@@ -115,11 +145,49 @@ void GameSimulation::start() {
 	// ai (XR fork): computer opponents train and build through the production
 	this->game->connect_ai_production(this->production);
 
+	// XR fork (save games): apply the saved state to the generated map
+	if (load) {
+		auto result = save::restore(*load, this->game->get_state(), this->event_loop, this->entity_factory,
+		                            this->production, this->game->get_generated_entity_range(), start_time);
+		if (result.ok) {
+			this->production->notify("Spielstand geladen: " + (load->title.empty() ? save::map_text(load->map) : load->title),
+			                         prod::status_t::good);
+		}
+		else {
+			log::log(ERR << "Load: " << result.error << " - the map is played from the start");
+			this->production->notify("Laden fehlgeschlagen: " + result.error, prod::status_t::warn);
+		}
+	}
+
 	this->running = not this->stop_requested;
 
 	log::log(MSG(info) << "Game simulation started");
 }
 
+
+void GameSimulation::post(Job job) {
+	std::lock_guard<std::mutex> lock{this->jobs_mutex};
+	this->jobs.push_back(std::move(job));
+}
+
+void GameSimulation::run_jobs(const time::time_t &time) {
+	std::vector<Job> todo;
+	{
+		std::lock_guard<std::mutex> lock{this->jobs_mutex};
+		if (this->jobs.empty()) {
+			return;
+		}
+		todo.swap(this->jobs);
+	}
+	for (auto &job : todo) {
+		try {
+			job(this->game, time);
+		}
+		catch (std::exception &err) {
+			log::log(ERR << "Simulation: job failed: " << err.what());
+		}
+	}
+}
 
 void GameSimulation::stop() {
 	std::unique_lock lock{this->mutex};

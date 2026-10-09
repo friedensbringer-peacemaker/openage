@@ -460,6 +460,11 @@ if(OPENAGE_NATIVE_ENTRY)
 	target_include_directories(openage-prod-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 	add_test(NAME openage-prod-check COMMAND openage-prod-check)
 
+	# host test: save game format (dependency-free: round trip, damaged files, slots, autosave timer; XR fork)
+	add_executable(openage-save-format-check gamestate/save_format_check.cpp)
+	target_include_directories(openage-save-format-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-save-format-check COMMAND openage-save-format-check)
+
 	# host test: mouse selection rules and presenter frame statistics (dependency-free, parameter sweep; XR fork)
 	add_executable(openage-select-check gamestate/selection_check.cpp)
 	target_include_directories(openage-select-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

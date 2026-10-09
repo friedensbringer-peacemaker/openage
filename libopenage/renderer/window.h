@@ -81,6 +81,9 @@ struct window_settings {
 	bool ui = false;
 	// Test schedule of the interface ("board@12,restart@8", see GameUiController).
 	std::string ui_demo{};
+	// Directory of the save game slots (XR fork, gamestate/save_format.h):
+	// "slot-N.save"/"slot-N.meta" and the autosave. Empty: no saving.
+	std::string save_dir{};
 };
 
 

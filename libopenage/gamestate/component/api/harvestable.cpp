@@ -14,7 +14,16 @@ Harvestable::Harvestable(const std::shared_ptr<openage::event::EventLoop> &loop,
 	APIComponent{loop, ability},
 	resource{resource},
 	amount{amount},
+	start_amount{amount},
 	depleted{false} {}
+
+double Harvestable::get_start_amount() const {
+	return this->start_amount;
+}
+
+void Harvestable::set_amount(double amount) {
+	this->amount = amount < 0.0 ? 0.0 : amount;
+}
 
 component_t Harvestable::get_type() const {
 	return component_t::HARVESTABLE;

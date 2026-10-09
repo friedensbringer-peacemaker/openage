@@ -108,6 +108,12 @@ public:
 		return this->amounts[static_cast<size_t>(type)];
 	}
 
+	/// replace all amounts (XR fork: loading a save game)
+	void set(const resource_amounts_t &values) {
+		std::lock_guard<std::mutex> lock{this->mutex};
+		this->amounts = values;
+	}
+
 	/// add an amount (negative amounts are ignored), returns the new amount
 	double add(resource_t type, double amount) {
 		std::lock_guard<std::mutex> lock{this->mutex};

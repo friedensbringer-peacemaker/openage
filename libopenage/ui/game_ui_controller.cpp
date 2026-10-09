@@ -46,9 +46,22 @@ agesxr::HudProdState to_hud(const gamestate::prod::Snapshot &s) {
 		p.queue = true;
 		for (const auto &item : s.queue->items) {
 			p.queueItems.push_back(item.label.empty() ? item.id : item.label);
+			p.queueIcons.push_back(item.icon);
 		}
 		p.queueProgress = s.queue->progress;
 		p.waitingForHousing = s.queue->waiting_for_housing;
+	}
+	for (const auto &o : s.orders) {
+		agesxr::HudProdOrder h;
+		h.entity = o.building;
+		h.construction = o.construction;
+		h.label = o.construction ? o.building_label : o.label;
+		h.building = o.construction ? std::string{} : o.building_label;
+		h.icon = o.icon;
+		h.count = static_cast<int>(o.count);
+		h.remaining = o.remaining;
+		h.progress = o.progress;
+		p.orders.push_back(h);
 	}
 	p.placement = s.placement;
 	p.status = s.status;
@@ -97,6 +110,12 @@ GameUiController::GameUiController(const gamestate::MapSettings &map, UiHooks ho
 	menu.mapInfo = this->map_info();
 	this->feed.setCommandHandler([this](int code, const std::string &label) {
 		this->production_command(code, label);
+	});
+	this->feed.setFocusHandler([this](uint64_t id, const std::string &label) {
+		log::log(INFO << "UI: order '" << label << "' clicked, camera to entity " << id);
+		if (this->hooks.focus_entity) {
+			this->hooks.focus_entity(id);
+		}
 	});
 
 	// "what@seconds,what@seconds"
@@ -171,6 +190,10 @@ void GameUiController::poll(double now) {
 		sample.prod = to_hud(this->hooks.production->snapshot());
 	}
 	this->feed.fill(sample, now);
+	// autosave (game time; not while paused, not twice per interval)
+	if (sample.info.game and this->hooks.save_slot and this->autosave.due(sample.gameSeconds)) {
+		this->save_slot(gamestate::save::AUTOSAVE_SLOT, "autosave");
+	}
 
 	auto &board = this->ui.board();
 	const bool over = this->feed.matchOver();
@@ -250,6 +273,24 @@ void GameUiController::run_demo(double now) {
 			this->open_menu(true);
 			log::log(INFO << "UI: demo game menu opened");
 		}
+		else if (step.what == "order0") {
+			// first entry of the orders bar, like a click on it
+			log::log(INFO << "UI: demo click on order 0 (" << this->feed.model().orders.size() << " orders)");
+			this->feed.clickHit(agesxr::VrHud::kHitOrderBase, now);
+		}
+		else if (step.what == "save-menu" or step.what == "load-menu") {
+			this->open_menu(true);
+			this->ui.menu().view = step.what == "save-menu" ? agesxr::GameMenuModel::kViewSave
+			                                                : agesxr::GameMenuModel::kViewLoad;
+			this->refresh_slots();
+			log::log(INFO << "UI: demo slot list '" << step.what << "' with " << this->ui.menu().slots.size() << " slots");
+		}
+		else if (step.what == "close-menu") {
+			this->open_menu(false);
+		}
+		else if (step.what == "quicksave") {
+			this->save_slot(gamestate::save::QUICK_SLOT, "demo");
+		}
 		else if (step.what == "restart") {
 			auto settings = this->menu_map_settings();
 			settings.seed += 1;
@@ -296,7 +337,7 @@ bool GameUiController::on_event(const renderer::WindowEvent &ev, double now) {
 				this->hud_coords(ev.x, ev.y, hx, hy);
 				int index = this->hud.pointer(hx, hy, true, this->feed.model(), now);
 				if (index >= 0) {
-					this->feed.click(index, now);
+					this->feed.clickHit(index, now);
 				}
 				this->hud_click = true;
 				return true;
@@ -366,6 +407,16 @@ bool GameUiController::on_event(const renderer::WindowEvent &ev, double now) {
 		if (ev.auto_repeat) {
 			return this->ui.menu().open;
 		}
+		if ((ev.key == key::Key_F5 or ev.key == key::Key_F9) and not this->ui.menu().open) {
+			if (ev.key == key::Key_F5) {
+				this->save_slot(gamestate::save::QUICK_SLOT, "F5");
+			}
+			else {
+				this->load_slot(gamestate::save::QUICK_SLOT, "F9");
+			}
+			this->swallowed_keys.push_back(ev.key);
+			return true;
+		}
 		if (ev.key == key::Key_Escape or ev.key == key::Key_F10) {
 			if (this->ui.context().open) {
 				this->ui.closeContext();
@@ -406,7 +457,12 @@ void GameUiController::open_menu(bool open) {
 	}
 	menu.open = open;
 	menu.confirmQuit = false;
+	menu.view = agesxr::GameMenuModel::kViewMain;
+	menu.confirmSlot = -1;
 	menu.mapInfo = this->map_info();
+	if (open) {
+		this->refresh_slots();
+	}
 	this->menu_pause = open;
 	log::log(INFO << "UI: game menu " << (open ? "opened" : "closed"));
 	this->apply_pause();
@@ -508,6 +564,18 @@ void GameUiController::menu_action(agesxr::GameUi::Result result) {
 		}
 		break;
 	}
+	case Action::kShowSlots:
+		this->refresh_slots();
+		log::log(INFO << "UI: slot list '" << (menu.view == agesxr::GameMenuModel::kViewSave ? "save" : "load") << "'");
+		break;
+	case Action::kSave:
+		this->save_slot(result.id, "game menu");
+		this->open_menu(false);
+		break;
+	case Action::kLoad:
+		this->load_slot(result.id, "game menu");
+		this->open_menu(false);
+		break;
 	case Action::kQuit:
 		log::log(INFO << "UI: quit confirmed");
 		if (this->hooks.quit) {
@@ -519,6 +587,41 @@ void GameUiController::menu_action(agesxr::GameUi::Result result) {
 	}
 }
 
+void GameUiController::refresh_slots() {
+	auto &menu = this->ui.menu();
+	menu.slots.clear();
+	if (not this->hooks.list_slots) {
+		return;
+	}
+	for (const auto &s : this->hooks.list_slots()) {
+		menu.slots.push_back({s.slot, s.label(), s.exists});
+	}
+}
+
+void GameUiController::save_slot(int slot, const char *why) {
+	if (not this->hooks.save_slot or not this->hooks.save_slot(slot)) {
+		log::log(WARN << "UI: saving slot " << slot << " (" << why << ") not possible");
+		if (this->hooks.production) {
+			this->hooks.production->notify("Speichern nicht möglich", gamestate::prod::status_t::warn);
+		}
+		return;
+	}
+	log::log(INFO << "UI: save slot " << slot << " (" << why << ")");
+	this->last_poll = -1.0;
+}
+
+void GameUiController::load_slot(int slot, const char *why) {
+	if (not this->hooks.load_slot) {
+		return;
+	}
+	log::log(INFO << "UI: load slot " << slot << " (" << why << ")");
+	auto error = this->hooks.load_slot(slot);
+	if (not error.empty()) {
+		log::log(WARN << "UI: load slot " << slot << " failed: " << error);
+	}
+	this->last_poll = -1.0;
+}
+
 void GameUiController::production_command(int code, const std::string &label) {
 	if (not this->hooks.production) {
 		return;
@@ -526,6 +629,9 @@ void GameUiController::production_command(int code, const std::string &label) {
 	log::log(INFO << "UI: HUD button '" << label << "' (" << code << ")");
 	if (code == agesxr::kHudCmdCancelTraining) {
 		this->hooks.production->cancel_training();
+	}
+	else if (agesxr::isCancelQueueCommand(code)) {
+		this->hooks.production->cancel_training_at(static_cast<size_t>(code - agesxr::kHudCmdCancelQueue0));
 	}
 	else if (code == agesxr::kHudCmdCancelPlacement) {
 		this->hooks.production->cancel_placement();

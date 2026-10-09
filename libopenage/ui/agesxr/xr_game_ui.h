@@ -41,9 +41,22 @@ struct ContextMenuModel {
     bool operator!=(const ContextMenuModel& o) const { return !(*this == o); }
 };
 
+// Spielstand-Slot der Slot-Liste (0.6.0-xr.0.11): Nummer (0 = automatisch), sichtbarer Text, belegt.
+struct GameUiSlot {
+    int slot = 0;
+    std::string label;  // „Slot 2: Zufallskarte #3 · 12:34 · 2026-10-08 19:30“
+    bool exists = false;
+    bool operator==(const GameUiSlot& o) const { return slot == o.slot && label == o.label && exists == o.exists; }
+    bool operator!=(const GameUiSlot& o) const { return !(*this == o); }
+};
+
 // Spielmenü (Esc/F10). Werte sind Indizes in die Tabellen unten; GameUi ändert sie bei Klicks auf ◀ ▶ selbst.
 struct GameMenuModel {
+    enum View { kViewMain, kViewSave, kViewLoad };
     bool open = false;
+    int view = kViewMain;             // Hauptseite oder Slot-Liste zum Speichern/Laden
+    std::vector<GameUiSlot> slots;    // Slot-Liste (von der Engine gefüllt)
+    int confirmSlot = -1;             // Slot mit offener Rückfrage (Überschreiben/Verwerfen), −1 = keine
     bool paused = false;    // Nutzerpause (Anzeige des Kippschalters)
     int speed = 1;          // kGameSpeedLabels
     int biome = 0;          // kBiomeLabels
@@ -53,7 +66,8 @@ struct GameMenuModel {
     bool confirmQuit = false;
     std::string mapInfo;    // laufende Karte, Hinweiszeile unter dem Titel
     bool operator==(const GameMenuModel& o) const {
-        return open == o.open && paused == o.paused && speed == o.speed && biome == o.biome && size == o.size &&
+        return open == o.open && view == o.view && slots == o.slots && confirmSlot == o.confirmSlot &&
+               paused == o.paused && speed == o.speed && biome == o.biome && size == o.size &&
                opponent == o.opponent && seed == o.seed && confirmQuit == o.confirmQuit && mapInfo == o.mapInfo;
     }
     bool operator!=(const GameMenuModel& o) const { return !(*this == o); }
@@ -94,6 +108,9 @@ public:
         kSpeedChanged,    // menu().speed geändert
         kNewMap,          // „Neue Karte starten“ mit biome/size/opponent/seed
         kQuit,            // „Ja“ in der Beenden-Rückfrage
+        kShowSlots,       // „Speichern …“/„Laden …“: Slot-Liste geöffnet (menu().view), Port füllt menu().slots
+        kSave,            // in Slot id speichern (bei belegtem Slot nach der Rückfrage)
+        kLoad,            // Slot id laden (nach der Rückfrage „laufendes Spiel verwerfen?“)
     };
     struct Result {
         Action action = Action::kNone;
@@ -141,14 +158,18 @@ public:
     Rect contextItemRect(int index) const;
     Rect menuRect() const;
     // Zeilen des Spielmenüs (Index = kRow*): Zeile, linker Pfeil, rechter Pfeil, Knopf „Ja“/„Nein“ der Rückfrage.
-    enum Row { kRowResume = 0, kRowPause, kRowSpeed, kRowBiome, kRowSize, kRowOpponent, kRowSeed, kRowNewMap, kRowQuit, kRowCount };
+    enum Row { kRowResume = 0, kRowSave, kRowLoad, kRowPause, kRowSpeed, kRowBiome, kRowSize, kRowOpponent, kRowSeed,
+               kRowNewMap, kRowQuit, kRowCount };
+    // Slot-Liste: Zeile i = menu().slots[i], danach „Zurück“ (slotBackRow()).
+    int slotBackRow() const { return static_cast<int>(mMenu.slots.size()); }
+    bool slotEnabled(int index) const;  // Speichern: alle außer automatisch; Laden: nur belegte
     Rect menuRowRect(int row) const;
     Rect menuArrowRect(int row, bool right) const;
     Rect menuConfirmRect(bool yes) const;
     Rect boardRect() const;
 
 private:
-    enum class Hover { kNone, kContextItem, kMenuRow, kMenuArrowL, kMenuArrowR, kConfirmYes, kConfirmNo };
+    enum class Hover { kNone, kContextItem, kMenuRow, kMenuArrowL, kMenuArrowR, kConfirmYes, kConfirmNo, kSlotRow, kSlotBack };
     struct HoverState {
         Hover kind = Hover::kNone;
         int index = -1;
@@ -159,6 +180,7 @@ private:
     void drawAll();
     void drawContext();
     void drawMenu();
+    void drawSlots();
     void drawBoard();
     void drawArrow(const Rect& r, bool right, bool hot);
     int rowY0(int row) const;

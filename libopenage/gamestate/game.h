@@ -10,6 +10,7 @@
 #include "gamestate/map_settings.h"
 #include "gamestate/resources.h"
 #include "gamestate/types.h"
+#include "time/time.h"
 
 namespace nyan {
 class Database;
@@ -67,12 +68,15 @@ public:
 	 * @param entity_factory Factory for creating entities. Used for creating the players.
 	 * @param terrain_factory Factory for creating terrain objects.
 	 * @param map_settings Map of the game (XR fork; default: fixed test map).
+	 * @param start_time Simulation time the game starts at (XR fork, save games:
+	 *                   the saved game time; the clock is set to it afterwards).
 	 */
 	Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 	     const std::shared_ptr<assets::ModManager> &mod_manager,
 	     const std::shared_ptr<EntityFactory> &entity_factory,
 	     const std::shared_ptr<TerrainFactory> &terrain_factory,
-	     const MapSettings &map_settings = {});
+	     const MapSettings &map_settings = {},
+	     const time::time_t &start_time = time::TIME_ZERO);
 	~Game() = default;
 
 	/**
@@ -87,6 +91,13 @@ public:
 	 *         for the test map (the presenter keeps its default camera).
 	 */
 	const std::optional<MapView> &get_start_view() const;
+
+	/**
+	 * Entity ids of the objects the map generator placed (XR fork, save games):
+	 * first..last, last < first if the map has none (test map). The same map
+	 * settings give the same ids, so a save game stores only what changed.
+	 */
+	std::pair<entity_id_t, entity_id_t> get_generated_entity_range() const;
 
 	/**
 	 * Resource stockpile of a player (XR fork, economy; for HUDs).
@@ -129,7 +140,12 @@ private:
 	 * Create and start the computer opponents (random maps, see MapSettings::ai).
 	 */
 	void start_ai(const std::shared_ptr<openage::event::EventLoop> &event_loop,
-	              const MapSettings &settings);
+	              const MapSettings &settings,
+	              const time::time_t &start_time);
+
+	/// entity ids of the generated map objects (save games)
+	entity_id_t generated_first = 1;
+	entity_id_t generated_last = 0;
 
 	/// start positions of the random map (0: test map)
 	size_t start_count = 0;
@@ -183,7 +199,8 @@ private:
 	bool generate_random_map(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 	                         const std::shared_ptr<EntityFactory> &entity_factory,
 	                         const std::shared_ptr<TerrainFactory> &terrain_factory,
-	                         const MapSettings &settings);
+	                         const MapSettings &settings,
+	                         const time::time_t &start_time);
 
 	/**
 	 * Initial camera view (random maps only).

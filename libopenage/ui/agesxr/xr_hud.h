@@ -27,12 +27,19 @@ public:
     bool init();  // false: keine System-Schrift (Logik und Formen funktionieren trotzdem, z. B. in Host-Tests)
     bool ok() const { return mOk; }
 
+    // Treffercodes (0.6.0-xr.0.11): 0 … 7 Befehlsknopf, kHitQueueBase + i = Eintrag i der Warteschlange
+    // (Klick bricht ihn ab), kHitOrderBase + i = Bestellung i (Klick springt zum Gebäude).
+    static constexpr int kHitQueueBase = 100, kHitOrderBase = 200;
+    static bool isQueueHit(int code) { return code >= kHitQueueBase && code < kHitQueueBase + hudlayout::kQueueCount; }
+    static bool isOrderHit(int code) { return code >= kHitOrderBase && code < kHitOrderBase + hudlayout::kOrdCount; }
+
     // Strahl auf dem HUD in Texturpixeln (x/y < 0 = kein Treffer). clickEdge = Trigger gedrückt (Flanke).
-    // Rückgabe: Index des geklickten Knopfs in model.buttons (nur aktive), sonst −1.
+    // Rückgabe: Treffercode des geklickten Elements (Knöpfe nur aktive), sonst −1.
     int pointer(float x, float y, bool clickEdge, const HudModel& model, double now);
     int hoverButton() const { return mHover; }
-    // Knopf unter (x, y) ohne Zustand (−1 = keiner); berücksichtigt nur vorhandene Knöpfe.
+    // Element unter (x, y) ohne Zustand (−1 = keines); berücksichtigt nur vorhandene Knöpfe/Einträge.
     static int buttonAt(float x, float y, int buttonCount);
+    static int hitAt(float x, float y, int buttonCount, int queueCount, int orderCount);
 
     // Pixel (RGBA, Zeile 0 oben); zeichnet nur, was sich gegenüber dem gezeigten Stand geändert hat.
     const uint32_t* pixels(const HudModel& model, double now);
@@ -47,12 +54,14 @@ public:
 
     int measureText(const char* utf8, float px, bool bold = false) const { return mCanvas.textWidth(utf8, px, bold); }
     static constexpr float kNumberPx = 34.0f, kLabelPx = 22.0f, kKindPx = 28.0f, kStatusPx = 26.0f;
+    static constexpr float kOrderPx = 19.0f, kOrderSmallPx = 16.0f;
 
 private:
     void paintBand(const HudModel& m, int y0, int y1);
     void drawScene(const HudModel& m);
     void drawTop(const HudModel& m);
     void drawBottom(const HudModel& m);
+    void drawOrders(const HudModel& m);
     void drawIcon(HudIcon icon, int cx, int cy, float scale, uint32_t color, bool shadow = true);
     // Text in maxW einpassen: erst verkleinern (bis minPx), dann mit „…“ kürzen (UTF-8-sicher).
     std::string fitText(const std::string& s, float& px, float minPx, int maxW, bool bold) const;

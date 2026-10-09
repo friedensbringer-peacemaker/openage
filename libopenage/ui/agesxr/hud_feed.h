@@ -40,6 +40,9 @@ enum HudCommand {
 // Eigene Befehle neben den Produktions-Codes der Engine (101–106, 201–207).
 constexpr int kHudCmdCancelTraining = 900;   // letzte Einheit der Warteschlange abbrechen (Kosten zurück)
 constexpr int kHudCmdCancelPlacement = 901;  // Bauplatz-Modus verlassen
+// 0.6.0-xr.0.11: Eintrag i der Warteschlange abbrechen (Klick auf sein Symbol), i = 0 … kMaxQueue − 1
+constexpr int kHudCmdCancelQueue0 = 910;
+inline bool isCancelQueueCommand(int id) { return id >= kHudCmdCancelQueue0 && id < kHudCmdCancelQueue0 + HudModel::kMaxQueue; }
 
 // Produktions-Schnappschuss ohne Engine-Typen (EngineHost übersetzt prod::Snapshot hierher).
 struct HudProdOption {
@@ -48,6 +51,18 @@ struct HudProdOption {
     std::string icon;       // „villager“, „house“, „sword“, „bow“, „horse“, „hammer“, „tower“
     bool available = true;  // false = ausgegraut (reason sagt warum)
     std::string reason;
+};
+
+// Laufende Ausbildung/Bau eines eigenen Gebäudes (prod::Order ohne Engine-Typen).
+struct HudProdOrder {
+    uint64_t entity = 0;
+    std::string label;      // „Dorfbewohner“, „Haus“
+    std::string building;   // „Dorfzentrum“ (Bau: Gebäudename in label, building leer)
+    std::string icon;       // Symbol-Hinweis wie HudProdOption::icon
+    int count = 1;
+    double remaining = -1.0;
+    double progress = 0.0;
+    bool construction = false;
 };
 
 struct HudProdState {
@@ -60,6 +75,8 @@ struct HudProdState {
     std::vector<HudProdOption> options;     // was die Auswahl ausbilden/bauen kann
     bool queue = false;                     // gewähltes Gebäude hat eine Warteschlange
     std::vector<std::string> queueItems;    // deutsche Namen, erstes = in Arbeit
+    std::vector<std::string> queueIcons;    // Symbol-Hinweise je Eintrag (leer = Schwert)
+    std::vector<HudProdOrder> orders;       // alle Bestellungen des Spielers (0.6.0-xr.0.11)
     double queueProgress = 0.0;             // 0 … 1 des ersten Eintrags
     bool waitingForHousing = false;
     std::string placement;                  // Gebäude im Bauplatz-Modus (leer = keiner)
@@ -81,6 +98,7 @@ using HudMatch = openage::engine::hud_match_t;
 class HudFeed {
 public:
     using CommandHandler = std::function<void(int id, const std::string& label)>;
+    using FocusHandler = std::function<void(uint64_t entity, const std::string& label)>;
     static constexpr double kStatusSeconds = 3.0;
     static constexpr const char* kIdleStatus = "Wirtschaft folgt";  // nur Platzhalter (Testbild-Modus)
     static constexpr const char* kPlacementHint = "Bauplatz wählen – Trigger setzt, B bricht ab";
@@ -88,6 +106,8 @@ public:
 
     // Engine-Anbindung: Befehl an die Engine geben (nil = Platzhalter-Meldung in der Statuszeile).
     void setCommandHandler(CommandHandler h) { mHandler = std::move(h); }
+    // Klick auf eine Bestellung: Kamera zum Gebäude, auswählen (0.6.0-xr.0.11).
+    void setFocusHandler(FocusHandler h) { mFocus = std::move(h); }
 
     // Neue Engine (Kartenwechsel): Meldungsnummern und Spielzustand beginnen von vorn.
     void reset() {
@@ -131,6 +151,8 @@ public:
         }
         mModel.selection = game ? selectionOf(s) : HudSelection{};
         mModel.buttons = game ? buttonsOf(p) : std::vector<HudButton>{};
+        mModel.queue = game ? queueOf(p) : std::vector<HudQueueItem>{};
+        mModel.orders = game ? ordersOf(p) : std::vector<HudOrder>{};
 
         // Spielzustand (nur Wechsel zählen; nach Sieg/Niederlage bleibt es dabei, bis reset()).
         if (game && s.info.match != HudMatch::RUNNING) mMatch = s.info.match;
@@ -160,6 +182,31 @@ public:
         if (mHandler) mHandler(b.id, b.label);
         else setStatus(b.label + ": folgt mit der Wirtschaft", HudStatus::kInfo, now);
         return b.id;
+    }
+
+    // Treffer aus VrHud::pointer (Knopf, Warteschlangen-Eintrag, Bestellung). Rückgabe: Befehls-ID bzw. für
+    // Bestellungen kHudFocus, −1 = nichts.
+    static constexpr int kHudFocus = 999;
+    int clickHit(int code, double now) {
+        if (code >= 0 && code < HudModel::kMaxButtons) return click(code, now);
+        if (code >= 100 && code < 100 + HudModel::kMaxQueue) {
+            const int i = code - 100;
+            if (i >= static_cast<int>(mModel.queue.size())) return -1;
+            const int id = kHudCmdCancelQueue0 + i;
+            const std::string label = mModel.queue[static_cast<size_t>(i)].label + " abbrechen";
+            if (mHandler) mHandler(id, label);
+            else setStatus(label, HudStatus::kInfo, now);
+            return id;
+        }
+        if (code >= 200 && code < 200 + HudModel::kMaxOrders) {
+            const int i = code - 200;
+            if (i >= static_cast<int>(mModel.orders.size())) return -1;
+            const HudOrder& o = mModel.orders[static_cast<size_t>(i)];
+            const std::string label = o.building.empty() ? o.label : o.building;
+            if (mFocus) mFocus(o.entity, label);
+            return kHudFocus;
+        }
+        return -1;
     }
 
     // Meldung für kStatusSeconds (danach zurück auf die Ruhemeldung).
@@ -299,6 +346,34 @@ private:
         return sel;
     }
 
+    static std::vector<HudQueueItem> queueOf(const HudProdState& p) {
+        std::vector<HudQueueItem> out;
+        if (!p.valid || !p.queue || !p.placement.empty()) return out;
+        for (size_t i = 0; i < p.queueItems.size() && out.size() < static_cast<size_t>(HudModel::kMaxQueue); ++i)
+            out.push_back({iconFor(i < p.queueIcons.size() && !p.queueIcons[i].empty() ? p.queueIcons[i] : "sword"),
+                           p.queueItems[i]});
+        return out;
+    }
+
+    static std::vector<HudOrder> ordersOf(const HudProdState& p) {
+        std::vector<HudOrder> out;
+        if (!p.valid) return out;
+        for (const HudProdOrder& o : p.orders) {
+            if (out.size() >= static_cast<size_t>(HudModel::kMaxOrders)) break;
+            HudOrder h;
+            h.entity = o.entity;
+            h.icon = iconFor(o.icon);
+            h.label = o.label;
+            h.building = o.building;
+            h.count = o.count;
+            h.remaining = std::isfinite(o.remaining) ? static_cast<float>(o.remaining) : -1.0f;
+            h.progress = static_cast<float>(std::clamp(std::isfinite(o.progress) ? o.progress : 0.0, 0.0, 1.0));
+            h.construction = o.construction;
+            out.push_back(h);
+        }
+        return out;
+    }
+
     static std::vector<HudButton> buttonsOf(const HudProdState& p) {
         std::vector<HudButton> out;
         if (!p.valid) return out;
@@ -316,6 +391,7 @@ private:
 
     HudModel mModel;
     CommandHandler mHandler;
+    FocusHandler mFocus;
     double mStatusUntil = 0.0;
     uint64_t mLastSeq = 0;
     HudMatch mMatch = HudMatch::RUNNING;

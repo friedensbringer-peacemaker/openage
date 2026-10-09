@@ -52,7 +52,8 @@ Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
            const std::shared_ptr<assets::ModManager> &mod_manager,
            const std::shared_ptr<EntityFactory> &entity_factory,
            const std::shared_ptr<TerrainFactory> &terrain_factory,
-           const MapSettings &map_settings) :
+           const MapSettings &map_settings,
+           const time::time_t &start_time) :
 	db{nyan::Database::create()},
 	state{std::make_shared<GameState>(this->db, event_loop)},
 	universe{std::make_shared<Universe>(state)} {
@@ -71,12 +72,12 @@ Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 	this->state->set_mod_manager(mod_manager);
 
 	// XR fork: auto attacks and the victory condition (gamestate/combat)
-	this->state->get_combat()->start(this->state, time::TIME_ZERO);
+	this->state->get_combat()->start(this->state, start_time);
 
 	if (map_settings.type == map_type_t::RANDOM
-	    and this->generate_random_map(event_loop, entity_factory, terrain_factory, map_settings)) {
+	    and this->generate_random_map(event_loop, entity_factory, terrain_factory, map_settings, start_time)) {
 		// ai (XR fork): computer opponent
-		this->start_ai(event_loop, map_settings);
+		this->start_ai(event_loop, map_settings, start_time);
 		return;
 	}
 	this->generate_terrain(terrain_factory);
@@ -88,6 +89,10 @@ const std::shared_ptr<GameState> &Game::get_state() const {
 
 const std::optional<MapView> &Game::get_start_view() const {
 	return this->start_view;
+}
+
+std::pair<entity_id_t, entity_id_t> Game::get_generated_entity_range() const {
+	return {this->generated_first, this->generated_last};
 }
 
 std::optional<resource_amounts_t> Game::get_player_resources(player_id_t player) const {
@@ -109,7 +114,8 @@ void Game::connect_ai_production(const std::shared_ptr<prod::Production> &produc
 }
 
 void Game::start_ai(const std::shared_ptr<openage::event::EventLoop> &event_loop,
-                    const MapSettings &settings) {
+                    const MapSettings &settings,
+                    const time::time_t &start_time) {
 	const auto &s = settings.ai;
 	bool on = s.mode == ai_mode_t::ON or (s.mode == ai_mode_t::AUTO and this->start_count >= 2);
 	if (not on or this->start_count == 0) {
@@ -139,7 +145,7 @@ void Game::start_ai(const std::shared_ptr<openage::event::EventLoop> &event_loop
 	                                         params,
 	                                         seed,
 	                                         ai::make_production_port());
-	ai->start(this->state, time::TIME_ZERO);
+	ai->start(this->state, start_time);
 	this->ai_players.push_back(ai);
 }
 // ---- end ai (XR fork) ----
@@ -309,7 +315,8 @@ RandomMapObjects random_map_objects(const std::string &modpack) {
 bool Game::generate_random_map(const std::shared_ptr<openage::event::EventLoop> &event_loop,
                                const std::shared_ptr<EntityFactory> &entity_factory,
                                const std::shared_ptr<TerrainFactory> &terrain_factory,
-                               const MapSettings &settings) {
+                               const MapSettings &settings,
+                               const time::time_t &start_time) {
 	auto t0 = std::chrono::steady_clock::now();
 
 	// the generator needs the AoE II terrain and objects (hd_base, aoe2_base)
@@ -419,7 +426,8 @@ bool Game::generate_random_map(const std::shared_ptr<openage::event::EventLoop> 
 	this->start_count = generated.starts.size();
 
 	// objects as entities (villagers gather from trees, mines and bushes, see econ.h)
-	const auto time = time::TIME_ZERO;
+	const auto time = start_time;
+	bool first_object = true;
 	for (const auto &object : generated.objects) {
 		const auto &fqon = names->objects[static_cast<size_t>(object.kind)];
 		auto owner = static_cast<player_id_t>(object.owner);
@@ -441,6 +449,12 @@ bool Game::generate_random_map(const std::shared_ptr<openage::event::EventLoop> 
 		entity->get_manager()->run_activity_system(time);
 
 		this->state->add_game_entity(entity);
+		// save games: the generated objects get consecutive ids
+		if (first_object) {
+			this->generated_first = entity->get_id();
+			first_object = false;
+		}
+		this->generated_last = entity->get_id();
 	}
 
 	// XR fork: skirmish test option, a small army per player between the starts
@@ -471,6 +485,7 @@ bool Game::generate_random_map(const std::shared_ptr<openage::event::EventLoop> 
 			activity->init(time);
 			entity->get_manager()->run_activity_system(time);
 			this->state->add_game_entity(entity);
+			this->generated_last = entity->get_id();
 		}
 		log::log(INFO << "Random map: skirmish, " << skirmish->units.size() << " units around tile ("
 		              << skirmish->center_ne << ", " << skirmish->center_se << ")");
