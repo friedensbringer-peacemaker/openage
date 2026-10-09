@@ -3,6 +3,7 @@
 #include "render_stage.h"
 
 #include <algorithm>
+#include <tuple>
 
 #include "renderer/camera/camera.h"
 #include "renderer/camera/frustum_3d.h"
@@ -14,6 +15,7 @@
 #include "renderer/resources/texture_info.h"
 #include "renderer/shader_program.h"
 #include "renderer/stages/world/object.h"
+#include "renderer/stages/world/render_entity.h"
 #include "renderer/texture.h"
 #include "renderer/window.h"
 #include "time/clock.h"
@@ -127,7 +129,10 @@ void WorldRenderStage::update() {
 						obj->get_id() + 1,
 						// XR fork: player color of the marked sprite pixels
 						"u_player",
-						obj->get_player());
+						obj->get_player(),
+						// XR fork: tint (ghost of the placement mode), neutral for game entities
+						"u_tint",
+						Eigen::Vector4f{1.0f, 1.0f, 1.0f, 1.0f});
 
 					Renderable display_obj{
 						layer_unifs,
@@ -150,6 +155,66 @@ void WorldRenderStage::update() {
 		obj->update_uniforms(current_time);
 	}
 	this->drawn_objects = drawn;
+
+	// XR fork: tint of the placement ghost
+	if (this->ghost_object) {
+		for (const auto &unif : this->ghost_object->get_uniforms()) {
+			unif->update("u_tint", this->ghost_tint);
+		}
+	}
+}
+
+void WorldRenderStage::set_ghost(const std::string &animation_path,
+                                 const coord::phys3 &position,
+                                 const Eigen::Vector4f &tint) {
+	auto now = this->clock->get_real_time();
+	std::shared_ptr<RenderEntity> old;
+	{
+		std::unique_lock lock{this->mutex};
+		this->ghost_tint = tint;
+		if (animation_path.empty() or animation_path != this->ghost_path) {
+			// other building or no placement: the old ghost leaves (dropped by update())
+			old = this->ghost_entity;
+			this->ghost_entity = nullptr;
+			this->ghost_object = nullptr;
+			this->ghost_path = animation_path;
+		}
+	}
+	if (old) {
+		old->mark_removed();
+	}
+	if (animation_path.empty()) {
+		return;
+	}
+	if (not this->ghost_entity) {
+		auto entity = std::make_shared<RenderEntity>();
+		entity->update(GHOST_ID, position, animation_path, now);
+		this->add_render_entity(entity);
+		std::unique_lock lock{this->mutex};
+		this->ghost_entity = entity;
+		this->ghost_object = this->render_objects.back();
+		return;
+	}
+	this->ghost_entity->update(GHOST_ID, position, animation_path, now);
+}
+
+std::vector<std::tuple<uint32_t, uint32_t, Eigen::Vector3f>>
+WorldRenderStage::get_ground_positions(const std::vector<uint32_t> &ids) {
+	std::vector<std::tuple<uint32_t, uint32_t, Eigen::Vector3f>> result;
+	if (ids.empty()) {
+		return result;
+	}
+	std::unique_lock lock{this->mutex};
+	auto current_time = this->clock->get_real_time();
+	for (auto &obj : this->render_objects) {
+		if (obj->is_removed() or std::find(ids.begin(), ids.end(), obj->get_id()) == ids.end()) {
+			continue;
+		}
+		if (auto pos = obj->get_world_position(current_time)) {
+			result.emplace_back(obj->get_id(), obj->get_player(), *pos);
+		}
+	}
+	return result;
 }
 
 size_t WorldRenderStage::get_drawn_objects() const {

@@ -17,6 +17,7 @@
 #include "renderer/resources/shader_source.h"
 #include "renderer/resources/texture_info.h"
 #include "renderer/shader_program.h"
+#include "renderer/stages/hud/color_batches.h"
 #include "renderer/stages/hud/object.h"
 #include "renderer/texture.h"
 #include "renderer/window.h"
@@ -66,10 +67,10 @@ void HudRenderStage::remove_drag_entity() {
 
 	this->drag_object = nullptr;
 	this->render_pass->clear_renderables();
-	// XR fork: the selection frames were cleared as well
-	this->marker_geometry = {};
-	this->marker_uniforms = {};
-	this->marker_vertices = {0, 0};
+	// XR fork: the health bars were cleared as well
+	if (this->marker_batches) {
+		this->marker_batches->reset();
+	}
 }
 
 void HudRenderStage::set_selection_markers(std::vector<SelectionMarker> &&markers) {
@@ -78,75 +79,38 @@ void HudRenderStage::set_selection_markers(std::vector<SelectionMarker> &&marker
 }
 
 void HudRenderStage::update_selection_markers() {
-	// frame width 2 px, 3 px away from the sprite
+	// XR fork (AoE layout): health bar above each selected (or hovered, damaged)
+	// sprite: dark track, fill green -> yellow -> red; width follows the sprite
+	// (and so the zoom), at least 20 px, at most 64 px, 5 px high
 	auto viewport = this->camera->get_viewport_size();
 	const float px_x = 2.0f / static_cast<float>(std::max<size_t>(viewport[0], 1));
 	const float px_y = 2.0f / static_cast<float>(std::max<size_t>(viewport[1], 1));
-	const float line_x = 2.0f * px_x;
-	const float line_y = 2.0f * px_y;
-	const float pad_x = 3.0f * px_x;
-	const float pad_y = 3.0f * px_y;
-
-	for (size_t group = 0; group < 2; ++group) {
-		const bool own = group == 0;
-		// 4 edges as 2 triangles each
-		std::vector<float> verts;
-		auto rect = [&verts](float l, float b, float r, float t) {
-			const float quad[12] = {l, b, r, b, r, t, l, b, r, t, l, t};
-			verts.insert(verts.end(), quad, quad + 12);
-		};
-		for (const auto &marker : this->selection_markers) {
-			if (marker.own != own) {
-				continue;
-			}
-			float l = marker.ndc.x() - pad_x;
-			float b = marker.ndc.y() - pad_y;
-			float r = marker.ndc.z() + pad_x;
-			float t = marker.ndc.w() + pad_y;
-			rect(l, b, r, b + line_y);
-			rect(l, t - line_y, r, t);
-			rect(l, b, l + line_x, t);
-			rect(r - line_x, b, r, t);
+	ColorBatch track{Eigen::Vector4f{0.08f, 0.08f, 0.08f, 0.85f}, {}};
+	ColorBatch good{Eigen::Vector4f{0.25f, 0.80f, 0.25f, 1.0f}, {}};
+	ColorBatch mid{Eigen::Vector4f{0.88f, 0.75f, 0.19f, 1.0f}, {}};
+	ColorBatch low{Eigen::Vector4f{0.82f, 0.19f, 0.19f, 1.0f}, {}};
+	for (const auto &marker : this->selection_markers) {
+		if (marker.health < 0.0f) {
+			continue;
 		}
-
-		const size_t vertex_count = verts.size() / 2;
-		if (vertex_count != this->marker_vertices[group]) {
-			// size changed: new geometry, the old renderable leaves the pass
-			if (this->marker_uniforms[group]) {
-				auto old = this->marker_uniforms[group];
-				this->render_pass->remove_renderables([&old](const Renderable &renderable) {
-					return renderable.uniform == old;
-				});
-			}
-			this->marker_geometry[group] = nullptr;
-			this->marker_uniforms[group] = nullptr;
-			this->marker_vertices[group] = vertex_count;
-			if (vertex_count == 0) {
-				continue;
-			}
-			std::vector<uint8_t> data(verts.size() * sizeof(float));
-			std::memcpy(data.data(), verts.data(), data.size());
-			resources::VertexInputInfo info{{resources::vertex_input_t::V2F32},
-			                                resources::vertex_layout_t::AOS,
-			                                resources::vertex_primitive_t::TRIANGLES};
-			this->marker_geometry[group] = this->renderer->add_mesh_geometry(
-				resources::MeshData{std::move(data), info});
-			this->marker_uniforms[group] = this->drag_select_shader->new_uniform_input(
-				"in_col",
-				own ? Eigen::Vector4f{1.0f, 1.0f, 1.0f, 0.9f} : Eigen::Vector4f{1.0f, 0.85f, 0.2f, 0.9f});
-			this->render_pass->add_renderables(Renderable{
-				this->marker_uniforms[group],
-				this->marker_geometry[group],
-				true,
-				false,
-			});
-		}
-		else if (vertex_count > 0) {
-			std::vector<uint8_t> data(verts.size() * sizeof(float));
-			std::memcpy(data.data(), verts.data(), data.size());
-			this->marker_geometry[group]->update_verts(data);
+		const float f = std::clamp(marker.health, 0.0f, 1.0f);
+		const float cx = 0.5f * (marker.ndc.x() + marker.ndc.z());
+		const float sprite_w = (marker.ndc.z() - marker.ndc.x()) / px_x;
+		const float w = std::clamp(sprite_w * 0.7f, 20.0f, 64.0f) * px_x;
+		const float h = 5.0f * px_y;
+		const float b = marker.ndc.w() + 4.0f * px_y;
+		const float l = cx - 0.5f * w;
+		const float r = cx + 0.5f * w;
+		track.rect(l - px_x, b - px_y, r + px_x, b + h + px_y);
+		auto &fill = f >= 0.5f ? good : f >= 0.25f ? mid : low;
+		if (f > 0.0f) {
+			fill.rect(l, b, l + w * f, b + h);
 		}
 	}
+	if (not this->marker_batches) {
+		this->marker_batches = std::make_unique<ColorBatches>(this->renderer, this->drag_select_shader);
+	}
+	this->marker_batches->commit(this->render_pass, {track, good, mid, low});
 }
 
 void HudRenderStage::update() {

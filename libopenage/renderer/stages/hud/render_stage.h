@@ -35,6 +35,7 @@ class AssetManager;
 }
 
 namespace hud {
+class ColorBatches;
 class HudDragObject;
 class DragRenderEntity;
 
@@ -46,6 +47,8 @@ struct SelectionMarker {
 	Eigen::Vector4f ndc;
 	/// owned by the controlled player (white), else only displayed (yellow)
 	bool own;
+	/// health 0..1 for the bar above the sprite (XR fork, AoE layout), < 0 = no bar
+	float health = -1.0f;
 };
 
 /**
@@ -166,9 +169,9 @@ private:
 	 * the geometry + uniforms in the render pass.
 	 */
 	std::vector<SelectionMarker> selection_markers;
-	std::array<std::shared_ptr<renderer::Geometry>, 2> marker_geometry;
-	std::array<std::shared_ptr<renderer::UniformInput>, 2> marker_uniforms;
-	std::array<size_t, 2> marker_vertices{0, 0};
+	/// health bars above the selected sprites (XR fork; the selection itself is
+	/// marked on the ground, see GroundMarkerStage)
+	std::unique_ptr<ColorBatches> marker_batches;
 
 	/**
 	 * Draw the selection frames (XR fork), part of update().

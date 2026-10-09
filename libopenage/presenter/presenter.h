@@ -6,6 +6,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <mutex>
 #include <vector>
 
@@ -68,6 +69,8 @@ class GUI;
 }
 
 namespace hud {
+struct ColorBatch;
+class GroundMarkerStage;
 class HudRenderStage;
 }
 
@@ -343,6 +346,33 @@ protected:
 	 * Graphics output for the HUD.
 	 */
 	std::shared_ptr<renderer::hud::HudRenderStage> hud_renderer;
+
+	/**
+	 * Markers on the ground under the sprites (XR fork): selection ellipses,
+	 * building footprints, footprint of the placement mode.
+	 */
+	std::shared_ptr<renderer::hud::GroundMarkerStage> ground_renderer;
+
+	/**
+	 * Last mouse position in window pixels (XR fork: hover, placement ghost), -1 = none.
+	 */
+	int mouse_x = -1;
+	int mouse_y = -1;
+
+	/**
+	 * Placement ghost (XR fork): validity and height of the last checked anchor.
+	 */
+	bool ghost_valid = true;
+	double ghost_up = 0.0;
+	/// hovered entity (health bar of a damaged entity) and when it was picked
+	std::optional<uint32_t> hover_id{};
+	double hover_at = -1.0;
+
+	/**
+	 * Placement ghost and footprint of the placement mode (XR fork), part of
+	 * update_selection_markers().
+	 */
+	void update_placement_ghost(std::vector<renderer::hud::ColorBatch> &ground);
 
 	/**
 	 * Game user interface (XR fork), null without window_settings::ui.

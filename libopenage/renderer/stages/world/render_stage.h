@@ -2,6 +2,10 @@
 
 #pragma once
 
+#include <tuple>
+
+#include "coord/phys.h"
+
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -135,6 +139,26 @@ public:
 	std::vector<ScreenBox> get_screen_boxes(const std::vector<uint32_t> &ids);
 
 	/**
+	 * World space ground positions of game entities (XR fork, selection
+	 * ellipses on the ground).
+	 *
+	 * @param ids Game entities.
+	 *
+	 * @return (id, player, position) of those entities that exist.
+	 */
+	std::vector<std::tuple<uint32_t, uint32_t, Eigen::Vector3f>> get_ground_positions(const std::vector<uint32_t> &ids);
+
+	/**
+	 * Ghost of the placement mode (XR fork): the sprite of \p animation_path at
+	 * \p position, multiplied by \p tint. An empty path removes the ghost.
+	 * Call in the render thread before update().
+	 */
+	void set_ghost(const std::string &animation_path, const coord::phys3 &position, const Eigen::Vector4f &tint);
+
+	/// entity id of the ghost (pick() returns it where the ghost is drawn)
+	static constexpr uint32_t GHOST_ID = 0x7ffffff0;
+
+	/**
 	 * Objects drawn in the last update() (XR fork, statistics).
 	 */
 	size_t get_drawn_objects() const;
@@ -194,6 +218,14 @@ private:
 	 * Objects drawn in the last update() (XR fork).
 	 */
 	size_t drawn_objects = 0;
+
+	/**
+	 * Ghost of the placement mode (XR fork).
+	 */
+	std::shared_ptr<RenderEntity> ghost_entity;
+	std::shared_ptr<WorldObject> ghost_object;
+	std::string ghost_path;
+	Eigen::Vector4f ghost_tint{1.0f, 1.0f, 1.0f, 1.0f};
 
 	/**
 	 * Shader for rendering the world objects.

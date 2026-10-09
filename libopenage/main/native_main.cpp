@@ -185,6 +185,7 @@ struct native_args {
 	std::string ui_style{"aoe"};
 	bool ui_quest = false;
 	bool replay_aoe = false;
+	bool replay_markers = false;
 };
 
 /**
@@ -216,7 +217,7 @@ void usage(const char *argv0) {
 	             " [--ai on|off|auto] [--ai-difficulty easy|normal] [--ai-player <n>]"
 	             " [--ai-first-attack <s>] [--ai-attack-size <n>] [--sim-speed <x>] [--capture-at <s1,s2,...>]"
 	             " [--ui | --no-ui] [--ui-demo <what@s,...>] [--replay-ui]"
-	             " [--ui-style aoe|classic] [--ui-quest] [--replay-aoe]\n";
+	             " [--ui-style aoe|classic] [--ui-quest] [--replay-aoe] [--replay-markers]\n";
 }
 
 bool parse_args(int argc, char **argv, native_args &args) {
@@ -419,6 +420,11 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		}
 		else if (arg == "--replay-aoe") {
 			args.replay_aoe = true;
+			args.ui = true;
+			args.ui_style = "aoe";
+		}
+		else if (arg == "--replay-markers") {
+			args.replay_markers = true;
 			args.ui = true;
 			args.ui_style = "aoe";
 		}
@@ -1327,6 +1333,11 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> aoe_replay_steps(con
 	              << centre(layout.gridRect(0)).first << ", " << centre(layout.gridRect(0)).second << "), bottom bar "
 	              << bar_top);
 	click(0.9, tp, E::kLeftButton);
+	// sync points: the sink delivers inputs after a capture only once it is taken (software GL is slow),
+	// the command grid needs the selection in the production snapshot
+	capture(2.0, "-sync-1");
+	add(2.5, E::kMouseMove, tp.first, tp.second, 0, 0);
+	capture(3.0, "-sync-2");
 	click(5.0, centre(layout.gridRect(0)), E::kLeftButton);
 	key(6.0, 'Q');
 	capture(7.5, "-2-dorfzentrum");
@@ -1357,6 +1368,8 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> aoe_replay_steps(con
 		key(11.8, 'T');
 		click(12.5, site, E::kLeftButton);
 		log::log(INFO << "aoe replay: barracks site at pixel (" << site.first << ", " << site.second << ")");
+		// a frame after the placement (the sink delivers later inputs only after this capture)
+		capture(14.0, "-sync-5");
 		key(19.0, 'A');
 		capture(20.0, "-5-holz");
 	}
@@ -1375,6 +1388,195 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> aoe_replay_steps(con
 	click(22.9, surrender_row, E::kLeftButton);
 	capture(23.5, "-8-aufgeben");
 	key(23.8, 0x01000000);
+	capture(24.5, nullptr);
+	return steps;
+}
+
+/**
+ * Input replay of the ground markers and the placement ghost (--replay-markers,
+ * XR fork; with --map random): selects a villager (ellipse + health bar), all
+ * villagers (double click), the town centre (footprint diamond), starts a house
+ * with the hotkey Q and moves the cursor over free grass (green ghost) and over
+ * water (red ghost), places the house and selects its foundation (health bar
+ * of the unfinished building). Captures <png stem>-m1 … -m6.
+ */
+std::vector<openage::renderer::opengl::TestFrameSink::Step> markers_replay_steps(const native_args &args,
+                                                                                  openage::gamestate::MapSettings &map_settings,
+                                                                                  double start,
+                                                                                  const std::string &capture_file) {
+	using namespace openage;
+	using renderer::opengl::TestFrameSink;
+	using gamestate::map_object_t;
+	using gamestate::map_terrain_t;
+	using E = renderer::SinkInputEvent;
+
+	const auto map = gamestate::generate_map(map_settings);
+	const gamestate::Heightmap heights{map.width, map.height, map.corners};
+	const auto tc = map.starts.at(0);
+	if (not map_settings.view) {
+		gamestate::MapView start_view;
+		start_view.ne = tc[0];
+		start_view.se = tc[1];
+		start_view.zoom = 1.5f;
+		map_settings.view = start_view;
+	}
+	const gamestate::MapView view = *map_settings.view;
+	const int width = static_cast<int>(args.width);
+	const int height = static_cast<int>(args.height);
+	auto camera = std::make_shared<renderer::camera::Camera>(nullptr, util::Vector2s{args.width, args.height});
+	camera->look_at_coord(coord::scene3{10.0, 10.0, 0});
+	camera->move_to(Eigen::Vector3f{0.0f, view.height, 0.0f});
+	camera->look_at_coord(coord::scene3{view.ne, view.se, 0});
+	camera->set_zoom(view.zoom);
+	const Eigen::Matrix4f matrix = camera->get_projection_matrix() * camera->get_view_matrix();
+	auto pixel = [&](double ne, double se, double up) {
+		double ground = heights.is_flat() ? 0.0 : heights.at(ne, se);
+		coord::phys3 pos{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{ground + up}};
+		auto w = pos.to_scene3().to_world_space();
+		Eigen::Vector4f clip = matrix * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+		int x = static_cast<int>(std::lround((clip.x() + 1.0) * 0.5 * width));
+		int y = static_cast<int>(std::lround(height - (clip.y() + 1.0) * 0.5 * height));
+		return std::pair{x, y};
+	};
+	agesxr::AoeUi layout;
+	layout.resize(width, height);
+	const int bar_top = layout.barRect().y0;
+	auto on_screen = [&](std::pair<int, int> p) {
+		return p.first >= 60 and p.second >= layout.topBarPx() + 60 and p.first < width - 60 and p.second < bar_top - 60;
+	};
+	const gamestate::MapObject *villager = nullptr;
+	for (const auto &o : map.objects) {
+		if (o.kind == map_object_t::VILLAGER and o.owner == 0 and on_screen(pixel(o.ne, o.se, 0.0))) {
+			villager = &o;
+			break;
+		}
+	}
+	auto terrain = [&](long ne, long se) {
+		return map.tiles[static_cast<size_t>(ne) + static_cast<size_t>(se) * map.width];
+	};
+	auto grass = [](map_terrain_t t) {
+		return t == map_terrain_t::GRASS or t == map_terrain_t::GRASS2 or t == map_terrain_t::GRASS3 or t == map_terrain_t::DIRT
+		       or t == map_terrain_t::DIRT2 or t == map_terrain_t::DIRT3;
+	};
+	auto water = [](map_terrain_t t) {
+		return t == map_terrain_t::WATER or t == map_terrain_t::WATER_MEDIUM or t == map_terrain_t::WATER_DEEP;
+	};
+	// free grass for a house (2 x 2 tiles plus a margin, no object, 4..9 tiles from the town centre)
+	// and a water tile, both on screen
+	std::optional<std::pair<double, double>> site;
+	std::optional<std::pair<double, double>> lake;
+	double best_site = 1e9, best_lake = 1e9;
+	for (long se = 2; se + 2 < static_cast<long>(map.height); ++se) {
+		for (long ne = 2; ne + 2 < static_cast<long>(map.width); ++ne) {
+			const double d = std::hypot(ne - tc[0], se - tc[1]);
+			auto p = pixel(ne, se, 0.0);
+			if (water(terrain(ne, se)) and d < best_lake and p.first >= 20 and p.second >= layout.topBarPx() + 20
+			    and p.first < width - 20 and p.second < bar_top - 20) {
+				best_lake = d;
+				lake = std::pair{ne + 0.5, se + 0.5};
+			}
+			if (not on_screen(p) or d < 4.0 or d > 9.0 or d >= best_site) {
+				continue;
+			}
+			bool ok = true;
+			for (long a = -2; a <= 1 and ok; ++a) {
+				for (long b = -2; b <= 1 and ok; ++b) {
+					ok = grass(terrain(ne + a, se + b));
+				}
+			}
+			for (const auto &o : map.objects) {
+				if (std::abs(o.ne - ne) < 3.0 and std::abs(o.se - se) < 3.0) {
+					ok = false;
+					break;
+				}
+			}
+			if (ok) {
+				best_site = d;
+				site = std::pair{static_cast<double>(ne), static_cast<double>(se)};
+			}
+		}
+	}
+
+	std::vector<TestFrameSink::Step> steps;
+	auto add = [&](double at, int type, int x, int y, int button, int buttons, int key = 0) {
+		TestFrameSink::Step step;
+		step.at = start + at;
+		step.what = TestFrameSink::Step::kind::input;
+		step.event.type = type;
+		step.event.x = x;
+		step.event.y = y;
+		step.event.button = button;
+		step.event.buttons = buttons;
+		step.event.key = key;
+		steps.push_back(step);
+	};
+	auto click = [&](double t, std::pair<int, int> p) {
+		add(t, E::kMouseMove, p.first, p.second, 0, 0);
+		add(t + 0.1, E::kMouseDown, p.first, p.second, E::kLeftButton, E::kLeftButton);
+		add(t + 0.2, E::kMouseUp, p.first, p.second, E::kLeftButton, 0);
+	};
+	auto double_click = [&](double t, std::pair<int, int> p) {
+		add(t, E::kMouseMove, p.first, p.second, 0, 0);
+		add(t + 0.05, E::kMouseDown, p.first, p.second, E::kLeftButton, E::kLeftButton);
+		add(t + 0.1, E::kMouseUp, p.first, p.second, E::kLeftButton, 0);
+		add(t + 0.2, E::kMouseDown, p.first, p.second, E::kLeftButton, E::kLeftButton);
+		add(t + 0.2, E::kMouseDoubleClick, p.first, p.second, E::kLeftButton, E::kLeftButton);
+		add(t + 0.3, E::kMouseUp, p.first, p.second, E::kLeftButton, 0);
+	};
+	auto capture = [&](double t, const char *suffix) {
+		const std::filesystem::path png{capture_file};
+		TestFrameSink::Step shot;
+		shot.at = start + t;
+		shot.what = TestFrameSink::Step::kind::capture;
+		shot.file = suffix == nullptr ? capture_file
+		                              : (png.parent_path() / (png.stem().string() + suffix + png.extension().string())).string();
+		steps.push_back(shot);
+	};
+	auto key = [&](double t, int code) {
+		add(t, E::kKeyDown, 0, 0, 0, 0, code);
+		add(t + 0.05, E::kKeyUp, 0, 0, 0, 0, code);
+	};
+
+	if (villager == nullptr or not site) {
+		log::log(WARN << "markers replay: no villager or free grass on screen");
+		capture(2.0, nullptr);
+		return steps;
+	}
+	auto vp = pixel(villager->ne, villager->se, 0.6);
+	auto tp = pixel(tc[0], tc[1], 1.2);
+	auto sp = pixel(site->first, site->second, 0.0);
+	log::log(INFO << "markers replay: villager at pixel (" << vp.first << ", " << vp.second << "), town centre ("
+	              << tp.first << ", " << tp.second << "), house site at tile (" << site->first << ", " << site->second
+	              << ") pixel (" << sp.first << ", " << sp.second << ")");
+	click(0.9, vp);
+	capture(3.0, "-m1-dorfbewohner");
+	click(3.5, tp);
+	capture(5.5, "-m3-dorfzentrum");
+	double_click(6.0, vp);
+	// also the sync point for the hotkey: the sink delivers later inputs only after this capture
+	capture(8.0, "-m2-gruppe");
+	key(11.0, 'Q');  // house (first command of the villagers)
+	add(12.0, E::kMouseMove, sp.first, sp.second, 0, 0);
+	// the ghost appears one frame after the footprint: a second move after a capture waits for more frames
+	capture(13.0, "-sync-m4");
+	add(13.5, E::kMouseMove, sp.first, sp.second, 0, 0);
+	capture(14.5, "-m4-bauplatz-gueltig");
+	if (lake) {
+		auto lp = pixel(lake->first, lake->second, 0.0);
+		log::log(INFO << "markers replay: water at tile (" << lake->first << ", " << lake->second << ") pixel ("
+		              << lp.first << ", " << lp.second << ")");
+		add(15.0, E::kMouseMove, lp.first, lp.second, 0, 0);
+		capture(16.0, "-sync-m5");
+		add(16.5, E::kMouseMove, lp.first, lp.second, 0, 0);
+		capture(17.5, "-m5-bauplatz-wasser");
+	}
+	else {
+		log::log(WARN << "markers replay: no water on screen");
+	}
+	click(18.0, sp);  // place the house on the grass
+	capture(20.0, "-sync-m6");
+	click(22.0, sp);  // its foundation: health bar of the unfinished building
+	capture(24.0, "-m6-fundament");
 	capture(24.5, nullptr);
 	return steps;
 }
@@ -1434,6 +1636,9 @@ bool egl_sink_check(const native_args &args,
 	settings.ui_quest = args.ui_quest;
 	if (args.replay_aoe and not args.stop_in_resize) {
 		steps = aoe_replay_steps(args, map_settings, start, png.string());
+	}
+	else if (args.replay_markers and not args.stop_in_resize) {
+		steps = markers_replay_steps(args, map_settings, start, png.string());
 	}
 	else if (args.replay_ui and not args.stop_in_resize) {
 		steps = ui_replay_steps(args, map_settings, start, png.string(), ui_demo);
@@ -1513,7 +1718,7 @@ bool egl_sink_check(const native_args &args,
 	// a house on water after the first house was paid (must be rejected)
 	std::atomic<bool> prod_driver_stop{false};
 	std::thread prod_driver;
-	if (args.replay_prod or args.replay_ui or args.replay_aoe) {
+	if (args.replay_prod or args.replay_ui or args.replay_aoe or args.replay_markers) {
 		// the UI replay only logs the snapshots (no house on water)
 		auto water = args.replay_prod ? prod_targets.water : std::nullopt;
 		prod_driver = std::thread{[&prod_driver_stop, production = engine->get_production(), water]() {
@@ -1726,7 +1931,7 @@ int main(int argc, char **argv) {
 
 	// ai (XR fork): the input replays check the human side; keep the computer opponent out
 	if ((args.replay or args.replay_econ or args.replay_combat or args.replay_prod or args.replay_select or args.replay_ui
-	     or args.replay_aoe)
+	     or args.replay_aoe or args.replay_markers)
 	    and not args.ai_explicit) {
 		args.map.ai.mode = gamestate::ai_mode_t::OFF;
 	}

@@ -152,6 +152,12 @@ public:
 	uint32_t get_player() const;
 
 	/**
+	 * World space position of the object (XR fork, ground markers), nothing
+	 * before the first update from the gamestate.
+	 */
+	std::optional<Eigen::Vector3f> get_world_position(const time::time_t &time) const;
+
+	/**
 	 * Visibility flag shared with the renderables of this object (XR fork):
 	 * false while the object is outside the screen.
 	 */

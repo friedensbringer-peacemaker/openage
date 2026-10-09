@@ -901,6 +901,8 @@ void Production::update(const std::shared_ptr<GameState> &state,
 		selected = this->selection;
 		player_id = this->player;
 	}
+	// XR fork: ghost of the placement mode (own rate, independent of the tick)
+	this->update_placement_preview(state, now);
 	const bool tick = t >= this->last_tick + TICK or t < this->last_tick;
 	if (not tick and not was_dirty) {
 		return;
@@ -1332,6 +1334,156 @@ void Production::update(const std::shared_ptr<GameState> &state,
 	snap.status_seq = this->current.status_seq;
 	snap.status_time = this->current.status_time;
 	this->current = std::move(snap);
+}
+
+
+// ---- placement preview (XR fork) -----------------------------------------------------------
+
+void Production::set_placement_cursor(const coord::phys3 &ground_hit) {
+	std::lock_guard<std::mutex> lock{this->mutex};
+	if (this->preview_cursor and this->preview_cursor->ne == ground_hit.ne and this->preview_cursor->se == ground_hit.se) {
+		return;
+	}
+	this->preview_cursor = ground_hit;
+	this->preview_dirty = true;
+}
+
+PlacementPreview Production::placement_preview() const {
+	std::lock_guard<std::mutex> lock{this->mutex};
+	return this->preview;
+}
+
+void Production::update_placement_preview(const std::shared_ptr<GameState> &state, const time::time_t &now) {
+	std::string id;
+	std::optional<coord::phys3> cursor;
+	std::vector<entity_id_t> selected;
+	player_id_t player_id;
+	bool dirty;
+	{
+		std::lock_guard<std::mutex> lock{this->mutex};
+		id = this->placement;
+		cursor = this->preview_cursor;
+		selected = this->selection;
+		player_id = this->player;
+		dirty = this->preview_dirty;
+		this->preview_dirty = false;
+		if (id.empty() or not cursor) {
+			this->preview = PlacementPreview{};
+			if (id.empty()) {
+				this->preview_cursor.reset();
+			}
+			return;
+		}
+	}
+	// the cursor moved, or units may have walked onto the footprint (4 Hz)
+	const double t = now.to_double();
+	if (not dirty and t >= this->preview_time and t < this->preview_time + 0.25) {
+		return;
+	}
+	this->preview_time = t;
+	if (state == nullptr or state->get_map() == nullptr) {
+		return;
+	}
+
+	// a selected own villager that can build it (same choice as place_at)
+	std::shared_ptr<GameEntity> builder_entity;
+	const BuilderComp::Buildable *buildable = nullptr;
+	for (auto sel_id : selected) {
+		auto entity = find_entity(state, sel_id);
+		if (entity == nullptr or not entity->has_component(component::component_t::OWNERSHIP)
+		    or owner_of(entity, now) != player_id) {
+			continue;
+		}
+		auto builder = component_of<BuilderComp>(entity, component::component_t::BUILDER);
+		if (builder == nullptr) {
+			continue;
+		}
+		if (const auto *b = builder->find(id)) {
+			builder_entity = entity;
+			buildable = b;
+			break;
+		}
+	}
+	if (buildable == nullptr) {
+		std::lock_guard<std::mutex> lock{this->mutex};
+		this->preview = PlacementPreview{};
+		return;
+	}
+
+	PlacementPreview result;
+	result.active = true;
+	result.id = id;
+	result.radius = buildable->radius;
+
+	// idle animation of the building (cached per building)
+	auto anim = this->preview_animations.find(buildable->fqon);
+	if (anim == this->preview_animations.end()) {
+		std::string path;
+		try {
+			const auto &view = state->get_db_view();
+			auto obj = view->get_object(buildable->fqon);
+			for (const auto &ability_val : obj.get_set("GameEntity.abilities")) {
+				auto ability = view->get_object(object_name(ability_val));
+				if (ability.get_parents()[0] == "engine.ability.type.Idle") {
+					path = animation_of(ability);
+					break;
+				}
+			}
+		}
+		catch (std::exception &e) {
+			log::log(WARN << "Production: no idle animation for the preview of " << buildable->fqon << ": " << e.what());
+		}
+		anim = this->preview_animations.emplace(buildable->fqon, path).first;
+	}
+	result.animation = anim->second;
+
+	// same footprint and tile rules as place_at()
+	auto map = state->get_map();
+	auto hit = map->pick_terrain(*cursor);
+	auto [ane, ase] = snap_anchor(hit.ne.to_double(), hit.se.to_double(), buildable->radius);
+	auto tiles = building_tiles(ane, ase, buildable->radius);
+	std::set<std::pair<long, long>> unit_tiles;
+	for (const auto &[eid, entity] : state->get_game_entities()) {
+		if (is_unit(entity)) {
+			auto p = position_of(entity, now);
+			unit_tiles.insert({static_cast<long>(std::floor(p.ne.to_double())),
+			                   static_cast<long>(std::floor(p.se.to_double()))});
+		}
+	}
+	auto land = grid_of(builder_entity, state);
+	auto water = grid_of(builder_entity, state, "Water");
+	const auto size = map->get_size();
+	auto check = check_placement(tiles, [&](const econ::tile_pos &tp) {
+		if (tp.ne < 0 or tp.se < 0 or tp.ne >= static_cast<long>(size[0]) or tp.se >= static_cast<long>(size[1])) {
+			return tile_state_t::OUTSIDE;
+		}
+		coord::tile tile{tp.ne, tp.se};
+		if (land and not map->is_passable(*land, tile)) {
+			if (water and map->is_passable(*water, tile)) {
+				return tile_state_t::WATER;
+			}
+			return tile_state_t::BLOCKED;
+		}
+		if (not terrain_buildable(map->terrain_name(tile))) {
+			return tile_state_t::WATER;
+		}
+		if (unit_tiles.contains({tp.ne, tp.se})) {
+			return tile_state_t::OCCUPIED;
+		}
+		return tile_state_t::FREE;
+	});
+	coord::phys3 anchor{coord::phys_t{ane}, coord::phys_t{ase}, coord::phys_t{0.0}};
+	auto on_ground = map->on_terrain(anchor);
+	result.anchor_ne = ane;
+	result.anchor_se = ase;
+	result.anchor_up = on_ground.up.to_double();
+	result.valid = check == placement_t::OK;
+	result.reason = result.valid ? std::string{} : std::string{placement_message(check)};
+
+	std::lock_guard<std::mutex> lock{this->mutex};
+	if (this->placement == id) {
+		this->preview = std::move(result);
+	}
 }
 
 } // namespace openage::gamestate::prod

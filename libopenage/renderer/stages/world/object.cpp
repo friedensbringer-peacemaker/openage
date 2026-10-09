@@ -247,6 +247,13 @@ uint32_t WorldObject::get_player() const {
 	return this->render_entity != nullptr ? this->render_entity->get_player() : 0;
 }
 
+std::optional<Eigen::Vector3f> WorldObject::get_world_position(const time::time_t &time) const {
+	if (this->render_entity == nullptr) {
+		return std::nullopt;
+	}
+	return this->position.get(time).to_world_space();
+}
+
 std::optional<Eigen::Vector4f> WorldObject::get_screen_bounds(const time::time_t &time,
                                                               const Eigen::Matrix4f &view_proj,
                                                               float inv_zoom,

@@ -7,6 +7,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -186,6 +187,30 @@ struct Snapshot {
 };
 
 /**
+ * Preview of the placement mode (XR fork, ghost of the building under the
+ * cursor): computed by the simulation thread with the same rules as a placed
+ * foundation (Production::place_at), read by the presenter.
+ */
+struct PlacementPreview {
+	/// placement mode active and a cursor position known
+	bool active = false;
+	/// short name of the building ("House")
+	std::string id;
+	/// idle animation of the building (sprite of the ghost), empty if none
+	std::string animation;
+	/// hitbox radius (tiles); footprint side = footprint_side(radius)
+	double radius = 1.0;
+	/// footprint centre snapped to the tile grid, terrain height at the anchor
+	double anchor_ne = 0.0;
+	double anchor_se = 0.0;
+	double anchor_up = 0.0;
+	/// the foundation may be placed there
+	bool valid = false;
+	/// why not (placement_message), empty if valid
+	std::string reason;
+};
+
+/**
  * Thread-safe production interface (no Qt): the HUD and the input bindings ask
  * for a snapshot and send requests; the simulation thread executes the requests
  * and advances the training queues in update().
@@ -266,7 +291,25 @@ public:
 	            const std::shared_ptr<EntityFactory> &factory,
 	            const time::time_t &now);
 
+	// ---- placement preview (XR fork): ghost and footprint under the cursor
+
+	/// ground point under the cursor in the placement mode (any thread)
+	void set_placement_cursor(const coord::phys3 &ground_hit);
+
+	/// latest preview of the placement mode (any thread, copy)
+	PlacementPreview placement_preview() const;
+
 private:
+	/// recompute the preview (simulation thread, without side effects on the game)
+	void update_placement_preview(const std::shared_ptr<GameState> &state, const time::time_t &now);
+
+	std::optional<coord::phys3> preview_cursor{};
+	bool preview_dirty = false;
+	PlacementPreview preview{};
+	// simulation thread only
+	double preview_time = -1.0;
+	std::unordered_map<std::string, std::string> preview_animations{};
+
 	struct Request {
 		enum class kind_t {
 			TRAIN,

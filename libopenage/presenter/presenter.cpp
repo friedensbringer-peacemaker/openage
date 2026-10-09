@@ -21,6 +21,7 @@
 #include "event/state.h"
 #include "gamestate/event/send_command.h"
 #include "gamestate/combat/combat_state.h"
+#include "gamestate/combat/stats.h"
 #include "gamestate/component/internal/commands/types.h"
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
@@ -30,7 +31,10 @@
 #include "input/controller/camera/binding_context.h"
 #include "input/controller/camera/controller.h"
 #include "input/controller/game/binding_context.h"
+#include "gamestate/combat/combat_state.h"
+#include "gamestate/game_state.h"
 #include "gamestate/production.h"
+#include "gamestate/production_math.h"
 #include "input/controller/game/controller.h"
 #include "input/controller/hud/binding_context.h"
 #include "input/controller/hud/controller.h"
@@ -52,6 +56,8 @@
 #include "renderer/resources/texture_data.h"
 #include "renderer/resources/texture_info.h"
 #include "renderer/stages/camera/manager.h"
+#include "renderer/stages/hud/color_batches.h"
+#include "renderer/stages/hud/ground_stage.h"
 #include "renderer/stages/hud/render_stage.h"
 #include "renderer/stages/screen/render_stage.h"
 #include "renderer/stages/skybox/render_stage.h"
@@ -387,6 +393,13 @@ void Presenter::init_graphics(const renderer::window_settings &window_settings) 
 		this->time_loop->get_clock());
 	this->render_passes.push_back(this->terrain_renderer->get_render_pass());
 
+	// XR fork: selection ellipses / footprints on the ground, covered by the sprites
+	this->ground_renderer = std::make_shared<renderer::hud::GroundMarkerStage>(
+		this->window,
+		this->renderer,
+		this->root_dir["assets"]["shaders"]);
+	this->render_passes.push_back(this->ground_renderer->get_render_pass());
+
 	// Units/buildings
 	this->world_renderer = std::make_shared<renderer::world::WorldRenderStage>(
 		this->window,
@@ -507,6 +520,8 @@ void Presenter::init_input() {
 	});
 	this->window->add_mouse_move_callback([this, ui_takes](const renderer::WindowEvent &ev) {
 		this->input_manager->set_mouse(static_cast<int>(ev.x), static_cast<int>(ev.y));
+		this->mouse_x = static_cast<int>(ev.x);
+		this->mouse_y = static_cast<int>(ev.y);
 		if (ui_takes(ev)) {
 			return;
 		}
@@ -676,20 +691,174 @@ void Presenter::apply_sink_background() {
 	}
 }
 
+namespace {
+
+/// world space point -> normalized device coordinates
+Eigen::Vector2f to_ndc(const Eigen::Matrix4f &view_proj, const Eigen::Vector3f &world) {
+	Eigen::Vector4f clip = view_proj * Eigen::Vector4f{world.x(), world.y(), world.z(), 1.0f};
+	const float w = clip.w() != 0.0f ? clip.w() : 1.0f;
+	return {clip.x() / w, clip.y() / w};
+}
+
+/// ground square of a footprint (side in tiles) around a world space centre
+std::vector<Eigen::Vector2f> footprint_ndc(const Eigen::Matrix4f &view_proj, const Eigen::Vector3f &centre, float half) {
+	// world space = (se, up, -ne): the tile axes are x and z
+	return {to_ndc(view_proj, centre + Eigen::Vector3f{-half, 0.0f, -half}),
+	        to_ndc(view_proj, centre + Eigen::Vector3f{half, 0.0f, -half}),
+	        to_ndc(view_proj, centre + Eigen::Vector3f{half, 0.0f, half}),
+	        to_ndc(view_proj, centre + Eigen::Vector3f{-half, 0.0f, half})};
+}
+
+} // namespace
+
 void Presenter::update_selection_markers() {
+	// XR fork (AoE layout): selection on the ground (ellipse under units, footprint
+	// diamond under buildings, white = own, yellow = others) in the ground pass
+	// under the sprites, health bars above the sprites in the HUD pass (selected,
+	// and the hovered entity if it is damaged); placement ghost of the placement mode
+	std::vector<renderer::hud::ColorBatch> ground;
 	auto controller = this->controller_slot->get();
 	if (not controller) {
+		this->update_placement_ghost(ground);
+		this->ground_renderer->set_batches(std::move(ground));
+		this->hud_renderer->set_selection_markers({});
 		return;
 	}
 	auto selected = controller->get_selected_copy();
 	std::vector<uint32_t> ids(selected.begin(), selected.end());
 	auto controlled = controller->get_controlled();
 
+	std::shared_ptr<gamestate::combat::CombatState> combat;
+	if (this->simulation) {
+		if (auto game = this->simulation->get_game()) {
+			if (auto state = game->get_state()) {
+				combat = state->get_combat();
+			}
+		}
+	}
+
+	// hovered entity (object id texture of the last frame; one texel read, at most 5 times a second)
+	const auto &viewport = this->camera->get_viewport_size();
+	if (this->mouse_x >= 0 and this->mouse_y >= 0 and viewport[0] > 0 and viewport[1] > 0
+	    and this->now() - this->hover_at >= 0.2) {
+		this->hover_at = this->now();
+		const float nx = 2.0f * (static_cast<float>(this->mouse_x) + 0.5f) / static_cast<float>(viewport[0]) - 1.0f;
+		const float ny = 1.0f - 2.0f * (static_cast<float>(this->mouse_y) + 0.5f) / static_cast<float>(viewport[1]);
+		this->hover_id = this->world_renderer->pick(nx, ny);
+	}
+	std::optional<uint32_t> hover = this->hover_id;
+	if (hover and (*hover == renderer::world::WorldRenderStage::GHOST_ID
+	               or std::find(ids.begin(), ids.end(), *hover) != ids.end())) {
+		hover.reset();
+	}
+
+	auto health_of = [&combat](uint32_t id) -> std::optional<gamestate::combat::HealthInfo> {
+		if (not combat) {
+			return std::nullopt;
+		}
+		auto infos = combat->get_health({static_cast<gamestate::entity_id_t>(id)});
+		if (infos.empty() or infos.front().max_health <= 0) {
+			return std::nullopt;
+		}
+		return infos.front();
+	};
+
+	// health bars (HUD pass, above the sprites)
+	std::vector<uint32_t> bar_ids = ids;
+	if (hover) {
+		if (auto h = health_of(*hover); h and h->alive and h->health < h->max_health) {
+			bar_ids.push_back(*hover);
+		}
+	}
 	std::vector<renderer::hud::SelectionMarker> markers;
-	for (const auto &box : this->world_renderer->get_screen_boxes(ids)) {
-		markers.push_back(renderer::hud::SelectionMarker{box.ndc, box.player == controlled});
+	for (const auto &box : this->world_renderer->get_screen_boxes(bar_ids)) {
+		renderer::hud::SelectionMarker marker{box.ndc, box.player == controlled};
+		if (auto h = health_of(box.id); h and h->alive) {
+			marker.health = static_cast<float>(h->health) / static_cast<float>(h->max_health);
+		}
+		markers.push_back(marker);
 	}
 	this->hud_renderer->set_selection_markers(std::move(markers));
+
+	// ground markers (ground pass, under the sprites)
+	const Eigen::Matrix4f view_proj = this->camera->get_projection_matrix() * this->camera->get_view_matrix();
+	const float px_x = 2.0f / static_cast<float>(std::max<size_t>(viewport[0], 1));
+	const float px_y = 2.0f / static_cast<float>(std::max<size_t>(viewport[1], 1));
+	renderer::hud::ColorBatch own{Eigen::Vector4f{1.0f, 1.0f, 1.0f, 0.9f}, {}};
+	renderer::hud::ColorBatch other{Eigen::Vector4f{1.0f, 0.85f, 0.2f, 0.9f}, {}};
+	for (const auto &[id, player, pos] : this->world_renderer->get_ground_positions(ids)) {
+		auto &batch = player == controlled ? own : other;
+		std::shared_ptr<const gamestate::combat::CombatStats> stats;
+		if (combat) {
+			stats = combat->get_stats_snapshot(id);
+		}
+		if (stats and stats->building) {
+			// footprint diamond (tiles of the building, same rule as the placement)
+			const float half = 0.5f * static_cast<float>(gamestate::prod::footprint_side(stats->radius));
+			batch.ring(footprint_ndc(view_proj, pos, half), 2.0f * px_x, 2.0f * px_y);
+		}
+		else {
+			// flat ellipse on the ground: a circle around the unit seen from above at 30 degrees
+			const float radius = std::max(0.35f, 1.4f * static_cast<float>(stats ? stats->radius : 0.25));
+			std::vector<Eigen::Vector2f> points;
+			constexpr int segments = 28;
+			for (int i = 0; i < segments; ++i) {
+				const float a = 6.2831853f * static_cast<float>(i) / static_cast<float>(segments);
+				points.push_back(to_ndc(view_proj, pos + Eigen::Vector3f{radius * std::cos(a), 0.0f, radius * std::sin(a)}));
+			}
+			batch.ring(points, 2.0f * px_x, 2.0f * px_y);
+		}
+	}
+	ground.push_back(std::move(own));
+	ground.push_back(std::move(other));
+	this->update_placement_ghost(ground);
+	this->ground_renderer->set_batches(std::move(ground));
+}
+
+void Presenter::update_placement_ghost(std::vector<renderer::hud::ColorBatch> &ground) {
+	auto production = this->simulation ? this->simulation->get_production() : nullptr;
+	if (not production or not production->placement_active() or this->mouse_x < 0) {
+		this->world_renderer->set_ghost({}, coord::phys3{0, 0, 0}, Eigen::Vector4f{1.0f, 1.0f, 1.0f, 1.0f});
+		return;
+	}
+	// ground point under the cursor (same plane hit as the placement click)
+	coord::input mouse{coord::pixel_t{this->mouse_x}, coord::pixel_t{this->mouse_y}};
+	auto hit = mouse.to_phys3(this->camera);
+	production->set_placement_cursor(hit);
+	auto preview = production->placement_preview();
+	if (not preview.active) {
+		this->world_renderer->set_ghost({}, coord::phys3{0, 0, 0}, Eigen::Vector4f{1.0f, 1.0f, 1.0f, 1.0f});
+		return;
+	}
+	// snap here (follows the cursor at once); validity of the simulation for the same anchor
+	auto [ane, ase] = gamestate::prod::snap_anchor(hit.ne.to_double(), hit.se.to_double(), preview.radius);
+	if (std::abs(ane - preview.anchor_ne) < 1e-6 and std::abs(ase - preview.anchor_se) < 1e-6) {
+		this->ghost_valid = preview.valid;
+		this->ghost_up = preview.anchor_up;
+	}
+	coord::phys3 anchor{coord::phys_t{ane}, coord::phys_t{ase}, coord::phys_t{this->ghost_up}};
+	// translucent; red (values above 1 brighten the red channel) where it cannot be placed
+	const Eigen::Vector4f tint = this->ghost_valid ? Eigen::Vector4f{1.0f, 1.0f, 1.0f, 0.6f}
+	                                               : Eigen::Vector4f{1.8f, 0.45f, 0.45f, 0.6f};
+	this->world_renderer->set_ghost(preview.animation, anchor, tint);
+
+	// footprint: filled diamond with an outline, green = valid, red = not
+	const Eigen::Matrix4f view_proj = this->camera->get_projection_matrix() * this->camera->get_view_matrix();
+	const auto &viewport = this->camera->get_viewport_size();
+	const float px_x = 2.0f / static_cast<float>(std::max<size_t>(viewport[0], 1));
+	const float px_y = 2.0f / static_cast<float>(std::max<size_t>(viewport[1], 1));
+	const float half = 0.5f * static_cast<float>(gamestate::prod::footprint_side(preview.radius));
+	auto corners = footprint_ndc(view_proj, anchor.to_scene3().to_world_space(), half);
+	renderer::hud::ColorBatch fill{this->ghost_valid ? Eigen::Vector4f{0.2f, 0.85f, 0.2f, 0.30f}
+	                                                 : Eigen::Vector4f{0.9f, 0.15f, 0.15f, 0.40f},
+	                               {}};
+	fill.quad(corners[0], corners[1], corners[2], corners[3]);
+	renderer::hud::ColorBatch edge{this->ghost_valid ? Eigen::Vector4f{0.3f, 1.0f, 0.3f, 0.9f}
+	                                                 : Eigen::Vector4f{1.0f, 0.2f, 0.2f, 0.9f},
+	                               {}};
+	edge.ring(corners, 2.0f * px_x, 2.0f * px_y);
+	ground.push_back(std::move(fill));
+	ground.push_back(std::move(edge));
 }
 
 void Presenter::apply_map_view() {
@@ -758,6 +927,7 @@ void Presenter::render() {
 	this->terrain_renderer->update();
 	this->world_renderer->update();
 	this->update_selection_markers();
+	this->ground_renderer->update();
 	this->hud_renderer->update();
 	if (this->ui_renderer) {
 		this->ui_renderer->update(this->now());

@@ -9,6 +9,9 @@ uniform sampler2D tex;
 uniform uint u_id;
 // owning player (XR fork): color of the player color pixels
 uniform uint u_player;
+// tint (XR fork): (1, 1, 1, 1) for game entities; the ghost of the placement
+// mode is translucent and red when the foundation cannot be placed
+uniform vec4 u_tint;
 
 // position (top left corner) and size: (x, y, width, height)
 uniform vec4 tile_params;
@@ -62,5 +65,6 @@ void main() {
 	else {
 		col = tex_val;
 	}
+	col *= u_tint;
 	id = u_id;
 }
