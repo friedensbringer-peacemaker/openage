@@ -849,11 +849,11 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> select_replay_steps(
 	// double click on the right villager (the middle one stands behind the town centre's
 	// roof): press, release, press + double click, release
 	add(6.0, E::kMouseMove, v2.first, v2.second, 0, 0);
-	add(6.05, E::kMouseDown, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
-	add(6.1, E::kMouseUp, v2.first, v2.second, E::kLeftButton, 0);
-	add(6.2, E::kMouseDown, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
-	add(6.2, E::kMouseDoubleClick, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
-	add(6.3, E::kMouseUp, v2.first, v2.second, E::kLeftButton, 0);
+	add(8.05, E::kMouseDown, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
+	add(8.1, E::kMouseUp, v2.first, v2.second, E::kLeftButton, 0);
+	add(8.2, E::kMouseDown, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
+	add(8.2, E::kMouseDoubleClick, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
+	add(8.3, E::kMouseUp, v2.first, v2.second, E::kLeftButton, 0);
 	capture(7.0, "double");
 	click(7.8, v0, E::kLeftButton);                 // 1 villager
 	click(8.2, gr, E::kRightButton);                // walks to the ground spot
@@ -1327,55 +1327,55 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> aoe_replay_steps(con
 	              << centre(layout.gridRect(0)).first << ", " << centre(layout.gridRect(0)).second << "), bottom bar "
 	              << bar_top);
 	click(0.9, tp, E::kLeftButton);
-	click(3.0, centre(layout.gridRect(0)), E::kLeftButton);
-	key(4.0, 'Q');
-	capture(5.5, "-2-dorfzentrum");
+	click(5.0, centre(layout.gridRect(0)), E::kLeftButton);
+	key(6.0, 'Q');
+	capture(7.5, "-2-dorfzentrum");
 	if (villager != nullptr) {
 		// 3. double click on a villager: all own villagers on screen
 		auto vp = pixel(villager->ne, villager->se, 0.6);
 		log::log(INFO << "aoe replay: villager at pixel (" << vp.first << ", " << vp.second << ")");
-		add(6.0, E::kMouseMove, vp.first, vp.second, 0, 0);
+		add(8.0, E::kMouseMove, vp.first, vp.second, 0, 0);
 		add(6.05, E::kMouseDown, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
 		add(6.1, E::kMouseUp, vp.first, vp.second, E::kLeftButton, 0);
 		add(6.2, E::kMouseDown, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
 		add(6.2, E::kMouseDoubleClick, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
 		add(6.3, E::kMouseUp, vp.first, vp.second, E::kLeftButton, 0);
-		capture(7.5, "-3-gruppe");
+		capture(9.5, "-3-gruppe");
 		// 4. right button held on free ground: context menu, "Hierher bewegen"
 		std::pair<int, int> ground{std::min(vp.first + 140, width - 400), std::min(vp.second + 40, bar_top - 80)};
-		add(8.0, E::kMouseMove, ground.first, ground.second, 0, 0);
-		add(8.1, E::kMouseDown, ground.first, ground.second, E::kRightButton, E::kRightButton);
-		capture(8.8, "-4-kontext");
-		add(8.9, E::kMouseUp, ground.first, ground.second, E::kRightButton, 0);
+		add(10.0, E::kMouseMove, ground.first, ground.second, 0, 0);
+		add(10.1, E::kMouseDown, ground.first, ground.second, E::kRightButton, E::kRightButton);
+		capture(10.8, "-4-kontext");
+		add(10.9, E::kMouseUp, ground.first, ground.second, E::kRightButton, 0);
 		layout.openContext(ground.first, ground.second, "x", std::vector<agesxr::GameUiItem>(5, agesxr::GameUiItem{1, "x", true}));
 		auto item0 = centre(layout.contextItemRect(0));
 		layout.closeContext();
 		log::log(INFO << "aoe replay: context item 0 at pixel (" << item0.first << ", " << item0.second << ")");
-		click(9.1, item0, E::kLeftButton);
+		click(11.1, item0, E::kLeftButton);
 		// 5. barracks (hotkey T) placed next to the villagers, then the archery range (A): not enough wood
 		std::pair<int, int> site{std::max(vp.first - 220, 80), std::max(vp.second - 60, layout.topBarPx() + 80)};
-		key(9.8, 'T');
-		click(10.5, site, E::kLeftButton);
+		key(11.8, 'T');
+		click(12.5, site, E::kLeftButton);
 		log::log(INFO << "aoe replay: barracks site at pixel (" << site.first << ", " << site.second << ")");
-		key(13.5, 'A');
-		capture(14.5, "-5-holz");
+		key(19.0, 'A');
+		capture(20.0, "-5-holz");
 	}
 	else {
 		log::log(WARN << "aoe replay: no villager of player 0 on screen");
 	}
 	// 6. game menu (Esc), settings page, back (Esc), surrender armed, close (Esc)
-	key(15.0, 0x01000000);
-	capture(15.8, "-6-spielmenue");
+	key(20.5, 0x01000000);
+	capture(21.3, "-6-spielmenue");
 	layout.openMenu(true, 0.0);
 	auto settings_row = centre(layout.dialogRowRect(agesxr::AoeUi::kMainSettings));
 	auto surrender_row = centre(layout.dialogRowRect(agesxr::AoeUi::kMainSurrender));
-	click(16.0, settings_row, E::kLeftButton);
-	capture(16.8, "-7-einstellungen");
-	key(17.0, 0x01000000);
-	click(17.4, surrender_row, E::kLeftButton);
-	capture(18.0, "-8-aufgeben");
-	key(18.3, 0x01000000);
-	capture(19.0, nullptr);
+	click(21.5, settings_row, E::kLeftButton);
+	capture(22.3, "-7-einstellungen");
+	key(22.5, 0x01000000);
+	click(22.9, surrender_row, E::kLeftButton);
+	capture(23.5, "-8-aufgeben");
+	key(23.8, 0x01000000);
+	capture(24.5, nullptr);
 	return steps;
 }
 
