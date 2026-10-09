@@ -2,6 +2,8 @@
 
 #include "engine.h"
 
+#include <algorithm>
+
 #include "log/log.h"
 #include "log/message.h"
 
@@ -181,6 +183,11 @@ HudInfo Engine::query_hud(uint64_t player) const {
 			HudEntity first;
 			first.id = info.selected.front();
 			if (combat) {
+				// XR fork (AoE layout): names of a multiple selection for the portraits
+				for (size_t i = 0; i < info.selected.size() and i < HudInfo::MAX_SELECTED_NAMES; ++i) {
+					auto stats = combat->get_stats_snapshot(info.selected[i]);
+					info.selected_names.push_back(stats ? stats->name : std::string{});
+				}
 				if (auto stats = combat->get_stats_snapshot(first.id)) {
 					first.name = stats->name;
 					first.unit = stats->unit;
@@ -188,6 +195,23 @@ HudInfo Engine::query_hud(uint64_t player) const {
 					first.villager = stats->villager;
 					first.ranged = stats->ranged;
 					first.neutral_object = stats->ambient or stats->herdable;
+					// combat values for the selection panel
+					first.has_stats = stats->alive;
+					for (const auto &effect : stats->attack.effects) {
+						first.attack = std::max(first.attack, effect.amount);
+					}
+					for (const auto &[type, amount] : stats->armor.block) {
+						if (type.find("Melee") != std::string::npos) {
+							first.armor_melee = std::max(first.armor_melee, amount);
+						}
+						else if (type.find("Pierce") != std::string::npos) {
+							first.armor_pierce = std::max(first.armor_pierce, amount);
+						}
+					}
+					first.range = stats->ranged ? stats->max_range : 0.0;
+					const auto &n = stats->name;
+					first.mounted = n.find("Knight") != std::string::npos or n.find("Cavalry") != std::string::npos
+					                or n.find("Scout") != std::string::npos or n.find("Camel") != std::string::npos;
 				}
 				auto health = combat->get_health({first.id});
 				if (not health.empty()) {

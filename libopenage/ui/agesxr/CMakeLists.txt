@@ -4,6 +4,8 @@
 add_sources(libopenage
 	stb_truetype_impl.cpp
 	text_raster.cpp
+	xr_aoe_skin.cpp
+	xr_aoe_ui.cpp
 	xr_canvas.cpp
 	xr_game_ui.cpp
 	xr_hud.cpp

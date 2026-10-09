@@ -42,6 +42,16 @@ struct HudEntity {
 	/// 0 = no health bar
 	int64_t max_health = 0;
 	bool alive = false;
+	/// combat values for the selection panel (XR fork, AoE layout): attack =
+	/// largest effect of one hit, armor = blocked amount of melee / pierce
+	/// changes, range in tiles (0 = melee); has_stats = false without combat data
+	bool has_stats = false;
+	int64_t attack = 0;
+	int64_t armor_melee = 0;
+	int64_t armor_pierce = 0;
+	double range = 0.0;
+	/// mounted unit (cavalry icon)
+	bool mounted = false;
 };
 
 /**
@@ -66,6 +76,10 @@ struct HudInfo {
 	std::vector<uint64_t> selected{};
 	/// first entity of the selection (if there is one)
 	std::optional<HudEntity> first{};
+	/// short nyan names of the first selected entities (XR fork, portraits of a
+	/// multiple selection; at most MAX_SELECTED_NAMES)
+	std::vector<std::string> selected_names{};
+	static constexpr size_t MAX_SELECTED_NAMES = 24;
 	/// match state of the player
 	hud_match_t match = hud_match_t::RUNNING;
 	/// simulation time (s) when the match was decided (only if match != RUNNING)

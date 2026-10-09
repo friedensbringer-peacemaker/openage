@@ -15,6 +15,7 @@
 #include "ui/agesxr/hud_feed.h"
 #include "ui/agesxr/xr_game_ui.h"
 #include "ui/agesxr/xr_hud.h"
+#include "ui/ui_controller.h"
 
 namespace openage {
 
@@ -74,7 +75,7 @@ struct UiHooks {
  * code draws the VR HUD and VR menu of the Quest app (ui/agesxr, copied from the
  * superproject). The Quest app keeps this interface off (window_settings::ui).
  */
-class GameUiController {
+class GameUiController : public UiController {
 public:
 	/// right button held this long opens the context menu (shorter: the usual right click)
 	static constexpr double HOLD_SECONDS = 0.25;
@@ -91,40 +92,58 @@ public:
 	GameUiController(const gamestate::MapSettings &map, UiHooks hooks, const std::string &demo = {});
 
 	/// load the fonts; false = no system font (the layout still works)
-	bool init();
-	void resize(size_t width, size_t height);
+	bool init() override;
+	void resize(size_t width, size_t height) override;
 
 	/**
 	 * Handle a window event before the input manager.
 	 *
 	 * @return true if the event belongs to the interface (not passed to the game).
 	 */
-	bool on_event(const renderer::WindowEvent &ev, double now);
+	bool on_event(const renderer::WindowEvent &ev, double now) override;
 
 	/// once per frame: poll the engine data, hold timer, pause state
-	void update(double now);
+	void update(double now) override;
 
 	// ---- output for the render stage
-	const uint32_t *hud_pixels(double now);
-	uint32_t hud_version() const;
+	const uint32_t *hud_pixels(double now) override;
+	uint32_t hud_version() const override;
 	const std::vector<agesxr::VrHud::DirtyBand> &hud_bands() const;
 	static constexpr int hud_texture_width() { return agesxr::VrHud::kWidth; }
 	static constexpr int hud_texture_height() { return agesxr::VrHud::kHeight; }
 	/// HUD bar on screen (window pixels, origin top left): full width, height scaled
-	void hud_screen_rect(int &x0, int &y0, int &x1, int &y1) const;
+	void hud_screen_rect(int &x0, int &y0, int &x1, int &y1) const override;
 
-	const uint32_t *overlay_pixels();
-	uint32_t overlay_version() const;
+	const uint32_t *overlay_pixels() override;
+	uint32_t overlay_version() const override;
 	int overlay_dirty_y0() const;
 	int overlay_dirty_y1() const;
-	int overlay_width() const;
-	int overlay_height() const;
+	int overlay_width() const override;
+	int overlay_height() const override;
+
+	// ---- UiController (common render stage)
+	int hud_width() const override {
+		return hud_texture_width();
+	}
+	int hud_height() const override {
+		return hud_texture_height();
+	}
+	Bands hud_band_rows() const override {
+		Bands rows;
+		for (const auto &band : this->hud_bands()) {
+			rows.emplace_back(band.y0, band.y1);
+		}
+		return rows;
+	}
+	Bands overlay_band_rows() const override {
+		return {{this->overlay_dirty_y0(), this->overlay_dirty_y1()}};
+	}
 
 	// ---- state (tests, logs)
-	bool menu_open() const;
-	bool context_open() const;
-	bool board_open() const;
-	bool user_paused() const;
+	bool menu_open() const override;
+	bool context_open() const override;
+	bool board_open() const override;
+	bool user_paused() const override;
 	const agesxr::HudModel &hud_model() const;
 
 private:

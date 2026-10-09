@@ -52,8 +52,30 @@ void Canvas::roundRect(int x0, int y0, int x1, int y1, int r, uint32_t color) {
 }
 
 void Canvas::fillRect(int x0, int y0, int x1, int y1, uint32_t color) {
+    const int xa = std::max(x0, 0), xb = std::min(x1, mW);
+    if (xb <= xa) return;
+    if ((color >> 24) == 0xFF) {  // deckend: Zeilen direkt füllen (gleiches Ergebnis wie blend, ~10× schneller)
+        for (int y = std::max(y0, mClipY0); y < std::min(y1, mClipY1); ++y) {
+            uint32_t* row = mPixels.data() + static_cast<size_t>(y) * static_cast<size_t>(mW);
+            std::fill(row + xa, row + xb, color);
+        }
+        return;
+    }
     for (int y = std::max(y0, mClipY0); y < std::min(y1, mClipY1); ++y)
-        for (int x = std::max(x0, 0); x < std::min(x1, mW); ++x) blend(x, y, color, 1.0f);
+        for (int x = xa; x < xb; ++x) blend(x, y, color, 1.0f);
+}
+
+void Canvas::blendMask(int x0, int y0, int w, int h, const uint8_t* coverage, uint32_t color) {
+    for (int y = std::max(y0, mClipY0); y < std::min(y0 + h, mClipY1); ++y) {
+        const uint8_t* row = coverage + static_cast<size_t>(y - y0) * static_cast<size_t>(w);
+        for (int x = std::max(x0, 0); x < std::min(x0 + w, mW); ++x) {
+            const uint8_t cov = row[x - x0];
+            if (cov == 255 && (color >> 24) == 0xFF)
+                mPixels[static_cast<size_t>(y) * static_cast<size_t>(mW) + static_cast<size_t>(x)] = color;
+            else if (cov)
+                blend(x, y, color, static_cast<float>(cov) / 255.0f);
+        }
+    }
 }
 
 // Fokusrahmen (Stick-Bedienung): geglätteter Ring, 4 px breit, direkt außerhalb des abgerundeten Elements.

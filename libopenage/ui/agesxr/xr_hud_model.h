@@ -28,6 +28,10 @@ enum class HudIcon : uint8_t {
     Food, Wood, Gold, Stone,  // Rohstoffe
     Population, Clock,         // Einwohner, Spielzeit
     Villager, House, Sword, Bow, Horse, Tower, Hammer, Stop,  // Auswahl und Befehle
+    // AoE-Layout (xr_aoe_ui): weitere Gebäude, feste Aktionen, Schmuck (hudIconShape in xr_hud.cpp)
+    Mill, LumberCamp, MiningCamp, Barracks, Range, Stable, Wall,
+    Halt, Garrison, Unload, Cancel, Back, Emblem, Age, Sheep, Tree,
+    Count,
 };
 
 enum class HudStatus : uint8_t { kInfo, kWarn, kGood };  // Plakette: Stein, Rot, Grün

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 #include "renderer/window_events.h"
 
@@ -135,6 +136,22 @@ public:
 	virtual bool poll_background(float rgba[4]) {
 		(void)rgba;
 		return false;
+	}
+
+	/**
+	 * Feedback of the game interface (XR fork, optional), once per presented
+	 * frame from the producer thread: the embedder pulses the controller when
+	 * click_seq changes (never on hover), double pulse when armed turns true;
+	 * focus_mode/menu_open: the stick moves the interface focus.
+	 */
+	virtual void ui_feedback(int hover_id, int clicked_id, uint32_t click_seq, bool armed, bool focus_mode,
+	                         bool menu_open) {
+		(void)hover_id;
+		(void)clicked_id;
+		(void)click_seq;
+		(void)armed;
+		(void)focus_mode;
+		(void)menu_open;
 	}
 };
 

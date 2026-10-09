@@ -118,6 +118,8 @@ public:
     void woodSign(int x0, int y0, int x1, int y1, int r, bool nails = true);                // Holzschild
     void circle(int cx, int cy, int r, uint32_t color) { roundRect(cx - r, cy - r, cx + r, cy + r, r, color); }
     void fillRect(int x0, int y0, int x1, int y1, uint32_t color);
+    // Abdeckungsmaske (w × h Bytes, 0 … 255) mit Farbe einmischen; Ergebnis wie fillSdf mit derselben Abdeckung.
+    void blendMask(int x0, int y0, int w, int h, const uint8_t* coverage, uint32_t color);
     void focusFrame(int x0, int y0, int x1, int y1, int r);
     void text(const char* utf8, int x, int y, float px, uint32_t color, bool bold = false);
     void textShadow(const char* utf8, int x, int y, float px, uint32_t color, bool bold = false);

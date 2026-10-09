@@ -21,7 +21,7 @@
 #include "renderer/texture.h"
 #include "renderer/uniform_input.h"
 #include "renderer/window.h"
-#include "ui/game_ui_controller.h"
+#include "ui/ui_controller.h"
 
 
 namespace openage::renderer::ui {
@@ -29,7 +29,7 @@ namespace openage::renderer::ui {
 UiRenderStage::UiRenderStage(const std::shared_ptr<Window> &window,
                              const std::shared_ptr<renderer::Renderer> &renderer,
                              const util::Path &shaderdir,
-                             const std::shared_ptr<openage::ui::GameUiController> &controller) :
+                             const std::shared_ptr<openage::ui::UiController> &controller) :
 	renderer{renderer},
 	controller{controller} {
 	renderer::opengl::GlContext::check_error();
@@ -71,8 +71,8 @@ void UiRenderStage::initialize_render_pass(size_t width, size_t height, const ut
 
 	// HUD bar: fixed texture size, drawn scaled to the window width
 	this->hud_texture = this->renderer->add_texture(resources::Texture2dInfo(
-		openage::ui::GameUiController::hud_texture_width(),
-		openage::ui::GameUiController::hud_texture_height(),
+		std::max(this->controller->hud_width(), 16),
+		std::max(this->controller->hud_height(), 16),
 		resources::pixel_format::rgba8));
 	this->hud_uniforms = this->shader->new_uniform_input("tex", this->hud_texture);
 	this->create_overlay_texture(width, height);
@@ -149,15 +149,15 @@ void UiRenderStage::update(double now) {
 	this->controller->update(now);
 
 	const uint32_t *hud_pixels = this->controller->hud_pixels(now);
-	const int hud_w = openage::ui::GameUiController::hud_texture_width();
-	const int hud_h = openage::ui::GameUiController::hud_texture_height();
-	if (this->controller->hud_version() != this->hud_shown) {
+	const int hud_w = this->controller->hud_width();
+	const int hud_h = this->controller->hud_height();
+	if (hud_pixels != nullptr and this->controller->hud_version() != this->hud_shown) {
 		if (this->hud_shown == 0) {
 			this->upload_rows(this->hud_texture, hud_pixels, hud_w, 0, hud_h);
 		}
 		else {
-			for (const auto &band : this->controller->hud_bands()) {
-				this->upload_rows(this->hud_texture, hud_pixels, hud_w, band.y0, band.y1);
+			for (const auto &band : this->controller->hud_band_rows()) {
+				this->upload_rows(this->hud_texture, hud_pixels, hud_w, band.first, band.second);
 			}
 		}
 		this->hud_shown = this->controller->hud_version();
@@ -173,8 +173,9 @@ void UiRenderStage::update(double now) {
 			this->upload_rows(this->overlay_texture, overlay_pixels, overlay_w, 0, overlay_h);
 		}
 		else {
-			this->upload_rows(this->overlay_texture, overlay_pixels, overlay_w,
-			                  this->controller->overlay_dirty_y0(), this->controller->overlay_dirty_y1());
+			for (const auto &band : this->controller->overlay_band_rows()) {
+				this->upload_rows(this->overlay_texture, overlay_pixels, overlay_w, band.first, band.second);
+			}
 		}
 		this->overlay_shown = this->controller->overlay_version();
 	}

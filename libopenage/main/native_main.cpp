@@ -140,6 +140,7 @@
 #include "renderer/resources/shader_template.h"
 #include "renderer/window.h"
 #include "time/clock.h"
+#include "ui/agesxr/xr_aoe_ui.h"
 #include "ui/agesxr/xr_game_ui.h"
 #include "ui/agesxr/xr_hud_layout.h"
 #include "ui/game_ui_controller.h"
@@ -180,6 +181,10 @@ struct native_args {
 	std::optional<bool> ui{};
 	std::string ui_demo{};
 	bool replay_ui = false;
+	// AoE layout (XR fork, docs/UI-SPEC-AOE.md): style, Quest hints, replay
+	std::string ui_style{"aoe"};
+	bool ui_quest = false;
+	bool replay_aoe = false;
 };
 
 /**
@@ -210,7 +215,8 @@ void usage(const char *argv0) {
 	             " [--background <r,g,b,a> [--background-switch <r,g,b,a>]]"
 	             " [--ai on|off|auto] [--ai-difficulty easy|normal] [--ai-player <n>]"
 	             " [--ai-first-attack <s>] [--ai-attack-size <n>] [--sim-speed <x>] [--capture-at <s1,s2,...>]"
-	             " [--ui | --no-ui] [--ui-demo <what@s,...>] [--replay-ui]\n";
+	             " [--ui | --no-ui] [--ui-demo <what@s,...>] [--replay-ui]"
+	             " [--ui-style aoe|classic] [--ui-quest] [--replay-aoe]\n";
 }
 
 bool parse_args(int argc, char **argv, native_args &args) {
@@ -400,6 +406,21 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		else if (arg == "--replay-ui") {
 			args.replay_ui = true;
 			args.ui = true;
+			args.ui_style = "classic";  // the classic HUD bar (88-ui-check.sh)
+		}
+		else if (arg == "--ui-style") {
+			args.ui_style = value();
+			if (args.ui_style != "aoe" and args.ui_style != "classic") {
+				throw std::runtime_error("--ui-style: aoe or classic");
+			}
+		}
+		else if (arg == "--ui-quest") {
+			args.ui_quest = true;
+		}
+		else if (arg == "--replay-aoe") {
+			args.replay_aoe = true;
+			args.ui = true;
+			args.ui_style = "aoe";
 		}
 		else if (arg == "--help" or arg == "-h") {
 			return false;
@@ -1197,6 +1218,167 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> ui_replay_steps(cons
 }
 #endif
 
+/**
+ * Input replay of the AoE layout check (--replay-aoe, XR fork; with --map random,
+ * docs/UI-SPEC-AOE.md S1): captures the empty interface, clicks the own town
+ * centre and its command "Dorfbewohner", presses the hotkey Q (second villager),
+ * double clicks a villager (group of villagers), holds the right button
+ * (context menu, "Hierher bewegen"), starts a barracks with the hotkey T and
+ * places it, presses A (archery range: "Nicht genug Holz"), opens the game menu
+ * with Esc, its settings page, goes back with Esc, arms "Partie aufgeben" and
+ * closes the menu with Esc. Each state is captured as <png stem>-<n>-<name>.png.
+ */
+std::vector<openage::renderer::opengl::TestFrameSink::Step> aoe_replay_steps(const native_args &args,
+                                                                              openage::gamestate::MapSettings &map_settings,
+                                                                              double start,
+                                                                              const std::string &capture_file) {
+	using namespace openage;
+	using renderer::opengl::TestFrameSink;
+	using gamestate::map_object_t;
+	using E = renderer::SinkInputEvent;
+
+	const auto map = gamestate::generate_map(map_settings);
+	const gamestate::Heightmap heights{map.width, map.height, map.corners};
+	const auto tc = map.starts.at(0);
+	if (not map_settings.view) {
+		gamestate::MapView start_view;
+		start_view.ne = tc[0];
+		start_view.se = tc[1];
+		start_view.zoom = 1.5f;
+		map_settings.view = start_view;
+	}
+	const gamestate::MapView view = *map_settings.view;
+
+	const int width = static_cast<int>(args.width);
+	const int height = static_cast<int>(args.height);
+	auto camera = std::make_shared<renderer::camera::Camera>(nullptr, util::Vector2s{args.width, args.height});
+	camera->look_at_coord(coord::scene3{10.0, 10.0, 0});
+	camera->move_to(Eigen::Vector3f{0.0f, view.height, 0.0f});
+	camera->look_at_coord(coord::scene3{view.ne, view.se, 0});
+	camera->set_zoom(view.zoom);
+	const Eigen::Matrix4f matrix = camera->get_projection_matrix() * camera->get_view_matrix();
+	auto pixel = [&](double ne, double se, double up) {
+		double ground = heights.is_flat() ? 0.0 : heights.at(ne, se);
+		coord::phys3 pos{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{ground + up}};
+		auto w = pos.to_scene3().to_world_space();
+		Eigen::Vector4f clip = matrix * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+		int x = static_cast<int>(std::lround((clip.x() + 1.0) * 0.5 * width));
+		int y = static_cast<int>(std::lround(height - (clip.y() + 1.0) * 0.5 * height));
+		return std::pair{x, y};
+	};
+
+	// the same layout code as the interface: bars, buttons, menu rows
+	agesxr::AoeUi layout;
+	layout.resize(width, height);
+	const int bar_top = layout.barRect().y0;
+	auto on_screen = [&](std::pair<int, int> p) {
+		return p.first >= 40 and p.second >= layout.topBarPx() + 40 and p.first < width - 40 and p.second < bar_top - 40;
+	};
+	const gamestate::MapObject *villager = nullptr;
+	for (const auto &o : map.objects) {
+		if (o.kind == map_object_t::VILLAGER and o.owner == 0 and on_screen(pixel(o.ne, o.se, 0.0))) {
+			villager = &o;
+			break;
+		}
+	}
+
+	std::vector<TestFrameSink::Step> steps;
+	auto add = [&](double at, int type, int x, int y, int button, int buttons, int key = 0, int modifiers = 0) {
+		TestFrameSink::Step step;
+		step.at = start + at;
+		step.what = TestFrameSink::Step::kind::input;
+		step.event.type = type;
+		step.event.x = x;
+		step.event.y = y;
+		step.event.button = button;
+		step.event.buttons = buttons;
+		step.event.key = key;
+		step.event.modifiers = modifiers;
+		steps.push_back(step);
+	};
+	auto click = [&](double t, std::pair<int, int> p, int button) {
+		add(t, E::kMouseMove, p.first, p.second, 0, 0);
+		add(t + 0.1, E::kMouseDown, p.first, p.second, button, button);
+		add(t + 0.2, E::kMouseUp, p.first, p.second, button, 0);
+	};
+	auto centre = [](const agesxr::AoeUi::Rect &r) {
+		return std::pair{(r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2};
+	};
+	auto capture = [&](double t, const char *suffix) {
+		const std::filesystem::path png{capture_file};
+		TestFrameSink::Step shot;
+		shot.at = start + t;
+		shot.what = TestFrameSink::Step::kind::capture;
+		shot.file = suffix == nullptr ? capture_file
+		                              : (png.parent_path() / (png.stem().string() + suffix + png.extension().string())).string();
+		steps.push_back(shot);
+	};
+	auto key = [&](double t, int code) {
+		add(t, E::kKeyDown, 0, 0, 0, 0, code);
+		add(t + 0.05, E::kKeyUp, 0, 0, 0, 0, code);
+	};
+
+	// 1. nothing selected
+	capture(0.6, "-1-leer");
+	// 2. town centre, command "Dorfbewohner" (grid cell 0) and hotkey Q: two villagers in the queue
+	// (generous gaps: the production snapshot follows the simulation, which is slow with software GL)
+	auto tp = pixel(tc[0], tc[1], 1.2);
+	log::log(INFO << "aoe replay: town centre at pixel (" << tp.first << ", " << tp.second << "), grid cell 0 at pixel ("
+	              << centre(layout.gridRect(0)).first << ", " << centre(layout.gridRect(0)).second << "), bottom bar "
+	              << bar_top);
+	click(0.9, tp, E::kLeftButton);
+	click(3.0, centre(layout.gridRect(0)), E::kLeftButton);
+	key(4.0, 'Q');
+	capture(5.5, "-2-dorfzentrum");
+	if (villager != nullptr) {
+		// 3. double click on a villager: all own villagers on screen
+		auto vp = pixel(villager->ne, villager->se, 0.6);
+		log::log(INFO << "aoe replay: villager at pixel (" << vp.first << ", " << vp.second << ")");
+		add(6.0, E::kMouseMove, vp.first, vp.second, 0, 0);
+		add(6.05, E::kMouseDown, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
+		add(6.1, E::kMouseUp, vp.first, vp.second, E::kLeftButton, 0);
+		add(6.2, E::kMouseDown, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
+		add(6.2, E::kMouseDoubleClick, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
+		add(6.3, E::kMouseUp, vp.first, vp.second, E::kLeftButton, 0);
+		capture(7.5, "-3-gruppe");
+		// 4. right button held on free ground: context menu, "Hierher bewegen"
+		std::pair<int, int> ground{std::min(vp.first + 140, width - 400), std::min(vp.second + 40, bar_top - 80)};
+		add(8.0, E::kMouseMove, ground.first, ground.second, 0, 0);
+		add(8.1, E::kMouseDown, ground.first, ground.second, E::kRightButton, E::kRightButton);
+		capture(8.8, "-4-kontext");
+		add(8.9, E::kMouseUp, ground.first, ground.second, E::kRightButton, 0);
+		layout.openContext(ground.first, ground.second, "x", std::vector<agesxr::GameUiItem>(5, agesxr::GameUiItem{1, "x", true}));
+		auto item0 = centre(layout.contextItemRect(0));
+		layout.closeContext();
+		log::log(INFO << "aoe replay: context item 0 at pixel (" << item0.first << ", " << item0.second << ")");
+		click(9.1, item0, E::kLeftButton);
+		// 5. barracks (hotkey T) placed next to the villagers, then the archery range (A): not enough wood
+		std::pair<int, int> site{std::max(vp.first - 220, 80), std::max(vp.second - 60, layout.topBarPx() + 80)};
+		key(9.8, 'T');
+		click(10.5, site, E::kLeftButton);
+		log::log(INFO << "aoe replay: barracks site at pixel (" << site.first << ", " << site.second << ")");
+		key(13.5, 'A');
+		capture(14.5, "-5-holz");
+	}
+	else {
+		log::log(WARN << "aoe replay: no villager of player 0 on screen");
+	}
+	// 6. game menu (Esc), settings page, back (Esc), surrender armed, close (Esc)
+	key(15.0, 0x01000000);
+	capture(15.8, "-6-spielmenue");
+	layout.openMenu(true, 0.0);
+	auto settings_row = centre(layout.dialogRowRect(agesxr::AoeUi::kMainSettings));
+	auto surrender_row = centre(layout.dialogRowRect(agesxr::AoeUi::kMainSurrender));
+	click(16.0, settings_row, E::kLeftButton);
+	capture(16.8, "-7-einstellungen");
+	key(17.0, 0x01000000);
+	click(17.4, surrender_row, E::kLeftButton);
+	capture(18.0, "-8-aufgeben");
+	key(18.3, 0x01000000);
+	capture(19.0, nullptr);
+	return steps;
+}
+
 /// one log line of the production HUD snapshot
 void log_prod_snapshot(const openage::gamestate::prod::Snapshot &snap) {
 	using namespace openage;
@@ -1248,7 +1430,12 @@ bool egl_sink_check(const native_args &args,
 	// game user interface (XR fork): only on request, the Quest app draws its own
 	std::string ui_demo = args.ui_demo;
 	settings.ui = args.ui.value_or(false);
-	if (args.replay_ui and not args.stop_in_resize) {
+	settings.ui_style = args.ui_style;
+	settings.ui_quest = args.ui_quest;
+	if (args.replay_aoe and not args.stop_in_resize) {
+		steps = aoe_replay_steps(args, map_settings, start, png.string());
+	}
+	else if (args.replay_ui and not args.stop_in_resize) {
 		steps = ui_replay_steps(args, map_settings, start, png.string(), ui_demo);
 	}
 	else if (args.replay_prod and not args.stop_in_resize) {
@@ -1326,7 +1513,7 @@ bool egl_sink_check(const native_args &args,
 	// a house on water after the first house was paid (must be rejected)
 	std::atomic<bool> prod_driver_stop{false};
 	std::thread prod_driver;
-	if (args.replay_prod or args.replay_ui) {
+	if (args.replay_prod or args.replay_ui or args.replay_aoe) {
 		// the UI replay only logs the snapshots (no house on water)
 		auto water = args.replay_prod ? prod_targets.water : std::nullopt;
 		prod_driver = std::thread{[&prod_driver_stop, production = engine->get_production(), water]() {
@@ -1538,7 +1725,8 @@ int main(int argc, char **argv) {
 	log::set_level(log::level::info);
 
 	// ai (XR fork): the input replays check the human side; keep the computer opponent out
-	if ((args.replay or args.replay_econ or args.replay_combat or args.replay_prod or args.replay_select or args.replay_ui)
+	if ((args.replay or args.replay_econ or args.replay_combat or args.replay_prod or args.replay_select or args.replay_ui
+	     or args.replay_aoe)
 	    and not args.ai_explicit) {
 		args.map.ai.mode = gamestate::ai_mode_t::OFF;
 	}
@@ -1595,6 +1783,8 @@ int main(int argc, char **argv) {
 		// game user interface (XR fork): on for the plain game, off for the checks
 		win_settings.ui = args.ui.value_or(not args.headless and not render_check);
 		win_settings.ui_demo = args.ui_demo;
+		win_settings.ui_style = args.ui_style;
+		win_settings.ui_quest = args.ui_quest;
 
 		// the game menu restarts the engine with other map settings (XR fork)
 		auto map_settings = args.map;

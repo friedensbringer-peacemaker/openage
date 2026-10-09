@@ -81,6 +81,12 @@ struct window_settings {
 	bool ui = false;
 	// Test schedule of the interface ("board@12,restart@8", see GameUiController).
 	std::string ui_demo{};
+	// Layout of the interface (XR fork): "aoe" (default, ui/aoe_ui_controller.h,
+	// docs/UI-SPEC-AOE.md) or "classic" (HUD bar of ui/game_ui_controller.h).
+	std::string ui_style{"aoe"};
+	// The interface runs in the Quest app (hint "App beenden: VR-Menü", labels
+	// on, hotkey letters off).
+	bool ui_quest = false;
 };
 
 

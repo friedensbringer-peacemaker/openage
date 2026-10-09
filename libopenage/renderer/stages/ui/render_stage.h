@@ -10,7 +10,7 @@
 namespace openage {
 
 namespace ui {
-class GameUiController;
+class UiController;
 }
 
 namespace renderer {
@@ -26,17 +26,18 @@ namespace ui {
 
 /**
  * Render stage of the game user interface (XR fork): draws the CPU canvases of
- * ui::GameUiController (HUD bar at the top, overlay with context menu, game menu
- * and match board) as two textured quads into its own render pass, which the
- * screen stage composes after the HUD pass. Textures are uploaded only when the
- * controller reports a new version, and only the changed rows.
+ * a ui::UiController (classic: HUD bar at the top + overlay with menus; AoE
+ * layout: one window-sized overlay) as two textured quads into its own render
+ * pass, which the screen stage composes after the HUD pass. Textures are
+ * uploaded only when the controller reports a new version, and only the
+ * changed row bands.
  */
 class UiRenderStage {
 public:
 	UiRenderStage(const std::shared_ptr<Window> &window,
 	              const std::shared_ptr<renderer::Renderer> &renderer,
 	              const util::Path &shaderdir,
-	              const std::shared_ptr<openage::ui::GameUiController> &controller);
+	              const std::shared_ptr<openage::ui::UiController> &controller);
 	~UiRenderStage() = default;
 
 	std::shared_ptr<renderer::RenderPass> get_render_pass();
@@ -65,7 +66,7 @@ private:
 	void update_rects();
 
 	std::shared_ptr<renderer::Renderer> renderer;
-	std::shared_ptr<openage::ui::GameUiController> controller;
+	std::shared_ptr<openage::ui::UiController> controller;
 	std::shared_ptr<renderer::RenderPass> render_pass;
 	std::shared_ptr<renderer::ShaderProgram> shader;
 	std::shared_ptr<renderer::Geometry> quad;

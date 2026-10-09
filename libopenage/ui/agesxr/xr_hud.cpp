@@ -36,8 +36,11 @@ uint32_t resourceColor(HudIcon i) {
     }
 }
 
+}  // namespace
+
 // Abstandsfunktion des Symbols in Symbolkoordinaten (≈ −16 … +16, +y unten wie im Bild), negativ = innen.
-float iconShape(HudIcon icon, float px, float py) {
+// Auch die AoE-Oberfläche (xr_aoe_ui.cpp) zeichnet ihre Vektorsymbole hiermit.
+float hudIconShape(HudIcon icon, float px, float py) {
     switch (icon) {
     case HudIcon::Food:  // Apfel mit Stiel und Blatt
         return std::min({lengthOf(px, py - 3.0f) - 11.0f, segment(px, py, 0, -8, 1, -14, 1.6f),
@@ -84,12 +87,74 @@ float iconShape(HudIcon icon, float px, float py) {
         return std::min(segment(px, py, -10, 11, 3, -2, 2.2f), segment(px, py, -2, -11, 10, 1, 4.2f));
     case HudIcon::Stop:
         return std::min(segment(px, py, -9, -9, 9, 9, 3.0f), segment(px, py, -9, 9, 9, -9, 3.0f));
-    case HudIcon::None: break;
+    case HudIcon::Mill: {  // Windmühle: Turm + vier Flügel
+        static const float body[6] = {-6.0f, 14.0f, 6.0f, 14.0f, 0.0f, -4.0f};
+        return std::min({triangle(px, py, body) - 1.0f, segment(px, py, -12, -14, 12, 10, 1.8f),
+                         segment(px, py, 12, -14, -12, 10, 1.8f)});
+    }
+    case HudIcon::LumberCamp:  // Stamm mit Axt
+        return std::min({box(px, py + 8.0f, 14.0f, 5.0f, 4.0f), segment(px, py, -4, 2, 8, -12, 2.0f),
+                         box(px + 9.0f, py - 12.0f, 5.0f, 3.5f, 1.0f)});
+    case HudIcon::MiningCamp:  // Spitzhacke über Stein
+        return std::min({segment(px, py, -10, 12, 8, -8, 2.0f), segment(px, py, 0, -14, 14, -2, 2.6f),
+                         lengthOf(px + 8.0f, py + 10.0f) - 5.0f});
+    case HudIcon::Barracks: {  // Haus mit Fahne
+        static const float roof[6] = {-15.0f, 2.0f, 15.0f, 2.0f, 0.0f, -8.0f};
+        static const float flag[6] = {2.0f, -17.0f, 12.0f, -14.0f, 2.0f, -11.0f};
+        return std::min({triangle(px, py, roof), box(px, py + 8.0f, 11.0f, 6.0f, 1.0f),
+                         segment(px, py, 1, -17, 1, -8, 1.2f), triangle(px, py, flag)});
+    }
+    case HudIcon::Range:  // Zielscheibe mit Pfeil
+        return std::min({ring(px, py, 13.0f, 3.0f), ring(px, py, 6.0f, 3.0f), lengthOf(px, py) - 2.0f,
+                         segment(px, py, 4, -4, 15, -15, 1.6f)});
+    case HudIcon::Stable:  // Hufeisen
+        return std::max(ring(px, py - 1.0f, 11.0f, 5.0f), -(py + 6.0f));
+    case HudIcon::Wall:  // Mauer aus Steinen
+        return std::min({box(px, py - 8.0f, 15.0f, 3.5f, 1.0f), box(px - 8.0f, py, 6.5f, 3.5f, 1.0f),
+                         box(px + 8.0f, py, 6.5f, 3.5f, 1.0f), box(px, py + 8.0f, 15.0f, 3.5f, 1.0f)});
+    case HudIcon::Halt: {  // Achteck (Stoppschild) mit Balken
+        const float a = std::fabs(px), b = std::fabs(py);
+        const float oct = std::max(std::max(a, b), (a + b) * 0.7071f) - 13.0f;
+        return std::max(oct, -box(px, py, 8.0f, 2.0f, 0.5f));
+    }
+    case HudIcon::Garrison: {  // Haus mit Pfeil hinein
+        static const float roof[6] = {-15.0f, -2.0f, 15.0f, -2.0f, 0.0f, -15.0f};
+        const float body = std::max(box(px, py + 6.0f, 11.0f, 7.0f, 1.0f), -box(px, py + 7.0f, 4.5f, 6.0f, 0.5f));
+        static const float head[6] = {0.0f, 2.0f, 0.0f, 12.0f, -7.0f, 7.0f};
+        return std::min({triangle(px, py, roof), body, segment(px, py, -14, 7, 0, 7, 1.6f), triangle(px, py, head)});
+    }
+    case HudIcon::Unload: {  // Tür mit Pfeil heraus
+        static const float head[6] = {14.0f, 0.0f, 5.0f, -7.0f, 5.0f, 7.0f};
+        return std::min({std::max(box(px - 6.0f, py, 8.0f, 13.0f, 1.0f), -box(px - 6.0f, py, 5.0f, 10.0f, 0.5f)),
+                         segment(px, py, -4, 0, 8, 0, 1.8f), triangle(px, py, head)});
+    }
+    case HudIcon::Cancel:  // Kreis mit Kreuz
+        return std::min({ring(px, py, 13.0f, 3.0f), segment(px, py, -6, -6, 6, 6, 2.2f),
+                         segment(px, py, -6, 6, 6, -6, 2.2f)});
+    case HudIcon::Back: {  // Pfeil nach links
+        static const float head[6] = {-14.0f, 0.0f, -2.0f, -10.0f, -2.0f, 10.0f};
+        return std::min(triangle(px, py, head), box(px + 6.0f, py, 8.0f, 3.5f, 1.0f));
+    }
+    case HudIcon::Emblem: {  // Wappenschild
+        const float top = box(px, py - 4.0f, 13.0f, 8.0f, 2.0f);
+        static const float tip[6] = {-13.0f, 2.0f, 13.0f, 2.0f, 0.0f, 16.0f};
+        return std::min(top, triangle(px, py, tip));
+    }
+    case HudIcon::Age:  // Plakette „I“
+        return std::min(box(px, py, 2.5f, 11.0f, 0.5f),
+                        std::min(box(px, py - 10.0f, 7.0f, 2.0f, 0.5f), box(px, py + 10.0f, 7.0f, 2.0f, 0.5f)));
+    case HudIcon::Sheep:  // Schaf
+        return std::min({box(px - 2.0f, py, 11.0f, 7.0f, 6.0f), lengthOf(px - 12.0f, py - 3.0f) - 4.5f,
+                         box(px - 6.0f, py + 10.0f, 1.5f, 4.0f, 0.5f), box(px + 4.0f, py + 10.0f, 1.5f, 4.0f, 0.5f)});
+    case HudIcon::Tree: {  // Nadelbaum
+        static const float crown[6] = {-13.0f, 6.0f, 13.0f, 6.0f, 0.0f, -16.0f};
+        return std::min(triangle(px, py, crown), box(px, py + 11.0f, 2.5f, 5.0f, 0.5f));
+    }
+    case HudIcon::None:
+    case HudIcon::Count: break;
     }
     return 1e9f;
 }
-
-}  // namespace
 
 bool VrHud::init() {
     mOk = mFont.load(false);
@@ -97,6 +162,12 @@ bool VrHud::init() {
     mCanvas.setFonts(&mFont, &mFontBold);
     mDirty = true;
     return mOk;
+}
+
+void VrHud::setDiagnostic(bool on) {
+    if (mDiagnostic == on) return;
+    mDiagnostic = on;
+    mDirty = true;
 }
 
 int VrHud::buttonAt(float x, float y, int buttonCount) {
@@ -109,7 +180,7 @@ int VrHud::buttonAt(float x, float y, int buttonCount) {
 }
 
 int VrHud::pointer(float x, float y, bool clickEdge, const HudModel& model, double now) {
-    const int n = static_cast<int>(model.buttons.size());
+    const int n = mDiagnostic ? 0 : static_cast<int>(model.buttons.size());
     mHover = x >= 0.0f && y >= 0.0f ? buttonAt(x, y, n) : -1;
     if (!clickEdge || mHover < 0 || !model.buttons[static_cast<size_t>(mHover)].enabled) return -1;
     mPressed = mHover;
@@ -182,12 +253,22 @@ void VrHud::drawIcon(HudIcon icon, int cx, int cy, float scale, uint32_t color, 
         const float ox = static_cast<float>(cx + (pass == 0 ? 2 : 0)), oy = static_cast<float>(cy + (pass == 0 ? 2 : 0));
         const uint32_t c = pass == 0 ? (kInk & 0x00FFFFFFu) | 0xB0000000u : color;
         mCanvas.fillSdf(cx - half, cy - half, cx + half + 3, cy + half + 3, c, [&](float x, float y) {
-            return iconShape(icon, (x - ox) / scale, (y - oy) / scale) * scale;  // Bildkoordinaten: +y unten
+            return hudIconShape(icon, (x - ox) / scale, (y - oy) / scale) * scale;  // Bildkoordinaten: +y unten
         });
     }
 }
 
 void VrHud::drawScene(const HudModel& m) {
+    if (mDiagnostic) {
+        // Diagnosezeile (0.6.0-xr.0.12): schmale Tafel, nur der Statustext (fps, Engine-Zeit, Abfrage-Latenz).
+        mCanvas.roundRect(0, 0, kWidth, kDiagHeight, 20, kStoneRim);
+        mCanvas.roundRectV(4, 4, kWidth - 4, kDiagHeight - 4, 16, kStoneTop, kStoneBottom);
+        float px = kStatusPx;
+        const std::string s = fitText(m.status.empty() ? "Diagnose" : m.status, px, 18.0f, kWidth - 48, false);
+        mCanvas.textShadow(s.c_str(), (kWidth - mCanvas.textWidth(s.c_str(), px)) / 2,
+                           (kDiagHeight - static_cast<int>(px)) / 2 - 2, px, kText);
+        return;
+    }
     // Steintafel wie das Menü (heller Rand, Verlauf).
     mCanvas.roundRect(0, 0, kWidth, kHeight, kRadius, kStoneRim);
     mCanvas.roundRectV(4, 4, kWidth - 4, kHeight - 4, kRadius - 4, kStoneTop, kStoneBottom);

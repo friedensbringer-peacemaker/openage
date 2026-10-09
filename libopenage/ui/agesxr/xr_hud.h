@@ -18,11 +18,16 @@
 
 namespace agesxr {
 
+// Abstandsfunktion eines Vektorsymbols (Symbolkoordinaten ≈ −16 … +16, +y unten), negativ = innen; gemeinsame
+// Formen für VR-HUD und AoE-Oberfläche (xr_aoe_ui).
+float hudIconShape(HudIcon icon, float px, float py);
+
 class VrHud {
 public:
     static constexpr int kWidth = hudlayout::kWidth;
     static constexpr int kHeight = hudlayout::kHeight;
     static constexpr double kPressSeconds = 0.18;  // Knopf leuchtet nach dem Klick grün
+    static constexpr int kDiagHeight = 64;         // Diagnosemodus: nur diese Zeilen sind belegt
 
     bool init();  // false: keine System-Schrift (Logik und Formen funktionieren trotzdem, z. B. in Host-Tests)
     bool ok() const { return mOk; }
@@ -45,6 +50,12 @@ public:
     int lastBandRows() const;
     void invalidate() { mDirty = true; }  // nächster pixels() zeichnet alles (z. B. nach GL-Kontextverlust)
 
+    // Diagnosemodus (0.6.0-xr.0.12, Spieloberfläche liegt im Engine-Bild): eine Zeile mit model.status, keine
+    // Knöpfe; die XR-Schicht zeigt nur die oberen contentHeight() Zeilen.
+    void setDiagnostic(bool on);
+    bool diagnostic() const { return mDiagnostic; }
+    int contentHeight() const { return mDiagnostic ? kDiagHeight : kHeight; }
+
     int measureText(const char* utf8, float px, bool bold = false) const { return mCanvas.textWidth(utf8, px, bold); }
     static constexpr float kNumberPx = 34.0f, kLabelPx = 22.0f, kKindPx = 28.0f, kStatusPx = 26.0f;
 
@@ -58,6 +69,7 @@ private:
     std::string fitText(const std::string& s, float& px, float minPx, int maxW, bool bold) const;
 
     bool mOk = false;
+    bool mDiagnostic = false;
     TextRaster mFont, mFontBold;
     Canvas mCanvas{kWidth, kHeight};
     uint32_t mVersion = 1;

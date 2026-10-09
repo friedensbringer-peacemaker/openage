@@ -6,6 +6,7 @@
 
 #include "presenter/frame_stats.h"
 
+#include <algorithm>
 #include <chrono>
 #include <eigen3/Eigen/Dense>
 #include <iostream>
@@ -29,6 +30,7 @@
 #include "input/controller/camera/binding_context.h"
 #include "input/controller/camera/controller.h"
 #include "input/controller/game/binding_context.h"
+#include "gamestate/production.h"
 #include "input/controller/game/controller.h"
 #include "input/controller/hud/binding_context.h"
 #include "input/controller/hud/controller.h"
@@ -59,6 +61,7 @@
 #include "renderer/texture.h"
 #include "time/clock.h"
 #include "time/time_loop.h"
+#include "ui/aoe_ui_controller.h"
 #include "ui/game_ui_controller.h"
 #include "util/path.h"
 
@@ -122,7 +125,54 @@ void Presenter::init_ui(const renderer::window_settings &window_settings) {
 		hooks.quit = [this]() { this->stop(); };
 	}
 	gamestate::MapSettings map = this->ui_map ? *this->ui_map : gamestate::MapSettings{};
-	this->ui_controller = std::make_shared<ui::GameUiController>(map, std::move(hooks), window_settings.ui_demo);
+	if (window_settings.ui_style == "classic") {
+		this->ui_controller = std::make_shared<ui::GameUiController>(map, std::move(hooks), window_settings.ui_demo);
+	}
+	else {
+		ui::AoeHooks aoe;
+		// camera view on the map for the minimap placeholder (map fractions)
+		aoe.camera_view = [this](float &cx, float &cy, float &cw, float &ch) {
+			if (not this->simulation or not this->camera) {
+				return false;
+			}
+			auto game = this->simulation->get_game();
+			if (not game or not game->get_state() or not game->get_state()->get_map()) {
+				return false;
+			}
+			auto size = game->get_state()->get_map()->get_size();
+			if (size[0] == 0 or size[1] == 0) {
+				return false;
+			}
+			const auto &pos = this->camera->get_scene_pos();
+			const float offset = pos[1] * 1.2247449f;  // see apply_map_view()
+			cx = std::clamp((pos[0] - offset) / static_cast<float>(size[1]), 0.0f, 1.0f);
+			cy = std::clamp(1.0f + (pos[2] - offset) / static_cast<float>(size[0]), 0.0f, 1.0f);
+			const Eigen::Matrix4f proj = this->camera->get_projection_matrix();
+			const auto &vp = this->camera->get_viewport_size();
+			if (proj(0, 0) == 0.0f or vp[0] == 0) {
+				return false;
+			}
+			// scene units per pixel (ortho), ground rows cover twice as much (pitch 30 degrees)
+			const float units = 2.0f / (proj(0, 0) * static_cast<float>(vp[0]));
+			cw = static_cast<float>(vp[0]) * units / (static_cast<float>(size[1]) * 1.4142136f);
+			ch = static_cast<float>(vp[1]) * units * 2.0f / (static_cast<float>(size[0]) * 1.4142136f);
+			return true;
+		};
+		// portrait of a multiple selection: select only this entity
+		aoe.select = [this](const std::vector<uint64_t> &ids) {
+			auto controller = this->controller_slot->get();
+			if (not controller or not this->simulation) {
+				return;
+			}
+			std::vector<gamestate::entity_id_t> sel(ids.begin(), ids.end());
+			controller->set_selected(sel);
+			if (auto production = this->simulation->get_production()) {
+				production->set_selection(sel);
+			}
+		};
+		this->ui_controller = std::make_shared<ui::AoeUiController>(map, std::move(hooks), std::move(aoe),
+		                                                            window_settings.ui_demo, window_settings.ui_quest);
+	}
 	this->ui_controller->init();
 	this->ui_renderer = std::make_shared<renderer::ui::UiRenderStage>(
 		this->window,
@@ -668,14 +718,30 @@ void Presenter::apply_map_view() {
 	// (renderer::camera::Camera::calc_look_at: height * sqrt(3) / sqrt(2) in x and z)
 	const float offset = view->height * 1.2247449f;
 	const float max_height = std::max(renderer::camera::Y_BOUND_MAX, view->height);
+	// XR fork (AoE layout): the bottom bar lies on the image, so the camera may go
+	// further towards the screen bottom by its height (scene units of that many
+	// pixels at twice the start zoom, along the ground direction "screen down")
+	float bottom = 0.0f;
+	if (this->ui_controller and this->ui_controller->camera_bottom_px() > 0) {
+		const Eigen::Matrix4f proj = this->camera->get_projection_matrix();
+		const auto &vp = this->camera->get_viewport_size();
+		if (proj(0, 0) != 0.0f and vp[0] > 0) {
+			const float units = 2.0f / (proj(0, 0) * static_cast<float>(vp[0]));
+			bottom = static_cast<float>(this->ui_controller->camera_bottom_px()) * units * 2.0f * 2.0f * 0.7071068f;
+		}
+	}
 	this->camera_manager->set_camera_boundaries(
 		renderer::camera::CameraBoundaries{
 			offset,
-			offset + static_cast<float>(map_size[1]),
+			offset + static_cast<float>(map_size[1]) + bottom,
 			renderer::camera::Y_BOUND_MIN,
 			max_height,
 			offset - static_cast<float>(map_size[0]),
-			offset});
+			offset + bottom});
+	if (bottom > 0.0f) {
+		log::log(INFO << "Presenter: camera limit extended by " << bottom << " scene units for the bottom bar ("
+		              << this->ui_controller->camera_bottom_px() << " px)");
+	}
 
 	log::log(INFO << "Presenter: map view at tile (" << view->ne << ", " << view->se << "), zoom "
 	              << view->zoom << ", camera height " << view->height << ", map " << map_size[0] << "x" << map_size[1]);
@@ -695,6 +761,11 @@ void Presenter::render() {
 	this->hud_renderer->update();
 	if (this->ui_renderer) {
 		this->ui_renderer->update(this->now());
+		// XR fork: haptics / focus mode of the embedder
+		if (this->sink and this->ui_controller) {
+			const auto f = this->ui_controller->feedback();
+			this->sink->ui_feedback(f.hover_id, f.clicked_id, f.click_seq, f.armed, f.focus_mode, f.menu_open);
+		}
 	}
 #if WITH_QT
 	if (this->gui) {

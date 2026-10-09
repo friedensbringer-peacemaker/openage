@@ -43,7 +43,7 @@ struct MapSettings;
 }
 
 namespace ui {
-class GameUiController;
+class UiController;
 enum class ui_command_t;
 } // namespace ui
 
@@ -347,7 +347,7 @@ protected:
 	/**
 	 * Game user interface (XR fork), null without window_settings::ui.
 	 */
-	std::shared_ptr<ui::GameUiController> ui_controller;
+	std::shared_ptr<ui::UiController> ui_controller;
 	std::shared_ptr<renderer::ui::UiRenderStage> ui_renderer;
 	std::function<engine::HudInfo()> ui_query_hud;
 	std::function<void(const gamestate::MapSettings &)> ui_restart;
