@@ -254,6 +254,29 @@ void AoeUiController::run_demo(double now) {
 		else if (step.what == "menu") {
 			this->open_menu(true, now);
 		}
+		else if (step.what == "order0") {
+			// first entry of the orders (as a click on it; same steps as the classic interface, 89-save-check.sh)
+			const auto &orders = this->aoe_ui.model().orders;
+			log::log(INFO << "UI: demo click on order 0 (" << orders.size() << " orders)");
+			if (not orders.empty() and this->hooks.focus_entity) {
+				this->hooks.focus_entity(orders.front().entity);
+			}
+		}
+		else if (step.what == "save-menu" or step.what == "load-menu") {
+			this->open_menu(true, now);
+			auto &menu = this->aoe_ui.menu();
+			menu.page = step.what == "save-menu" ? agesxr::AoeMenuModel::kSave : agesxr::AoeMenuModel::kLoad;
+			menu.confirmSlot = -1;
+			this->refresh_slots();
+			this->aoe_ui.invalidate();
+			log::log(INFO << "UI: demo slot list '" << step.what << "' with " << menu.slots.size() << " slots");
+		}
+		else if (step.what == "close-menu") {
+			this->open_menu(false, now);
+		}
+		else if (step.what == "quicksave") {
+			this->save_slot(gamestate::save::QUICK_SLOT, "demo");
+		}
 		else if (step.what == "restart") {
 			auto settings = this->menu_map_settings();
 			settings.seed += 1;
