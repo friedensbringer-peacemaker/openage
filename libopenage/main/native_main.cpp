@@ -849,11 +849,11 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> select_replay_steps(
 	// double click on the right villager (the middle one stands behind the town centre's
 	// roof): press, release, press + double click, release
 	add(6.0, E::kMouseMove, v2.first, v2.second, 0, 0);
-	add(8.05, E::kMouseDown, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
-	add(8.1, E::kMouseUp, v2.first, v2.second, E::kLeftButton, 0);
-	add(8.2, E::kMouseDown, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
-	add(8.2, E::kMouseDoubleClick, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
-	add(8.3, E::kMouseUp, v2.first, v2.second, E::kLeftButton, 0);
+	add(6.05, E::kMouseDown, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
+	add(6.1, E::kMouseUp, v2.first, v2.second, E::kLeftButton, 0);
+	add(6.2, E::kMouseDown, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
+	add(6.2, E::kMouseDoubleClick, v2.first, v2.second, E::kLeftButton, E::kLeftButton);
+	add(6.3, E::kMouseUp, v2.first, v2.second, E::kLeftButton, 0);
 	capture(7.0, "double");
 	click(7.8, v0, E::kLeftButton);                 // 1 villager
 	click(8.2, gr, E::kRightButton);                // walks to the ground spot
@@ -1335,11 +1335,11 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> aoe_replay_steps(con
 		auto vp = pixel(villager->ne, villager->se, 0.6);
 		log::log(INFO << "aoe replay: villager at pixel (" << vp.first << ", " << vp.second << ")");
 		add(8.0, E::kMouseMove, vp.first, vp.second, 0, 0);
-		add(6.05, E::kMouseDown, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
-		add(6.1, E::kMouseUp, vp.first, vp.second, E::kLeftButton, 0);
-		add(6.2, E::kMouseDown, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
-		add(6.2, E::kMouseDoubleClick, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
-		add(6.3, E::kMouseUp, vp.first, vp.second, E::kLeftButton, 0);
+		add(8.05, E::kMouseDown, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
+		add(8.1, E::kMouseUp, vp.first, vp.second, E::kLeftButton, 0);
+		add(8.2, E::kMouseDown, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
+		add(8.2, E::kMouseDoubleClick, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
+		add(8.3, E::kMouseUp, vp.first, vp.second, E::kLeftButton, 0);
 		capture(9.5, "-3-gruppe");
 		// 4. right button held on free ground: context menu, "Hierher bewegen"
 		std::pair<int, int> ground{std::min(vp.first + 140, width - 400), std::min(vp.second + 40, bar_top - 80)};
