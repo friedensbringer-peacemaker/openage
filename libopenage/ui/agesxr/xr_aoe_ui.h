@@ -233,7 +233,6 @@ private:
     uint32_t mClickSeq = 0;
     std::vector<Band> mBands, mLastBands;
     UiFeedback mFeedback;
-    int mShownMenuBtnState = -1;
 };
 
 }  // namespace agesxr
