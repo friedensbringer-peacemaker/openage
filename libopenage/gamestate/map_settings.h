@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 
 
@@ -194,6 +195,10 @@ struct MapSettings {
 	bool skirmish = false;
 	// ai (XR fork): computer opponent
 	AiSettings ai{};
+	/// XR fork (save games): restore this save file after the map was generated
+	/// (gamestate/save_game.h); the other fields must be the map settings of the
+	/// file. Empty: a new game.
+	std::string load_file{};
 };
 
 } // namespace openage::gamestate

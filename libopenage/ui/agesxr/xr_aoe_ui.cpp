@@ -16,7 +16,7 @@ namespace {
 
 constexpr int kAlignLeft = 0, kAlignCenter = 1, kAlignRight = 2;
 constexpr int kIdMenuBtn = 5001, kIdMinimap = 5002, kIdCtxBase = 6000, kIdDlgBase = 7000, kIdBoardBase = 8000,
-              kIdMultiBase = 9000, kIdGarrisonBase = 9500, kIdDlgLoad = 7999;
+              kIdMultiBase = 9000, kIdGarrisonBase = 9500, kIdDlgLoad = 7999, kIdOrderBase = 9700;
 
 int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -169,6 +169,7 @@ AoeUi::Rect AoeUi::slotBase(Hit kind, int i, int pad) const {
         y = kQueueY0;
         break;
     case Hit::kMulti:
+    case Hit::kOrder:
         if (i < 0 || i >= kAoeMultiShown) return {};
         x = multiX(i);
         y = multiY(i);
@@ -181,6 +182,7 @@ AoeUi::Rect AoeUi::slotBase(Hit kind, int i, int pad) const {
 AoeUi::Rect AoeUi::queueRect(int i) const { return slotBase(Hit::kQueue, i, 0); }
 AoeUi::Rect AoeUi::garrisonRect(int i) const { return slotBase(Hit::kGarrison, i, 0); }
 AoeUi::Rect AoeUi::multiRect(int i) const { return slotBase(Hit::kMulti, i, 0); }
+AoeUi::Rect AoeUi::orderRect(int i) const { return slotBase(Hit::kOrder, i, 0); }
 AoeUi::Rect AoeUi::slotHitRect(Hit kind, int i) const { return slotBase(kind, i, kSlotHitPad); }
 
 AoeUi::Rect AoeUi::messageRect(int i) const {
@@ -214,7 +216,7 @@ AoeUi::Rect AoeUi::contextItemRect(int index) const {
 
 AoeUi::Rect AoeUi::dialogRect() const {
     if (!mMenu.open || !mCanvas) return {};
-    const int w = px(mMenu.page == AoeMenuModel::kNewMap ? kDlgWWide : kDlgW), h = px(kDlgH);
+    const int w = px(mMenu.page == AoeMenuModel::kNewMap || slotPage(mMenu.page) ? kDlgWWide : kDlgW), h = px(kDlgH);
     const int x0 = (width() - w) / 2, y0 = std::max(px(kTopH + 8), (height() - h) / 2);
     return r4(x0, y0, x0 + w, y0 + h);
 }
@@ -230,6 +232,9 @@ int AoeUi::dialogRowCount() const {
     switch (mMenu.page) {
     case AoeMenuModel::kSettings: return kSetCount;
     case AoeMenuModel::kNewMap: return kNewCount;
+    case AoeMenuModel::kSave:
+    case AoeMenuModel::kLoad:
+        return std::min(static_cast<int>(mMenu.slots.size()), kAoeSlotsMax) + 1;  // + „‹ Zurück“
     default: return kMainCount;
     }
 }
@@ -237,9 +242,12 @@ int AoeUi::dialogRowCount() const {
 AoeUi::Rect AoeUi::dialogRowRect(int row) const {
     const Rect d = dialogRect();
     if (d.empty() || row < 0 || row >= dialogRowCount()) return {};
-    const int w = px(kDlgBtnW) + (mMenu.page == AoeMenuModel::kNewMap ? px(kDlgWWide - kDlgW) : 0);
-    const int y0 = d.y0 + px(kDlgRowsY + 8) + row * px(kDlgPitch);
-    Rect r = r4(d.cx() - w / 2, y0, d.cx() + w / 2, y0 + px(kDlgBtnH));
+    const bool slots = slotPage(mMenu.page);
+    const int w = px(kDlgBtnW) + (mMenu.page == AoeMenuModel::kNewMap || slots ? px(kDlgWWide - kDlgW) : 0);
+    // slot pages: 8 rows in the same dialog (pitch 64, rows 56 – still ≥ 48 px)
+    const int pitch = slots ? px(64) : px(kDlgPitch);
+    const int y0 = d.y0 + px(kDlgRowsY + 8) + row * pitch;
+    Rect r = r4(d.cx() - w / 2, y0, d.cx() + w / 2, y0 + (slots ? px(56) : px(kDlgBtnH)));
     if (mMenu.page == AoeMenuModel::kMain && row == kMainSave && mMenu.loadAvailable) r.x1 = r.cx() - px(4);
     return r;
 }
@@ -271,10 +279,20 @@ bool AoeUi::dialogRowEnabled(int row) const {
         if (row == kMainSave) return mMenu.saveAvailable;
         return true;
     }
+    if (slotPage(mMenu.page) && row < dialogRowCount() - 1) {
+        const AoeSaveSlot& s = mMenu.slots[static_cast<size_t>(row)];
+        return mMenu.page == AoeMenuModel::kSave ? s.writable : s.exists;
+    }
     return true;
 }
 
 std::string AoeUi::dialogRowLabel(int row) const {
+    if (slotPage(mMenu.page)) {
+        if (row >= dialogRowCount() - 1) return "‹ Zurück";
+        if (row == mMenu.confirmSlot)
+            return mMenu.page == AoeMenuModel::kSave ? "Überschreiben? Nochmal klicken" : "Spiel verwerfen? Nochmal klicken";
+        return mMenu.slots[static_cast<size_t>(row)].label;
+    }
     switch (mMenu.page) {
     case AoeMenuModel::kSettings:
         switch (row) {
@@ -298,7 +316,7 @@ std::string AoeUi::dialogRowLabel(int row) const {
     default:
         switch (row) {
         case kMainResume: return "Weiterspielen";
-        case kMainSave: return mMenu.saveAvailable ? "Speichern" : "Speichern (folgt)";
+        case kMainSave: return mMenu.saveAvailable ? "Speichern …" : "Speichern (folgt)";
         case kMainSettings: return "Einstellungen ›";
         case kMainNewMap: return "Neue Karte ›";
         case kMainSurrender: return mMenu.confirmSurrender ? "Sicher? Nochmal klicken" : "Partie aufgeben";
@@ -394,6 +412,10 @@ AoeUi::HitState AoeUi::hitTest(int x, int y) const {
             const int n = std::min(static_cast<int>(sel.units.size()), kAoeMultiShown);
             for (int i = 0; i < n; ++i)
                 if (slotHitRect(Hit::kMulti, i).contains(x, y)) return {Hit::kMulti, i};
+        } else if (showsOrders()) {
+            const int n = std::min(static_cast<int>(mModel.orders.size()), kAoeOrdersShown);
+            for (int i = 0; i < n; ++i)
+                if (slotHitRect(Hit::kOrder, i).contains(x, y)) return {Hit::kOrder, i};
         } else if (sel.count > 0) {
             const int nq = std::min(static_cast<int>(sel.queue.size()), kAoeQueueShown);
             for (int i = 0; i < nq; ++i)
@@ -420,6 +442,7 @@ int AoeUi::feedbackId(const HitState& h) const {
     case Hit::kQueue: return kAoeCmdQueueBase + h.index;
     case Hit::kGarrison: return kIdGarrisonBase + h.index;
     case Hit::kMulti: return kIdMultiBase + h.index;
+    case Hit::kOrder: return kIdOrderBase + h.index;
     case Hit::kMenuBtn: return kIdMenuBtn;
     case Hit::kMinimap: return kIdMinimap;
     case Hit::kCtxItem: return kIdCtxBase + h.index;
@@ -478,7 +501,40 @@ AoeUi::Result AoeUi::dialogClick(const HitState& h, double now) {
     }
     if (h.kind == Hit::kDlgLoad) {
         setPressed(h, now);
-        r.action = Action::kLoad;
+        mMenu.page = AoeMenuModel::kLoad;
+        mMenu.confirmSlot = -1;
+        mMenu.confirmSurrender = false;
+        r.action = Action::kSlotsShown;
+        if (mFocusMode) mFocus = {Hit::kDlgRow, 0};
+        return r;
+    }
+    if (h.kind == Hit::kDlgRow && slotPage(mMenu.page)) {
+        const int row = h.index;
+        if (row >= dialogRowCount() - 1) {  // ‹ Zurück
+            setPressed(h, now);
+            mMenu.page = AoeMenuModel::kMain;
+            mMenu.confirmSlot = -1;
+            if (mFocusMode) mFocus = {Hit::kDlgRow, kMainSave};
+            return r;
+        }
+        if (!dialogRowEnabled(row)) return r;
+        setPressed(h, now);
+        const AoeSaveSlot& slot = mMenu.slots[static_cast<size_t>(row)];
+        // belegten Slot überschreiben bzw. laden (laufendes Spiel geht verloren): zweiter Klick innerhalb 3 s
+        const bool needsConfirm = mMenu.page == AoeMenuModel::kLoad || slot.exists;
+        if (needsConfirm && mMenu.confirmSlot != row) {
+            mMenu.confirmSlot = row;
+            mMenu.armedAt = now;
+            r.action = Action::kSlotArmed;
+            r.id = slot.slot;
+            return r;
+        }
+        r.action = mMenu.page == AoeMenuModel::kSave ? Action::kSave : Action::kLoad;
+        r.id = slot.slot;
+        mMenu.confirmSlot = -1;
+        mMenu.open = false;
+        mFocus = {};
+        mFocusMode = false;
         return r;
     }
     if (h.kind != Hit::kDlgRow) {
@@ -511,7 +567,12 @@ AoeUi::Result AoeUi::dialogClick(const HitState& h, double now) {
             mMenu.confirmSurrender = false;
             r.action = Action::kResume;
             break;
-        case kMainSave: r.action = Action::kSave; break;
+        case kMainSave:
+            mMenu.page = AoeMenuModel::kSave;
+            mMenu.confirmSlot = -1;
+            mMenu.confirmSurrender = false;
+            r.action = Action::kSlotsShown;
+            break;
         case kMainSettings: mMenu.page = AoeMenuModel::kSettings; mMenu.confirmSurrender = false; break;
         case kMainNewMap: mMenu.page = AoeMenuModel::kNewMap; mMenu.confirmSurrender = false; break;
         case kMainSurrender:
@@ -603,6 +664,11 @@ AoeUi::Result AoeUi::clickHit(const HitState& h, int x, int y, double now) {
         return r;
     case Hit::kGarrison:
         return r;  // S3
+    case Hit::kOrder:
+        setPressed(h, now);
+        r.action = Action::kFocusOrder;
+        r.index = h.index;
+        return r;
     case Hit::kMenuBtn:
         setPressed(h, now);
         openMenu(true, now);
@@ -682,6 +748,9 @@ std::vector<AoeUi::HitState> AoeUi::focusOrder() const {
     if (sel.multi()) {
         const int n = std::min(static_cast<int>(sel.units.size()), kAoeMultiShown);
         for (int i = 0; i < n; ++i) out.push_back({Hit::kMulti, i});
+    } else if (showsOrders()) {
+        const int n = std::min(static_cast<int>(mModel.orders.size()), kAoeOrdersShown);
+        for (int i = 0; i < n; ++i) out.push_back({Hit::kOrder, i});
     } else if (sel.count > 0) {
         const int nq = std::min(static_cast<int>(sel.queue.size()), kAoeQueueShown);
         for (int i = 0; i < nq; ++i) out.push_back({Hit::kQueue, i});
@@ -769,6 +838,7 @@ AoeUi::Rect AoeUi::rectOf(const HitState& h) const {
     case Hit::kQueue: return queueRect(h.index);
     case Hit::kGarrison: return garrisonRect(h.index);
     case Hit::kMulti: return multiRect(h.index);
+    case Hit::kOrder: return orderRect(h.index);
     case Hit::kMenuBtn: return menuButtonRect();
     case Hit::kMinimap: return minimapRect();
     case Hit::kCtxItem: return contextItemRect(h.index);
@@ -812,12 +882,13 @@ const uint32_t* AoeUi::pixels(double now) {
     // Fristen
     if (!mPressed.none() && now >= mPressedUntil) mPressed = {};
     if (mMenu.confirmSurrender && now - mMenu.armedAt >= kConfirmSeconds) mMenu.confirmSurrender = false;
+    if (mMenu.confirmSlot >= 0 && now - mMenu.armedAt >= kConfirmSeconds) mMenu.confirmSlot = -1;
     aoeExpireMessages(mModel, now, kMsgSeconds, kFadeSeconds);
     const bool plakette = !mModel.plakette.empty() && now - mModel.plaketteAt < kPlaketteSeconds;
     bool fading = false;
     for (const AoeMessage& m : mModel.messages)
         fading = fading || (now - m.shownAt >= kMsgSeconds && now - m.shownAt < kMsgSeconds + kFadeSeconds);
-    mFeedback.armed = mMenu.confirmSurrender;
+    mFeedback.armed = mMenu.confirmSurrender || mMenu.confirmSlot >= 0;
     mFeedback.focusMode = mFocusMode;
     mFeedback.menuOpen = mMenu.open || mContext.open;
 
@@ -1102,6 +1173,51 @@ void AoeUi::drawSelection() {
     const std::string hoverBlocked = blockedOf(mHover);
     if (!hoverBlocked.empty()) sel.blocked = hoverBlocked;
     const uint32_t ink = mSkin->inkOn(SkinPanel::kSelection, SkinState::kNormal);
+    if (sel.count <= 0 && !mModel.orders.empty()) {
+        // Bestellungen (0.6.0-xr.0.11) wie Porträts der Mehrfachauswahl: Symbol, Fortschritt, Anzahl; Klick = Gebäude
+        const int n = std::min(static_cast<int>(mModel.orders.size()), kAoeOrdersShown);
+        for (int i = 0; i < n; ++i) {
+            const AoeOrder& o = mModel.orders[static_cast<size_t>(i)];
+            const Rect r = orderRect(i);
+            const HitState h{Hit::kOrder, i};
+            const SkinState st = stateOf(h, true);
+            mSkin->drawButton(*mCanvas, SkinButton::kSlot, r, st, s);
+            mSkin->drawIcon(*mCanvas, o.icon == HudIcon::None ? HudIcon::Hammer : o.icon, r.cx(), r.cy() - px(4), s * 1.1f, st);
+            mSkin->drawBar(*mCanvas, SkinBar::kQueue, r4(r.x0 + px(2), r.y1 - px(12), r.x1 - px(2), r.y1 - px(2)), o.progress, s);
+            if (o.count > 1) {
+                char buf[16];
+                std::snprintf(buf, sizeof(buf), "%d", o.count);
+                textIn(buf, r4(r.x1 - px(24), r.y0 + px(2), r.x1 - px(4), r.y0 + px(22)), kPxHotkey * s, kGoldLight, true, true,
+                       kAlignRight);
+            }
+            if (mFocusMode && mFocus == h) mSkin->drawFocus(*mCanvas, r, s);
+        }
+        // Kopfzeile und Erklärung zur angezielten bzw. ersten Bestellung
+        const int hx = lx(static_cast<float>(multiX(kMultiCols - 1))) + px(kSlot + 24);
+        const int textX1 = field.x1 - px(16);
+        char head[48];
+        std::snprintf(head, sizeof(head), "Bestellungen (%d)", static_cast<int>(mModel.orders.size()));
+        float npx = kPxName * s;
+        const std::string ht = fitText(head, npx, kPxMin * s, textX1 - hx, true);
+        textIn(ht.c_str(), r4(hx, field.y0 + px(kMultiY0 - kBarY), textX1, field.y0 + px(kMultiY0 - kBarY + kSlot)), npx,
+               ink, true, false, kAlignLeft);
+        const int shown = mHover.kind == Hit::kOrder ? mHover.index : 0;
+        if (shown >= 0 && shown < n) {
+            const AoeOrder& o = mModel.orders[static_cast<size_t>(shown)];
+            char line[160];
+            if (o.remaining >= 0.0f)
+                std::snprintf(line, sizeof(line), "%s%s%s · noch %d s", o.label.c_str(), o.building.empty() ? "" : " – ",
+                              o.building.c_str(), static_cast<int>(o.remaining + 0.5f));
+            else
+                std::snprintf(line, sizeof(line), "%s%s%s", o.label.c_str(), o.building.empty() ? "" : " – ", o.building.c_str());
+            float lpx = kPxStats * s;
+            const std::string lt = fitText(line, lpx, kPxMin * s, textX1 - hx, false);
+            textIn(lt.c_str(), r4(hx, field.y0 + px(kMultiY0 + kMultiPitch - kBarY), textX1,
+                                  field.y0 + px(kMultiY0 + kMultiPitch + kSlot - kBarY)),
+                   lpx, ink, false, false, kAlignLeft);
+        }
+        return;
+    }
     if (sel.count <= 0) {
         // gedimmtes Wappen in der Mitte
         mSkin->drawIcon(*mCanvas, HudIcon::Emblem, field.cx(), field.cy(), 3.0f * s, SkinState::kDisabled);
@@ -1229,11 +1345,18 @@ void AoeUi::drawDialog() {
     mSkin->drawPanel(*mCanvas, SkinPanel::kDialog, d, s);
     const Rect t = dialogTitleRect();
     mSkin->drawPanel(*mCanvas, SkinPanel::kTitlePlate, t, s);
-    const char* title = mMenu.page == AoeMenuModel::kSettings ? "Einstellungen" : mMenu.page == AoeMenuModel::kNewMap ? "Neue Karte" : "Spielmenü";
+    const char* title = mMenu.page == AoeMenuModel::kSettings ? "Einstellungen"
+                        : mMenu.page == AoeMenuModel::kNewMap ? "Neue Karte"
+                        : mMenu.page == AoeMenuModel::kSave   ? "Speichern"
+                        : mMenu.page == AoeMenuModel::kLoad   ? "Laden"
+                                                              : "Spielmenü";
     textIn(title, t, kPxDialogTitle * s, kWhite, true, true, kAlignCenter);
     // Hinweiszeile
     std::string info = mMenu.page == AoeMenuModel::kNewMap ? "Startet die Partie neu (laufende Partie geht verloren)"
-                       : mMenu.page == AoeMenuModel::kSettings ? "Spieltempo, Beschriftung, Hotkeys, Meldungen" : mMenu.mapInfo;
+                       : mMenu.page == AoeMenuModel::kSettings ? "Spieltempo, Beschriftung, Hotkeys, Meldungen"
+                       : mMenu.page == AoeMenuModel::kSave     ? "Platz wählen – belegte Plätze werden überschrieben"
+                       : mMenu.page == AoeMenuModel::kLoad     ? "Spielstand wählen – die laufende Partie geht verloren"
+                       : mMenu.mapInfo;
     if (!info.empty()) {
         float ipx = kPxDialogInfo * s;
         info = fitText(info, ipx, kPxMin * s, d.w() - px(40), false);
@@ -1256,7 +1379,8 @@ void AoeUi::drawDialog() {
             const std::string v = fitText(dialogRowValue(row), vpx, kPxMin * s, ar.x0 - al.x1 - px(8), true);
             textIn(v.c_str(), r4(al.x1, r.y0, ar.x0, r.y1), vpx, kInk, true, false, kAlignCenter);
         } else {
-            const bool danger = mMenu.page == AoeMenuModel::kMain && row == kMainSurrender;
+            const bool danger = (mMenu.page == AoeMenuModel::kMain && row == kMainSurrender) ||
+                                (slotPage(mMenu.page) && row == mMenu.confirmSlot);
             mSkin->drawButton(*mCanvas, danger ? SkinButton::kDanger : SkinButton::kDialog, r, st, s);
             float bpx = kPxDialogBtn * s;
             const std::string l = fitText(label, bpx, kPxMin * s, r.w() - px(24), true);

@@ -7,6 +7,9 @@
 
 #include "coord/phys.h"
 #include "gamestate/combat/command.h"
+#include "gamestate/combat/combat_state.h"
+#include "gamestate/combat/stats.h"
+#include "gamestate/pick.h"
 #include "gamestate/component/internal/command_queue.h"
 #include "gamestate/component/api/production_queue.h"
 #include "gamestate/component/internal/commands/build.h"
@@ -48,6 +51,50 @@ std::string Commander::idstr() const {
 	return "command_target";
 }
 
+
+namespace {
+
+/**
+ * Entity under the cursor for a rally point (XR fork): an enemy, else an own unit
+ * or building (not the building itself). Resources are picked by the economy.
+ */
+std::shared_ptr<GameEntity> pick_rally_entity(const std::shared_ptr<GameState> &state,
+                                              const std::shared_ptr<GameEntity> &building,
+                                              const openage::event::EventHandler::param_map &params,
+                                              const coord::phys3 &target,
+                                              const time::time_t &time) {
+	auto combat = state->get_combat();
+	if (combat == nullptr) {
+		return nullptr;
+	}
+	auto owner = std::dynamic_pointer_cast<component::Ownership>(
+		building->get_component(component::component_t::OWNERSHIP));
+	const auto player = owner->get_owners().get(time);
+	PickRequest request;
+	request.terrain = target;
+	if (params.contains("camera_matrix") and params.contains("pick_ndc")) {
+		request.camera = params.get<Eigen::Matrix4f>("camera_matrix", Eigen::Matrix4f::Identity());
+		request.ndc = params.get<Eigen::Vector2f>("pick_ndc", Eigen::Vector2f{0.0f, 0.0f});
+		request.slack = 0.01;
+	}
+	if (auto enemy = combat->pick_enemy(state, time, player, request)) {
+		return enemy;
+	}
+	return pick_entity(state, time, request, [&](const std::shared_ptr<GameEntity> &entity) -> std::optional<PickShape> {
+		if (entity == building or combat->is_dead(entity->get_id())
+		    or not entity->has_component(component::component_t::OWNERSHIP)) {
+			return std::nullopt;
+		}
+		auto o = std::dynamic_pointer_cast<component::Ownership>(entity->get_component(component::component_t::OWNERSHIP));
+		auto stats = combat->get_stats(entity->get_id());
+		if (o->get_owners().get(time) != player or stats == nullptr or not(stats->unit or stats->building)) {
+			return std::nullopt;
+		}
+		return PickShape{stats->radius, stats->building ? stats->radius : 1.0};
+	});
+}
+
+} // namespace
 
 SendCommandHandler::SendCommandHandler() :
 	openage::event::OnceEventHandler{"game.send_command"} {
@@ -138,6 +185,8 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 		}
 	}
 
+	bool rally_picked = false;
+	std::shared_ptr<GameEntity> rally_entity;
 	for (auto id : ids) {
 		auto entity = gstate->get_game_entity(id);
 		auto command_queue = std::dynamic_pointer_cast<component::CommandQueue>(
@@ -150,14 +199,19 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 				std::make_shared<component::command::BuildCommand>(build_target->get_id()));
 			continue;
 		}
-		if (command_type == component::command::command_t::MOVE
+		if ((command_type == component::command::command_t::MOVE
+		     or command_type == component::command::command_t::GATHER)
 		    and entity->has_component(component::component_t::PRODUCTION_QUEUE)
 		    and not entity->has_component(component::component_t::MOVE)) {
-			auto production = std::dynamic_pointer_cast<component::ProductionQueue>(
-				entity->get_component(component::component_t::PRODUCTION_QUEUE));
-			production->rally_point = target;
-			log::log(INFO << "Entity " << id << " rally point at tile (" << target.ne.to_float() << ", "
-			              << target.se.to_float() << ")");
+			// rally point (XR fork): on the resource, own entity or enemy under the cursor, else the ground
+			if (not rally_picked) {
+				rally_picked = true;
+				rally_entity = gather_target;
+				if (rally_entity == nullptr and not plain) {
+					rally_entity = pick_rally_entity(gstate, entity, params, target, time);
+				}
+			}
+			prod::set_rally_point(gstate, entity, target, rally_entity, time);
 			continue;
 		}
 

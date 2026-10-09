@@ -179,12 +179,37 @@ int VrHud::buttonAt(float x, float y, int buttonCount) {
     return -1;
 }
 
+int VrHud::hitAt(float x, float y, int buttonCount, int queueCount, int orderCount) {
+    const int b = buttonAt(x, y, buttonCount);
+    if (b >= 0) return b;
+    if (!(x >= 0.0f && y >= 0.0f)) return -1;
+    const int nq = std::min(queueCount, kQueueCount);
+    if (y >= static_cast<float>(kQueueY0 - kHitPad) && y < static_cast<float>(kQueueY1 + kHitPad)) {
+        for (int i = 0; i < nq; ++i)
+            if (x >= static_cast<float>(queueX0(i) - kHitPad) && x < static_cast<float>(queueX1(i) + kHitPad))
+                return kHitQueueBase + i;
+    }
+    const int no = std::min(orderCount, kOrdCount);
+    if (y >= static_cast<float>(kOrdY0 - kHitPad) && y < static_cast<float>(kOrdY1 + kHitPad)) {
+        for (int i = 0; i < no; ++i)
+            if (x >= static_cast<float>(orderX0(i) - kHitPad) && x < static_cast<float>(orderX1(i) + kHitPad))
+                return kHitOrderBase + i;
+    }
+    return -1;
+}
+
 int VrHud::pointer(float x, float y, bool clickEdge, const HudModel& model, double now) {
+    // Diagnosemodus (0.6.0-xr.0.12): nur eine Zeile, nichts bedienbar
     const int n = mDiagnostic ? 0 : static_cast<int>(model.buttons.size());
-    mHover = x >= 0.0f && y >= 0.0f ? buttonAt(x, y, n) : -1;
-    if (!clickEdge || mHover < 0 || !model.buttons[static_cast<size_t>(mHover)].enabled) return -1;
-    mPressed = mHover;
-    mPressedUntil = now + kPressSeconds;
+    mHover = x >= 0.0f && y >= 0.0f && !mDiagnostic
+                 ? hitAt(x, y, n, static_cast<int>(model.queue.size()), static_cast<int>(model.orders.size()))
+                 : -1;
+    if (!clickEdge || mHover < 0) return -1;
+    if (mHover < kHitQueueBase) {
+        if (!model.buttons[static_cast<size_t>(mHover)].enabled) return -1;
+        mPressed = mHover;
+        mPressedUntil = now + kPressSeconds;
+    }
     return mHover;
 }
 
@@ -198,14 +223,22 @@ const uint32_t* VrHud::pixels(const HudModel& model, double now) {
     mLastBands.clear();
     if (mPressed >= 0 && now >= mPressedUntil) mPressed = -1;
     const int n = std::min(static_cast<int>(model.buttons.size()), kBtnCount);
-    if (mHover >= n) mHover = -1;
+    const int nq = std::min(static_cast<int>(model.queue.size()), kQueueCount);
+    const int no = std::min(static_cast<int>(model.orders.size()), kOrdCount);
+    if (mHover >= 0 && mHover < kHitQueueBase && mHover >= n) mHover = -1;
+    if (isQueueHit(mHover) && mHover - kHitQueueBase >= nq) mHover = -1;
+    if (isOrderHit(mHover) && mHover - kHitOrderBase >= no) mHover = -1;
     if (mPressed >= n) mPressed = -1;
     const bool top = !model.sameTop(mShown);
-    const bool bottom = !model.sameBottom(mShown) || mHover != mShownHover || mPressed != mShownPressed;
+    const auto isMid = [](int code) { return code >= 0 && !isOrderHit(code); };
+    const bool hoverBottom = mHover != mShownHover && (isMid(mHover) || isMid(mShownHover));
+    const bool hoverOrders = mHover != mShownHover && (isOrderHit(mHover) || isOrderHit(mShownHover));
+    const bool bottom = !model.sameBottom(mShown) || hoverBottom || mPressed != mShownPressed;
+    const bool orders = !model.sameOrders(mShown) || hoverOrders;
     if (mDirty) {
         paintBand(model, 0, kHeight);
         mLastBands.push_back({0, kHeight});
-    } else if (top || bottom) {
+    } else if (top || bottom || orders) {
         if (top) {
             paintBand(model, kTopBandY0, kTopBandY1);
             mLastBands.push_back({kTopBandY0, kTopBandY1});
@@ -213,6 +246,10 @@ const uint32_t* VrHud::pixels(const HudModel& model, double now) {
         if (bottom) {
             paintBand(model, kBotBandY0, kBotBandY1);
             mLastBands.push_back({kBotBandY0, kBotBandY1});
+        }
+        if (orders) {
+            paintBand(model, kOrdBandY0, kOrdBandY1);
+            mLastBands.push_back({kOrdBandY0, kOrdBandY1});
         }
     } else {
         return mCanvas.data();
@@ -274,6 +311,7 @@ void VrHud::drawScene(const HudModel& m) {
     mCanvas.roundRectV(4, 4, kWidth - 4, kHeight - 4, kRadius - 4, kStoneTop, kStoneBottom);
     if (mCanvas.visible(kTopBandY0, kTopBandY1)) drawTop(m);
     if (mCanvas.visible(kBotBandY0, kBotBandY1)) drawBottom(m);
+    if (mCanvas.visible(kOrdBandY0, kOrdBandY1)) drawOrders(m);
 }
 
 void VrHud::drawTop(const HudModel& m) {
@@ -317,8 +355,19 @@ void VrHud::drawBottom(const HudModel& m) {
         if (sel.count > 1) kind = std::to_string(sel.count) + " × " + kind;
         float px = kKindPx;
         const int tx = kSelX0 + 64;
-        kind = fitText(kind, px, 20.0f, kSelX1 - 14 - tx, true);
+        const int nq = std::min(static_cast<int>(m.queue.size()), kQueueCount);
+        kind = fitText(kind, px, 20.0f, (nq > 0 ? kQueueX0 - 10 : kSelX1 - 14) - tx, true);
         mCanvas.textShadow(kind.c_str(), tx, kBotY0 + 28 - static_cast<int>(px) / 2 - 3, px, kText, true);
+        // Warteschlange: Symbolreihe rechts, erster Eintrag (in Arbeit) grün unterlegt; Klick bricht den Eintrag ab.
+        for (int i = 0; i < nq; ++i) {
+            const HudQueueItem& q = m.queue[static_cast<size_t>(i)];
+            const bool hover = mHover == kHitQueueBase + i;
+            const int x0 = queueX0(i), x1 = queueX1(i);
+            if (hover) mCanvas.slab(x0, kQueueY0, x1, kQueueY1, 6, kWarnTop, kWarnBottom);
+            else if (i == 0) mCanvas.slab(x0, kQueueY0, x1, kQueueY1, 6, kLeafTop, kLeafBottom);
+            else mCanvas.slab(x0, kQueueY0, x1, kQueueY1, 6, kSlabTop, kSlabBottom);
+            drawIcon(hover ? HudIcon::Stop : q.icon, (x0 + x1) / 2, (kQueueY0 + kQueueY1) / 2, 0.55f, kText, false);
+        }
         if (sel.progress >= 0.0f) {
             // Ausbildung/Bau: blauer Fortschrittsbalken, darunter die Zeile detail (statt der HP-Zahlen).
             const float f = std::clamp(sel.progress, 0.0f, 1.0f);
@@ -360,6 +409,43 @@ void VrHud::drawBottom(const HudModel& m) {
         const std::string label = fitText(b.label, px, 16.0f, kBtnW - 10, false);
         mCanvas.textShadow(label.c_str(), (x0 + x1 - mCanvas.textWidth(label.c_str(), px)) / 2, kBotY0 + kBtnTextDy, px,
                            tone);
+    }
+}
+
+void VrHud::drawOrders(const HudModel& m) {
+    // Bestellungen: Beschriftung links, dann bis zu 8 Einträge als Steinplatten mit Symbol, zwei Textzeilen und
+    // einem dünnen Fortschrittsbalken; leer = gedämpfter Hinweis.
+    const int cy = (kOrdY0 + kOrdY1) / 2;
+    mCanvas.textShadow("Bestellungen", kOrdLabelX, cy - static_cast<int>(kLabelPx) / 2 - 2, kLabelPx, kTextDim, true);
+    const int n = std::min(static_cast<int>(m.orders.size()), kOrdCount);
+    if (n == 0) {
+        const char* none = "Keine Ausbildung, kein Bau";
+        mCanvas.textShadow(none, kOrdX0 + 8, cy - static_cast<int>(kLabelPx) / 2 - 2, kLabelPx, kTextDim);
+        return;
+    }
+    for (int i = 0; i < n; ++i) {
+        const HudOrder& o = m.orders[static_cast<size_t>(i)];
+        const int x0 = orderX0(i), x1 = orderX1(i);
+        const bool hover = mHover == kHitOrderBase + i;
+        if (hover) mCanvas.slab(x0, kOrdY0, x1, kOrdY1, 10, kSlabHoverTop, kSlabHoverBottom);
+        else mCanvas.slab(x0, kOrdY0, x1, kOrdY1, 10, kSlabTop, kSlabBottom);
+        drawIcon(o.icon == HudIcon::None ? HudIcon::Hammer : o.icon, x0 + kOrdIconDx, cy - 2, 0.65f,
+                 hover ? kLeaf : kText);
+        float px = kOrderPx;
+        const int maxW = x1 - 6 - (x0 + kOrdTextDx);
+        const std::string line1 = fitText(hudOrderText(o), px, 13.0f, maxW, true);
+        mCanvas.textShadow(line1.c_str(), x0 + kOrdTextDx, kOrdY0 + 4, px, hover ? kLeaf : kText, true);
+        float spx = kOrderSmallPx;
+        std::string line2 = HudModel::hudRemainingText(o.remaining);
+        if (!o.building.empty()) line2 = o.building + " · " + line2;
+        line2 = fitText(line2, spx, 12.0f, maxW, false);
+        mCanvas.textShadow(line2.c_str(), x0 + kOrdTextDx, kOrdY0 + 24, spx, kTextDim);
+        // Fortschritt: dünner blauer Balken am unteren Rand
+        const float f = std::clamp(o.progress, 0.0f, 1.0f);
+        const int by1 = kOrdY1 - 3, by0 = by1 - kOrdBarH;
+        mCanvas.fillRect(x0 + 8, by0, x1 - 8, by1, kBarTrack);
+        const int fill = x0 + 8 + static_cast<int>(std::lround(f * static_cast<float>(x1 - x0 - 16)));
+        if (fill > x0 + 9) mCanvas.fillRect(x0 + 8, by0, fill, by1, o.remaining < 0.0f ? kWarnBottom : kProgress);
     }
 }
 

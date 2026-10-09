@@ -84,6 +84,15 @@ public:
 	void set_speed(speed_t speed);
 
 	/**
+	 * Set the simulation time (XR fork, loading a save game): the clock
+	 * continues from there (simulated and real simulation time, which the
+	 * world renderer uses for animations). Safe to call from any thread.
+	 *
+	 * @param time New simulation time (seconds).
+	 */
+	void set_time(const time::time_t &time);
+
+	/**
 	 * Start the simulation timer.
 	 */
 	void start();

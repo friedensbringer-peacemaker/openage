@@ -101,8 +101,8 @@ AoeUiController::AoeUiController(const gamestate::MapSettings &map,
 		}
 	}
 	menu.quest = quest;
-	menu.saveAvailable = static_cast<bool>(this->aoe.save);
-	menu.loadAvailable = static_cast<bool>(this->aoe.load);
+	menu.saveAvailable = static_cast<bool>(this->hooks.save_slot) and static_cast<bool>(this->hooks.list_slots);
+	menu.loadAvailable = static_cast<bool>(this->hooks.load_slot) and static_cast<bool>(this->hooks.list_slots);
 	// on the Quest the symbols are generic without the game's skin: labels on (spec §1.2), hotkeys off
 	menu.labels = true;
 	menu.hotkeys = not quest;
@@ -157,6 +157,11 @@ void AoeUiController::poll(double now) {
 	this->info = sample.info;
 	if (this->hooks.production and sample.info.game) {
 		sample.prod = prod_to_hud(this->hooks.production->snapshot());
+	}
+	// autosave (game time; not while paused, not twice per interval)
+	if (sample.info.game and this->hooks.save_slot and not this->match_over
+	    and this->autosave.due(sample.gameSeconds)) {
+		this->save_slot(gamestate::save::AUTOSAVE_SLOT, "autosave");
 	}
 	this->feed.fill(sample, now);
 
@@ -360,6 +365,17 @@ bool AoeUiController::on_event(const renderer::WindowEvent &ev, double now) {
 			return modal;
 		}
 		bool consumed = false;
+		if ((k == key::Key_F5 or k == key::Key_F9) and not modal) {
+			// quick save / quick load (0.6.0-xr.0.11)
+			if (k == key::Key_F5) {
+				this->save_slot(gamestate::save::QUICK_SLOT, "F5");
+			}
+			else {
+				this->load_slot(gamestate::save::QUICK_SLOT, "F9");
+			}
+			this->swallowed_keys.push_back(k);
+			return true;
+		}
 		if (k == key::Key_Escape or k == key::Key_F10) {
 			if (ui.context().open) {
 				ui.closeContext();
@@ -441,6 +457,9 @@ void AoeUiController::open_menu(bool open, double now) {
 	}
 	ui.menu().mapInfo = this->map_info();
 	ui.openMenu(open, now);
+	if (open) {
+		this->refresh_slots();
+	}
 	this->menu_pause = open;
 	log::log(INFO << "UI: game menu " << (open ? "opened" : "closed"));
 	this->apply_pause();
@@ -549,10 +568,25 @@ void AoeUiController::handle(const agesxr::AoeUi::Result &result, double now) {
 		break;
 	}
 	case Action::kQueueCancel:
-		// TODO: cancel exactly this entry once the production offers it (0.6.0-xr.0.11); today: the last one
-		log::log(INFO << "UI: queue slot " << result.index << " clicked: cancel training");
-		this->production_command(agesxr::kAoeCmdCancelTraining, "Warteschlange");
+		// exactly this entry (costs back), 0.6.0-xr.0.11
+		log::log(INFO << "UI: queue slot " << result.index << " clicked: cancel this entry");
+		if (this->hooks.production and result.index >= 0) {
+			this->hooks.production->cancel_training_at(static_cast<size_t>(result.index));
+			this->last_poll = -1.0;
+		}
 		break;
+	case Action::kFocusOrder: {
+		const auto &orders = ui.model().orders;
+		if (result.index >= 0 and static_cast<size_t>(result.index) < orders.size()) {
+			const auto &o = orders[static_cast<size_t>(result.index)];
+			log::log(INFO << "UI: order '" << o.label << "' clicked, camera to entity " << o.entity);
+			if (this->hooks.focus_entity) {
+				this->hooks.focus_entity(o.entity);
+			}
+			this->last_poll = -1.0;
+		}
+		break;
+	}
 	case Action::kSelectUnit:
 		if (result.index >= 0 and static_cast<size_t>(result.index) < this->info.selected.size() and this->aoe.select) {
 			const uint64_t id = this->info.selected[static_cast<size_t>(result.index)];
@@ -605,11 +639,23 @@ void AoeUiController::handle(const agesxr::AoeUi::Result &result, double now) {
 		this->menu_pause = false;
 		this->show_board(false, "Niederlage", {"Du hast die Partie aufgegeben.", "Neue Karte: Knopf unten oder Spielmenü."});
 		break;
+	case Action::kSlotsShown:
+		this->refresh_slots();
+		log::log(INFO << "UI: slot list '" << (menu.page == agesxr::AoeMenuModel::kSave ? "save" : "load") << "' with "
+		              << menu.slots.size() << " slots");
+		break;
+	case Action::kSlotArmed:
+		log::log(INFO << "UI: slot " << result.id << " armed (3 s)");
+		break;
 	case Action::kSave:
-		log::log(INFO << "UI: save " << (this->aoe.save and this->aoe.save() ? "ok" : "not available"));
+		this->menu_pause = false;
+		this->save_slot(result.id, "game menu");
+		this->apply_pause();
 		break;
 	case Action::kLoad:
-		log::log(INFO << "UI: load " << (this->aoe.load and this->aoe.load() ? "ok" : "not available"));
+		this->menu_pause = false;
+		this->load_slot(result.id, "game menu");
+		this->apply_pause();
 		break;
 	case Action::kBoardNewMap:
 		this->menu_pause = true;
@@ -626,6 +672,51 @@ void AoeUiController::handle(const agesxr::AoeUi::Result &result, double now) {
 	case Action::kNone:
 		break;
 	}
+}
+
+// ---- save games ---------------------------------------------------------------------------
+
+void AoeUiController::refresh_slots() {
+	auto &menu = this->aoe_ui.menu();
+	menu.slots.clear();
+	if (not this->hooks.list_slots) {
+		return;
+	}
+	for (const auto &s : this->hooks.list_slots()) {
+		if (static_cast<int>(menu.slots.size()) >= agesxr::kAoeSlotsMax) {
+			break;
+		}
+		agesxr::AoeSaveSlot slot;
+		slot.slot = s.slot;
+		slot.label = s.label();
+		slot.exists = s.exists;
+		slot.writable = s.slot != gamestate::save::AUTOSAVE_SLOT;
+		menu.slots.push_back(slot);
+	}
+}
+
+void AoeUiController::save_slot(int slot, const char *why) {
+	if (not this->hooks.save_slot or not this->hooks.save_slot(slot)) {
+		log::log(WARN << "UI: saving slot " << slot << " (" << why << ") not possible");
+		if (this->hooks.production) {
+			this->hooks.production->notify("Speichern nicht möglich", gamestate::prod::status_t::warn);
+		}
+		return;
+	}
+	log::log(INFO << "UI: save slot " << slot << " (" << why << ")");
+	this->last_poll = -1.0;
+}
+
+void AoeUiController::load_slot(int slot, const char *why) {
+	if (not this->hooks.load_slot) {
+		return;
+	}
+	log::log(INFO << "UI: load slot " << slot << " (" << why << ")");
+	auto error = this->hooks.load_slot(slot);
+	if (not error.empty()) {
+		log::log(WARN << "UI: load slot " << slot << " failed: " << error);
+	}
+	this->last_poll = -1.0;
 }
 
 // ---- map ----------------------------------------------------------------------------------

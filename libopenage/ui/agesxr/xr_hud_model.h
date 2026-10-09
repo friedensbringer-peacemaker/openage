@@ -63,8 +63,35 @@ struct HudSelection {
     bool operator!=(const HudSelection& o) const { return !(*this == o); }
 };
 
+// Eintrag der Warteschlange des gewählten Gebäudes (0.6.0-xr.0.11): Symbolreihe im Auswahlfeld, Klick bricht ab.
+struct HudQueueItem {
+    HudIcon icon = HudIcon::None;
+    std::string label;             // „Dorfbewohner“ (Hinweiszeile, Log)
+    bool operator==(const HudQueueItem& o) const { return icon == o.icon && label == o.label; }
+    bool operator!=(const HudQueueItem& o) const { return !(*this == o); }
+};
+
+// „Bestellung“ (0.6.0-xr.0.11): laufende Ausbildung oder Bau eines eigenen Gebäudes, global in der unteren Leiste.
+struct HudOrder {
+    uint64_t entity = 0;           // Gebäude (Klick: Kamera dorthin, auswählen)
+    HudIcon icon = HudIcon::None;
+    std::string label;             // was entsteht: „Dorfbewohner“, „Haus“
+    std::string building;          // „Dorfzentrum“, „Kaserne“; beim Bau leer
+    int count = 1;                 // Einträge der Warteschlange (Bau: 1)
+    float remaining = -1.0f;       // Restzeit des ersten Eintrags in s, < 0 = wartet (Bevölkerungsgrenze)
+    float progress = 0.0f;         // 0 … 1 des ersten Eintrags
+    bool construction = false;     // true = Fundament im Bau
+    bool operator==(const HudOrder& o) const {
+        return entity == o.entity && icon == o.icon && label == o.label && building == o.building &&
+               count == o.count && remaining == o.remaining && progress == o.progress && construction == o.construction;
+    }
+    bool operator!=(const HudOrder& o) const { return !(*this == o); }
+};
+
 struct HudModel {
     static constexpr int kMaxButtons = 8;
+    static constexpr int kMaxQueue = 5;
+    static constexpr int kMaxOrders = 8;
 
     // Ressourcenleiste
     int food = 0, wood = 0, gold = 0, stone = 0;
@@ -75,6 +102,9 @@ struct HudModel {
     // Auswahlfeld und Befehlsleiste
     HudSelection selection;
     std::vector<HudButton> buttons;         // höchstens kMaxButtons, weitere werden nicht gezeigt
+    std::vector<HudQueueItem> queue;        // Warteschlange des gewählten Gebäudes (erster = in Arbeit), ≤ kMaxQueue
+    // Bestellungen: alle laufenden Ausbildungen/Bauten eigener Gebäude, nach Restzeit sortiert, ≤ kMaxOrders
+    std::vector<HudOrder> orders;
 
     int shownSecond() const { return std::isfinite(gameSeconds) && gameSeconds > 0.0 ? static_cast<int>(gameSeconds) : 0; }
     // Obere Leiste (Ressourcen, Einwohner, Zeit, Status) gleich wie gezeigt?
@@ -83,9 +113,38 @@ struct HudModel {
                populationMax == o.populationMax && shownSecond() == o.shownSecond() && status == o.status &&
                statusKind == o.statusKind;
     }
-    // Untere Leiste (Auswahl, Befehle) gleich wie gezeigt?
-    bool sameBottom(const HudModel& o) const { return selection == o.selection && buttons == o.buttons; }
+    // Mittlere Leiste (Auswahl, Warteschlange, Befehle) gleich wie gezeigt?
+    bool sameBottom(const HudModel& o) const { return selection == o.selection && buttons == o.buttons && queue == o.queue; }
+    // Untere Leiste (Bestellungen) gleich wie gezeigt? Restzeiten zählen nur auf ganze Sekunden.
+    bool sameOrders(const HudModel& o) const {
+        if (orders.size() != o.orders.size()) return false;
+        for (size_t i = 0; i < orders.size(); ++i) {
+            const HudOrder& a = orders[i];
+            const HudOrder& b = o.orders[i];
+            if (a.entity != b.entity || a.icon != b.icon || a.label != b.label || a.building != b.building ||
+                a.count != b.count || a.construction != b.construction || hudRemainingText(a.remaining) != hudRemainingText(b.remaining) ||
+                static_cast<int>(a.progress * 100.0f) != static_cast<int>(b.progress * 100.0f))
+                return false;
+        }
+        return true;
+    }
+    // Restzeit einer Bestellung: „12 s“, „1:05“, „wartet“ (< 0), „fertig“ (0).
+    static std::string hudRemainingText(float seconds) {
+        if (!std::isfinite(seconds) || seconds < 0.0f) return "wartet";
+        const int s = static_cast<int>(seconds + 0.999f);
+        char buf[24];
+        if (s >= 60) std::snprintf(buf, sizeof(buf), "%d:%02d", s / 60, s % 60);
+        else std::snprintf(buf, sizeof(buf), "%d s", s);
+        return buf;
+    }
 };
+
+// Erste Zeile eines Bestellungs-Eintrags: „Dorfbewohner ×2“, „Haus (Bau)“.
+inline std::string hudOrderText(const HudOrder& o) {
+    if (o.construction) return o.label + " (Bau)";
+    if (o.count > 1) return o.label + " ×" + std::to_string(o.count);
+    return o.label;
+}
 
 // Anzeigehilfen (Host-getestet).
 // Spielzeit: „0:00“ … „59:59“, ab einer Stunde „1:02:03“; negativ/NaN → „0:00“.

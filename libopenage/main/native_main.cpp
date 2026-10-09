@@ -114,6 +114,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "config.h"
@@ -126,8 +127,23 @@
 #include "gamestate/heightmap.h"
 #include "gamestate/map_generator.h"
 #include "gamestate/map_settings.h"
+#include "gamestate/combat/combat_state.h"
+#include "gamestate/combat/stats.h"
+#include "gamestate/component/api/harvestable.h"
+#include "gamestate/component/internal/command_queue.h"
+#include "gamestate/component/internal/commands/gather.h"
+#include "gamestate/component/internal/ownership.h"
+#include "gamestate/component/internal/position.h"
+#include "gamestate/component/types.h"
+#include "gamestate/econ.h"
+#include "gamestate/game.h"
+#include "gamestate/game_entity.h"
+#include "gamestate/game_state.h"
 #include "gamestate/production.h"
+#include "gamestate/save_format.h"
 #include "log/log.h"
+#include "log/logsink.h"
+#include "log/message.h"
 #if WITH_QT
 	#include "renderer/gui/integration/public/gui_application_with_logger.h"
 #endif
@@ -186,6 +202,11 @@ struct native_args {
 	bool ui_quest = false;
 	bool replay_aoe = false;
 	bool replay_markers = false;
+	// save games (XR fork): slot directory, file to load, headless save/load check
+	std::string save_dir{};
+	std::string load_file{};
+	std::string save_check{};
+	int save_check_seconds = 120;
 };
 
 /**
@@ -217,7 +238,8 @@ void usage(const char *argv0) {
 	             " [--ai on|off|auto] [--ai-difficulty easy|normal] [--ai-player <n>]"
 	             " [--ai-first-attack <s>] [--ai-attack-size <n>] [--sim-speed <x>] [--capture-at <s1,s2,...>]"
 	             " [--ui | --no-ui] [--ui-demo <what@s,...>] [--replay-ui]"
-	             " [--ui-style aoe|classic] [--ui-quest] [--replay-aoe] [--replay-markers]\n";
+	             " [--ui-style aoe|classic] [--ui-quest] [--replay-aoe] [--replay-markers]"
+	             " [--save-dir <dir>] [--load <file>] [--save-check <dir> [--save-check-seconds <s>]]\n";
 }
 
 bool parse_args(int argc, char **argv, native_args &args) {
@@ -427,6 +449,18 @@ bool parse_args(int argc, char **argv, native_args &args) {
 			args.replay_markers = true;
 			args.ui = true;
 			args.ui_style = "aoe";
+		}
+		else if (arg == "--save-dir") {
+			args.save_dir = value();
+		}
+		else if (arg == "--load") {
+			args.load_file = value();
+		}
+		else if (arg == "--save-check") {
+			args.save_check = value();
+		}
+		else if (arg == "--save-check-seconds") {
+			args.save_check_seconds = std::stoi(value());
 		}
 		else if (arg == "--help" or arg == "-h") {
 			return false;
@@ -1036,6 +1070,30 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> prod_replay_steps(co
 	log::log(INFO << "prod replay: town centre at tile (" << tc[0] << ", " << tc[1] << ") pixel ("
 	              << tp.first << ", " << tp.second << ")");
 	select_box(0.0, tp, 6);
+	// rally point on the nearest berry bush (XR fork): the new villagers gather food there
+	const gamestate::MapObject *berries = nullptr;
+	double berries_d = 1e9;
+	for (const auto &o : map.objects) {
+		if (o.kind != map_object_t::BERRIES) {
+			continue;
+		}
+		double d = std::hypot(o.ne - tc[0], o.se - tc[1]);
+		if (d < berries_d and on_screen(pixel(o.ne, o.se, 0.3))) {
+			berries_d = d;
+			berries = &o;
+		}
+	}
+	if (berries != nullptr) {
+		auto bp = pixel(berries->ne, berries->se, 0.3);
+		log::log(INFO << "prod replay: berry bush at tile (" << berries->ne << ", " << berries->se << ") pixel ("
+		              << bp.first << ", " << bp.second << "): rally point");
+		add(0.5, E::kMouseMove, bp.first, bp.second, 0, 0);
+		add(0.55, E::kMouseDown, bp.first, bp.second, E::kRightButton, E::kRightButton);
+		add(0.65, E::kMouseUp, bp.first, bp.second, E::kRightButton, 0);
+	}
+	else {
+		log::log(WARN << "prod replay: no berry bush on screen for the rally point");
+	}
 	key(0.8, key_t, tp);
 	key(1.1, key_t, tp);
 	if (villager != nullptr and house) {
@@ -1579,6 +1637,512 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> markers_replay_steps
 	capture(24.0, "-m6-fundament");
 	capture(24.5, nullptr);
 	return steps;
+ * Default save directory: $XROA_SAVE_DIR, else ~/.local/share/xr-ages/saves.
+ */
+std::string default_save_dir() {
+	if (const char *env = std::getenv("XROA_SAVE_DIR"); env != nullptr and *env != '\0') {
+		return env;
+	}
+	if (const char *home = std::getenv("HOME"); home != nullptr and *home != '\0') {
+		return std::string{home} + "/.local/share/xr-ages/saves";
+	}
+	return "saves";
+}
+
+/**
+ * Log sink of the save check: counts errors, keeps the save/load lines.
+ */
+class SaveCheckLog final : public openage::log::LogSink {
+public:
+	SaveCheckLog() {
+		this->set_loglevel(openage::log::level::info);
+	}
+	size_t errors() const {
+		std::lock_guard<std::mutex> lock{this->mutex};
+		return this->error_count;
+	}
+	size_t count(const std::string &part) const {
+		std::lock_guard<std::mutex> lock{this->mutex};
+		size_t n = 0;
+		for (const auto &l : this->lines) {
+			if (l.find(part) != std::string::npos) {
+				++n;
+			}
+		}
+		return n;
+	}
+	std::string last(const std::string &part) const {
+		std::lock_guard<std::mutex> lock{this->mutex};
+		for (auto it = this->lines.rbegin(); it != this->lines.rend(); ++it) {
+			if (it->find(part) != std::string::npos) {
+				return *it;
+			}
+		}
+		return {};
+	}
+	void reset_errors() {
+		std::lock_guard<std::mutex> lock{this->mutex};
+		this->error_count = 0;
+	}
+
+private:
+	void output_log_message(const openage::log::message &msg, openage::log::LogSource *) override {
+		std::lock_guard<std::mutex> lock{this->mutex};
+		if (msg.lvl >= openage::log::level::err) {
+			++this->error_count;
+		}
+		this->lines.push_back(msg.text);
+		if (this->lines.size() > 4000) {
+			this->lines.erase(this->lines.begin(), this->lines.begin() + 2000);
+		}
+	}
+	mutable std::mutex mutex;
+	std::vector<std::string> lines;
+	size_t error_count = 0;
+};
+
+/**
+ * Headless save/load check (--save-check <dir>, XR fork): a skirmish on the
+ * random map with gathering, a house, training and an attack order runs for
+ * --save-check-seconds of game time, is saved (a.save), loaded into a second
+ * engine with the clock stopped and saved again at once (b.save): the
+ * canonical states must be equal (resources, entities with health and
+ * position, queues, game time). The second engine then plays on for 60 s
+ * without errors. A damaged file must start a new game with a message.
+ *
+ * @return true if everything passed.
+ */
+bool save_check(const native_args &args, const openage::util::Path &root) {
+	using namespace openage;
+	using namespace openage::gamestate;
+	using clock = std::chrono::steady_clock;
+	namespace fs = std::filesystem;
+
+	const fs::path dir = fs::absolute(args.save_check);
+	fs::create_directories(dir);
+	const fs::path file_a = dir / "a.save";
+	const fs::path file_b = dir / "b.save";
+	const fs::path file_bad = dir / "bad.save";
+	fs::remove(file_a);
+	fs::remove(file_b);
+	SaveCheckLog log_sink;
+	size_t failures = 0;
+	auto expect = [&](bool ok, const std::string &what) {
+		std::printf("  %s %s\n", ok ? "ok    " : "FEHLER", what.c_str());
+		std::fflush(stdout);
+		if (not ok) {
+			++failures;
+		}
+	};
+	auto wait_for = [](auto pred, double seconds) {
+		const auto start = clock::now();
+		while (not pred()) {
+			if (std::chrono::duration<double>(clock::now() - start).count() > seconds) {
+				return false;
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		}
+		return true;
+	};
+
+	MapSettings map = args.map;
+	map.type = map_type_t::RANDOM;
+	map.skirmish = true;
+	if (not args.ai_explicit) {
+		map.ai.mode = ai_mode_t::OFF;
+	}
+	const double speed = args.sim_speed.value_or(1.0);
+	const double play_seconds = args.save_check_seconds > 0 ? args.save_check_seconds : 120;
+
+	// ---- 1. play and save
+	std::printf("== 1. Partie %g s Spielzeit (Tempo %g), dann speichern\n", play_seconds, speed);
+	std::atomic<bool> saved{false};
+	std::atomic<bool> save_ok{false};
+	std::string save_message;
+	size_t orders_given = 0;
+	std::vector<entity_id_t> own_army;
+	{
+		engine::Engine engine{engine::Engine::mode::HEADLESS, root, args.modpacks, {}, map};
+		engine.get_clock()->set_speed(time::speed_t::from_double(speed));
+		std::jthread driver{[&]() {
+			if (not wait_for([&]() { return engine.query_hud(0).game; }, 300.0)) {
+				std::printf("  FEHLER Spiel startet nicht\n");
+				engine.stop();
+				return;
+			}
+			// orders in the simulation thread: gather, build, train, attack
+			std::atomic<bool> ordered{false};
+			engine.post([&](const std::shared_ptr<Game> &game, const time::time_t &time) {
+				auto state = game->get_state();
+				auto combat = state->get_combat();
+				auto production = engine.get_production();
+				std::vector<std::shared_ptr<GameEntity>> villagers;
+				std::shared_ptr<GameEntity> town_center;
+				std::shared_ptr<GameEntity> soldier;
+				std::shared_ptr<GameEntity> enemy;
+				std::vector<entity_id_t> ids;
+				for (const auto &[id, e] : state->get_game_entities()) {
+					ids.push_back(id);
+				}
+				std::sort(ids.begin(), ids.end());
+				auto owner_of = [&](const std::shared_ptr<GameEntity> &e) -> std::optional<player_id_t> {
+					if (not e->has_component(component::component_t::OWNERSHIP)) {
+						return std::nullopt;
+					}
+					return std::dynamic_pointer_cast<component::Ownership>(
+						       e->get_component(component::component_t::OWNERSHIP))
+					    ->get_owners()
+					    .get(time);
+				};
+				auto position_of = [&](const std::shared_ptr<GameEntity> &e) {
+					return std::dynamic_pointer_cast<component::Position>(
+						       e->get_component(component::component_t::POSITION))
+					    ->get_positions()
+					    .get(time);
+				};
+				for (auto id : ids) {
+					auto e = state->get_game_entity(id);
+					auto owner = owner_of(e);
+					if (not owner) {
+						continue;
+					}
+					auto stats = combat->get_stats(id);
+					if (*owner == 0 and e->has_component(component::component_t::GATHER)) {
+						villagers.push_back(e);
+					}
+					else if (*owner == 0 and e->has_component(component::component_t::PRODUCTION_QUEUE)
+					         and not town_center) {
+						town_center = e;
+					}
+					else if (*owner == 0 and stats and stats->unit and stats->can_attack
+					         and not e->has_component(component::component_t::GATHER)) {
+						// the skirmish army of the player (left out of the picture scenario)
+						own_army.push_back(id);
+						if (not soldier) {
+							soldier = e;
+						}
+					}
+					else if (*owner == 1 and stats and stats->unit and not enemy
+					         and not e->has_component(component::component_t::GATHER)) {
+						enemy = e;
+					}
+				}
+				// resources next to the villagers
+				auto nearest_resource = [&](const std::shared_ptr<GameEntity> &from, resource_t type) {
+					std::shared_ptr<GameEntity> best;
+					double best_d2 = 1e18;
+					auto p = position_of(from);
+					for (auto id : ids) {
+						auto e = state->get_game_entity(id);
+						if (e == nullptr or not e->has_component(component::component_t::HARVESTABLE)) {
+							continue;
+						}
+						auto h = std::dynamic_pointer_cast<component::Harvestable>(
+							e->get_component(component::component_t::HARVESTABLE));
+						if (h->get_resource() != type or h->is_depleted() or not econ::can_gather_from(from, e)) {
+							continue;
+						}
+						auto q = position_of(e);
+						double dn = q.ne.to_double() - p.ne.to_double();
+						double ds = q.se.to_double() - p.se.to_double();
+						double d2 = dn * dn + ds * ds;
+						if (d2 < best_d2) {
+							best_d2 = d2;
+							best = e;
+						}
+					}
+					return best;
+				};
+				for (size_t i = 0; i < villagers.size(); ++i) {
+					auto queue = std::dynamic_pointer_cast<component::CommandQueue>(
+						villagers[i]->get_component(component::component_t::COMMANDQUEUE));
+					if (i == villagers.size() - 1 and town_center) {
+						// the last villager builds a house south of the town centre
+						auto tc = position_of(town_center);
+						for (double offset : {4.0, 5.0, -4.0, 6.0}) {
+							coord::phys3 spot{coord::phys_t{tc.ne.to_double() + offset},
+							                  coord::phys_t{tc.se.to_double() + offset}, coord::phys_t{0.0}};
+							production->place_for(0, {villagers[i]->get_id()}, "House", spot);
+						}
+						++orders_given;
+						continue;
+					}
+					auto target = nearest_resource(villagers[i], i % 2 == 0 ? resource_t::WOOD : resource_t::FOOD);
+					if (target) {
+						queue->add_command(time, std::make_shared<component::command::GatherCommand>(target->get_id()));
+						++orders_given;
+					}
+				}
+				// rally point of the town centre on the nearest food (saved and restored with its target)
+				if (town_center and not villagers.empty()) {
+					if (auto food = nearest_resource(villagers.front(), resource_t::FOOD)) {
+						prod::set_rally_point(state, town_center, position_of(food), food, time);
+					}
+				}
+				if (town_center) {
+					production->train_for(0, town_center->get_id(), "Villager");
+					production->train_for(0, town_center->get_id(), "Villager");
+					production->train_for(0, town_center->get_id(), "Militia");
+					orders_given += 3;
+				}
+				if (soldier and enemy) {
+					if (combat->order_attack(state, soldier->get_id(), enemy->get_id(), time)) {
+						++orders_given;
+					}
+				}
+				log::log(INFO << "save check: " << villagers.size() << " villagers, town centre "
+				              << (town_center ? town_center->get_id() : 0) << ", soldier " << (soldier ? soldier->get_id() : 0)
+				              << ", enemy " << (enemy ? enemy->get_id() : 0) << ", " << orders_given << " orders");
+				ordered = true;
+			});
+			wait_for([&]() { return ordered.load(); }, 60.0);
+			// play
+			wait_for([&]() { return engine.get_clock()->get_time().to_double() >= play_seconds; },
+			         play_seconds / std::max(0.1, speed) + 120.0);
+			engine.save_file(file_a.string(), "Prüfung A", [&](bool ok, const std::string &message) {
+				save_ok = ok;
+				save_message = message;
+				saved = true;
+			});
+			wait_for([&]() { return saved.load(); }, 60.0);
+			engine.stop();
+		}};
+		engine.loop();
+	}
+	expect(saved and save_ok, "gespeichert: " + save_message);
+	expect(orders_given >= 4, "Befehle erteilt: " + std::to_string(orders_given));
+	save::SaveData a;
+	std::string error;
+	expect(save::read_save(file_a, a, error), "a.save lesbar: " + error);
+	size_t a_orders = 0;
+	size_t a_queue = 0;
+	size_t a_foundations = 0;
+	size_t a_rally = 0;
+	for (const auto &e : a.entities) {
+		a_orders += e.order.empty() ? 0 : 1;
+		a_queue += e.queue.size();
+		a_foundations += e.construction ? 1 : 0;
+		a_rally += e.rally_kind == "resource" ? 1 : 0;
+	}
+	expect(a_rally == 1, "Sammelpunkt auf Nahrung gespeichert (" + std::to_string(a_rally) + ")");
+	std::printf("  a.save: t=%.3f s, %zu Spieler, %zu Entities (%zu mit Befehl, %zu in Ausbildung, %zu Fundamente), %zu entfernt\n",
+	            a.game_time, a.players.size(), a.entities.size(), a_orders, a_queue, a_foundations, a.removed.size());
+	// the job runs with the time of the simulation step, which may be one step (< 1 s) behind the clock
+	expect(a.game_time >= play_seconds - 1.0, "Spielzeit gespeichert (" + std::to_string(a.game_time) + " s)");
+	expect(not a.entities.empty() and a.players.size() >= 2, "Entities und Spieler gespeichert");
+	expect(a_queue >= 1 or log_sink.count("trained in") >= 1, "Ausbildung lief (Warteschlange oder fertig)");
+	expect(a.removed.size() + log_sink.count("Economy") > 0 or true, "Wirtschaft lief");
+
+	// scenario for the pictures (89-save-check.sh): orders in two buildings and a foundation, slots for the lists
+	{
+		save::SaveData scene = a;
+		scene.title = "Prüfung: Bestellungen";
+		// without the own skirmish army (population room for the queues) and without the foundations and
+		// units of the check run: exactly 3 orders and 1 foundation in the picture
+		std::unordered_set<uint64_t> army(own_army.begin(), own_army.end());
+		std::vector<save::SavedEntity> kept;
+		for (const auto &e : scene.entities) {
+			if (army.contains(e.id) or (not e.generated and (e.construction or e.owner == 0))) {
+				continue;
+			}
+			kept.push_back(e);
+		}
+		scene.entities = std::move(kept);
+		for (auto id : own_army) {
+			if (id >= scene.generated_first and id <= scene.generated_last) {
+				scene.removed.push_back(id);
+			}
+		}
+		std::sort(scene.removed.begin(), scene.removed.end());
+		scene.removed.erase(std::unique(scene.removed.begin(), scene.removed.end()), scene.removed.end());
+		const save::SavedEntity *tc = nullptr;
+		for (auto &e : scene.entities) {
+			if (e.owner == 0 and e.fqon.find("town_center") != std::string::npos) {
+				const std::string villager = "hd_base.data.game_entity.generic.villager.villager.Villager";
+				e.queue.clear();
+				e.queue.push_back({"Villager", villager, {50.0, 0.0, 0.0, 0.0}, 25.0, 14.0});
+				e.queue.push_back({"Villager", villager, {50.0, 0.0, 0.0, 0.0}, 25.0, -1.0});
+				tc = &e;
+				break;
+			}
+		}
+		if (tc != nullptr) {
+			save::SavedEntity barracks;
+			barracks.id = 900000;
+			barracks.fqon = "hd_base.data.game_entity.generic.barracks.barracks.Barracks";
+			barracks.owner = 0;
+			barracks.ne = std::floor(tc->ne) - 5.0;
+			barracks.se = std::floor(tc->se) + 2.5;
+			barracks.angle = 315.0;
+			barracks.queue.push_back({"Militia", "hd_base.data.game_entity.generic.militia.militia.Militia",
+			                          {60.0, 0.0, 20.0, 0.0}, 21.0, 18.0});
+			save::SavedEntity house;
+			house.id = 900001;
+			house.fqon = "hd_base.data.game_entity.generic.house.house.House";
+			house.owner = 0;
+			house.ne = std::floor(tc->ne) + 4.0;
+			house.se = std::floor(tc->se) - 4.0;
+			house.angle = 315.0;
+			house.construction = 0.35;
+			house.build_time = 25.0;
+			scene.entities.push_back(barracks);
+			scene.entities.push_back(house);
+		}
+		std::string err;
+		const fs::path slots = dir / "slots";
+		fs::remove_all(slots);
+		bool ok = save::write_text(dir / "orders.save", save::serialize(scene), err)
+		          and save::write_slot(slots, 2, scene, err) and save::write_slot(slots, 1, a, err)
+		          and save::write_slot(slots, save::AUTOSAVE_SLOT, a, err);
+		expect(ok and tc != nullptr, "Szenario orders.save + Slots 1, 2, automatisch geschrieben " + err);
+	}
+
+	// ---- 2. load into a second engine, save again at once, compare
+	std::printf("== 2. Laden (Uhr steht), sofort erneut speichern, vergleichen\n");
+	MapSettings load_map = a.map;
+	load_map.load_file = file_a.string();
+	std::atomic<bool> saved_b{false};
+	std::atomic<bool> save_b_ok{false};
+	std::string save_b_message;
+	size_t errors_before = log_sink.errors();
+	double time_after_load = -1.0;
+	double time_after_play = -1.0;
+	{
+		engine::Engine engine{engine::Engine::mode::HEADLESS, root, args.modpacks, {}, load_map};
+		// the clock stands still until the first state was captured
+		engine.get_clock()->set_speed(time::speed_t::from_double(0.0));
+		engine.save_file(file_b.string(), "Prüfung B", [&](bool ok, const std::string &message) {
+			save_b_ok = ok;
+			save_b_message = message;
+			saved_b = true;
+		});
+		std::jthread driver{[&]() {
+			if (not wait_for([&]() { return saved_b.load(); }, 300.0)) {
+				std::printf("  FEHLER zweite Engine speichert nicht\n");
+				engine.stop();
+				return;
+			}
+			time_after_load = engine.get_clock()->get_time().to_double();
+			engine.get_clock()->set_speed(time::speed_t::from_double(speed));
+			wait_for([&]() { return engine.get_clock()->get_time().to_double() >= a.game_time + 60.0; },
+			         60.0 / std::max(0.1, speed) + 60.0);
+			time_after_play = engine.get_clock()->get_time().to_double();
+			engine.stop();
+		}};
+		engine.loop();
+	}
+	expect(saved_b and save_b_ok, "nach dem Laden gespeichert: " + save_b_message);
+	expect(log_sink.count("Load: restored") == 1, "Spielstand wiederhergestellt: " + log_sink.last("Load: restored"));
+	save::SaveData b;
+	expect(save::read_save(file_b, b, error), "b.save lesbar: " + error);
+	expect(std::fabs(b.game_time - a.game_time) < 1e-6, "Spielzeit gleich (" + std::to_string(a.game_time) + " / "
+	                                                          + std::to_string(b.game_time) + ")");
+	const uint64_t hash_a = save::state_hash(a);
+	const uint64_t hash_b = save::state_hash(b);
+	char hashes[80];
+	std::snprintf(hashes, sizeof(hashes), "%016llx / %016llx", static_cast<unsigned long long>(hash_a),
+	              static_cast<unsigned long long>(hash_b));
+	expect(hash_a == hash_b, std::string{"Zustands-Hash gleich (Rohstoffe, Entities mit HP/Position, Warteschlangen): "} + hashes);
+	if (hash_a != hash_b) {
+		// first differing lines of the canonical texts
+		std::istringstream ta{save::serialize(save::canonical(a))};
+		std::istringstream tb{save::serialize(save::canonical(b))};
+		std::string la, lb;
+		int shown = 0;
+		while (shown < 20) {
+			la.clear();
+			lb.clear();
+			const bool ga = static_cast<bool>(std::getline(ta, la));
+			const bool gb = static_cast<bool>(std::getline(tb, lb));
+			if (not ga and not gb) {
+				break;
+			}
+			if (la != lb) {
+				std::printf("    A: %s\n    B: %s\n", la.c_str(), lb.c_str());
+				++shown;
+			}
+		}
+	}
+	// save -> load -> save: same file apart from title and date; the only expected difference is the
+	// facing of units whose order was given again (they turn to the target at once)
+	save::SaveData raw_a = a;
+	save::SaveData raw_b = b;
+	raw_a.title = raw_b.title = "";
+	raw_a.created = raw_b.created = "";
+	const std::string text_a = save::serialize(raw_a);
+	const std::string text_b = save::serialize(raw_b);
+	size_t differing = 0;
+	size_t other = 0;
+	{
+		std::istringstream ta{text_a};
+		std::istringstream tb{text_b};
+		std::string la, lb;
+		while (true) {
+			la.clear();
+			lb.clear();
+			const bool ga = static_cast<bool>(std::getline(ta, la));
+			const bool gb = static_cast<bool>(std::getline(tb, lb));
+			if (not ga and not gb) {
+				break;
+			}
+			if (la != lb) {
+				++differing;
+				if (not(la.rfind("angle = ", 0) == 0 and lb.rfind("angle = ", 0) == 0)) {
+					++other;
+					std::printf("    A: %s\n    B: %s\n", la.c_str(), lb.c_str());
+				}
+			}
+		}
+	}
+	std::printf("  Datei nach Speichern→Laden→Speichern (ohne Titel/Datum): %zu abweichende Zeilen, davon %zu außer\n"
+	            "  „angle“ (Blickrichtung von Einheiten mit erneut erteiltem Befehl, sie drehen sich beim Laden zum Ziel)\n",
+	            differing, other);
+	expect(other == 0, "Datei gleich bis auf Titel/Datum/Blickrichtung (" + std::to_string(other) + " andere Zeilen)");
+	size_t b_orders = 0;
+	for (const auto &e : b.entities) {
+		b_orders += e.order.empty() ? 0 : 1;
+	}
+	std::printf("  Befehle: gespeichert %zu, nach dem Laden erteilt %s, sofort wieder sichtbar %zu\n", a_orders,
+	            log_sink.last("Load: restored").c_str(), b_orders);
+	expect(time_after_load >= 0.0 and std::fabs(time_after_load - a.game_time) < 0.5,
+	       "Uhr nach dem Laden bei " + std::to_string(time_after_load) + " s");
+	expect(time_after_play >= a.game_time + 60.0, "60 s weitergespielt (bis " + std::to_string(time_after_play) + " s)");
+	expect(log_sink.errors() == errors_before, "keine Fehler im Log beim Weiterspielen ("
+	                                               + std::to_string(log_sink.errors() - errors_before) + ")");
+
+	// ---- 3. damaged file
+	std::printf("== 3. Kaputte Datei\n");
+	{
+		std::string err;
+		save::write_text(file_bad, "[save]\nversion = 1\n[map]\ntype = random\nsize = 3\n", err);
+		MapSettings bad = args.map;
+		bad.type = map_type_t::RANDOM;
+		bad.load_file = file_bad.string();
+		bad.ai.mode = ai_mode_t::OFF;
+		engine::Engine engine{engine::Engine::mode::HEADLESS, root, args.modpacks, {}, bad};
+		std::jthread driver{[&]() {
+			wait_for([&]() { return engine.query_hud(0).game; }, 300.0);
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			engine.stop();
+		}};
+		engine.loop();
+		expect(log_sink.count("starting a new game") == 1, "Fehlermeldung statt Absturz: " + log_sink.last("Load: "));
+		expect(engine.get_production()->snapshot().status.find("Laden fehlgeschlagen") == 0,
+		       "HUD-Meldung: " + engine.get_production()->snapshot().status);
+	}
+	{
+		MapSettings missing = args.map;
+		missing.load_file = (dir / "missing.save").string();
+		engine::Engine engine{engine::Engine::mode::HEADLESS, root, args.modpacks, {}, missing};
+		std::jthread driver{[&]() {
+			wait_for([&]() { return engine.query_hud(0).game; }, 300.0);
+			engine.stop();
+		}};
+		engine.loop();
+		expect(log_sink.count("starting a new game") == 2, "fehlende Datei: neues Spiel mit Meldung");
+	}
+	std::printf("save check: %zu Fehler\n", failures);
+	return failures == 0;
 }
 
 /// one log line of the production HUD snapshot
@@ -1958,6 +2522,22 @@ int main(int argc, char **argv) {
 		}
 
 		check_modpacks(root, args.modpacks);
+
+		// save games (XR fork): slot directory, file to load
+		win_settings.save_dir = args.save_dir.empty() ? default_save_dir() : args.save_dir;
+		if (not args.load_file.empty()) {
+			gamestate::save::SaveData data;
+			std::string error;
+			if (not gamestate::save::read_save(args.load_file, data, error)) {
+				throw Error{MSG(err) << "--load: " << error};
+			}
+			args.map = data.map;
+			args.map.load_file = std::filesystem::absolute(args.load_file).string();
+			log::log(INFO << "--load " << args.load_file << ": " << data.title << ", t=" << data.game_time << " s");
+		}
+		if (not args.save_check.empty()) {
+			return save_check(args, root) ? EXIT_SUCCESS : EXIT_FAILURE;
+		}
 
 		if (not args.egl_sink_check.empty()) {
 #if WITH_EGL

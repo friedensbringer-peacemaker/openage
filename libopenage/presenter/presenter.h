@@ -8,8 +8,11 @@
 #include <memory>
 #include <optional>
 #include <mutex>
+#include <optional>
 #include <vector>
 
+#include "gamestate/save_format.h"
+#include "gamestate/types.h"
 #include "renderer/window.h"
 #include "util/path.h"
 
@@ -176,6 +179,25 @@ public:
 	                  std::function<void(const gamestate::MapSettings &)> restart,
 	                  std::function<void()> quit,
 	                  const gamestate::MapSettings &map);
+
+	/**
+	 * Save game slots of the game user interface (XR fork). Call before run().
+	 */
+	void set_ui_save_hooks(std::function<bool(int)> save_slot,
+	                       std::function<std::string(int)> load_slot,
+	                       std::function<std::vector<gamestate::save::SlotInfo>()> list_slots);
+
+	/**
+	 * Move the camera to an entity and select it (XR fork, orders bar). Safe
+	 * to call from any thread; the position is looked up in the simulation
+	 * thread and applied in the next frame.
+	 */
+	void focus_entity(gamestate::entity_id_t id);
+
+	/**
+	 * Camera target from focus_entity() (any thread).
+	 */
+	void request_focus(double ne, double se, gamestate::entity_id_t id);
 
 	/**
 	 * Set the game simulation controlled by this presenter.
@@ -383,6 +405,25 @@ protected:
 	std::function<void(const gamestate::MapSettings &)> ui_restart;
 	std::function<void()> ui_quit;
 	std::shared_ptr<gamestate::MapSettings> ui_map;
+	std::function<bool(int)> ui_save_slot;
+	std::function<std::string(int)> ui_load_slot;
+	std::function<std::vector<gamestate::save::SlotInfo>()> ui_list_slots;
+
+	/**
+	 * Pending camera target of focus_entity() (XR fork).
+	 */
+	struct FocusRequest {
+		double ne = 0.0;
+		double se = 0.0;
+		gamestate::entity_id_t id = 0;
+	};
+	std::mutex focus_mutex;
+	std::optional<FocusRequest> focus_request;
+
+	/**
+	 * Apply a pending focus request (presenter thread, once per frame).
+	 */
+	void apply_focus();
 	std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now();
 
 	/**

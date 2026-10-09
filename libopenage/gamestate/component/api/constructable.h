@@ -39,6 +39,9 @@ public:
 	/// make this a foundation (progress 0) with a build time
 	void start_foundation(double build_time);
 
+	/// set the progress of a foundation (XR fork, loading a save game), clamped to 0..1
+	void set_progress(double progress);
+
 	/**
 	 * Add the work of one builder.
 	 *

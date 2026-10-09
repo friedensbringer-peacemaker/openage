@@ -87,6 +87,21 @@ void Clock::set_speed(speed_t speed) {
 	log::log(MSG(info) << "Clock speed set to " << this->speed);
 }
 
+void Clock::set_time(const time::time_t &time) {
+	if (this->state == ClockState::RUNNING) {
+		this->update_time();
+	}
+
+	std::unique_lock lock{this->mutex};
+	// sim_time is stored in milliseconds; the world render stage animates with the
+	// real time of the simulation, so it continues from the same value
+	this->sim_time = time * 1000;
+	this->sim_real_time = this->sim_time;
+	this->last_check = simclock_t::now();
+
+	log::log(MSG(info) << "Clock set to " << this->sim_time << "ms (simulated)");
+}
+
 void Clock::start() {
 	std::unique_lock lock{this->mutex};
 

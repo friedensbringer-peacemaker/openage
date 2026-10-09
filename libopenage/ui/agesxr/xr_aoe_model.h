@@ -18,12 +18,15 @@ namespace agesxr {
 // Feste Befehle des Rasters neben den Produktions-Codes der Engine (101–106 Ausbilden, 201–207 Bauen).
 constexpr int kAoeCmdCancelTraining = 900;   // = kHudCmdCancelTraining (hud_feed.h): letzten Auftrag abbrechen
 constexpr int kAoeCmdCancelPlacement = 901;  // = kHudCmdCancelPlacement: Bauplatz-Modus verlassen
-constexpr int kAoeCmdAttack = 910;           // Zeile 3: Angriff (S3, bis dahin gesperrt)
-constexpr int kAoeCmdHalt = 911;             // Halt (S3)
-constexpr int kAoeCmdGarrison = 912;         // Garnison (S3)
-constexpr int kAoeCmdUnload = 913;           // Alle ausladen (S3)
-constexpr int kAoeCmdBack = 920;             // Zurück aus einem Untermenü (Feld 4,2)
-// Warteschlange: Klick auf Feld i = Auftrag i abbrechen (kAoeCmdQueueBase + i)
+// Warteschlange: Klick auf Feld i = Auftrag i abbrechen (= kHudCmdCancelQueue0 + i aus hud_feed.h, 0.6.0-xr.0.11)
+constexpr int kAoeCmdCancelQueue0 = 910;
+constexpr int kAoeQueueCancelMax = 5;
+constexpr int kAoeCmdAttack = 930;           // Zeile 3: Angriff (S3, bis dahin gesperrt)
+constexpr int kAoeCmdHalt = 931;             // Halt (S3)
+constexpr int kAoeCmdGarrison = 932;         // Garnison (S3)
+constexpr int kAoeCmdUnload = 933;           // Alle ausladen (S3)
+constexpr int kAoeCmdBack = 940;             // Zurück aus einem Untermenü (Feld 4,2)
+// Rückkanal-IDs (UiFeedback) der Warteschlangenfelder
 constexpr int kAoeCmdQueueBase = 1000;
 
 constexpr int kAoeGridCells = 15;
@@ -61,6 +64,37 @@ struct AoeSlot {
     bool operator==(const AoeSlot& o) const { return label == o.label && icon == o.icon; }
     bool operator!=(const AoeSlot& o) const { return !(*this == o); }
 };
+
+// Bestellung (0.6.0-xr.0.11, prod::Order): laufende Ausbildung bzw. Bau eines eigenen Gebäudes.
+struct AoeOrder {
+    uint64_t entity = 0;          // Gebäude (Klick: Kamera dorthin, auswählen)
+    HudIcon icon = HudIcon::None;
+    std::string label;            // „Dorfbewohner“, bei Bau „Haus“
+    std::string building;         // „Dorfzentrum“ (leer bei Bau)
+    int count = 1;                // Aufträge dieser Art in der Warteschlange
+    float remaining = -1.0f;      // Sekunden bis fertig, < 0 = unbekannt
+    float progress = 0.0f;        // 0 … 1
+    bool construction = false;
+    bool operator==(const AoeOrder& o) const {
+        return entity == o.entity && icon == o.icon && label == o.label && building == o.building && count == o.count &&
+               remaining == o.remaining && progress == o.progress && construction == o.construction;
+    }
+    bool operator!=(const AoeOrder& o) const { return !(*this == o); }
+};
+constexpr int kAoeOrdersShown = 12;
+
+// Spielstand-Platz (0.6.0-xr.0.11, gamestate::save::SlotInfo).
+struct AoeSaveSlot {
+    int slot = 0;                 // 1 … 5, Schnell, 0 = Automatisch
+    std::string label;            // „Slot 2: Zufallskarte #3 · 12:34 · 2026-10-08 19:30“, „Slot 2: leer“
+    bool exists = false;
+    bool writable = true;         // Automatisch: nur laden
+    bool operator==(const AoeSaveSlot& o) const {
+        return slot == o.slot && label == o.label && exists == o.exists && writable == o.writable;
+    }
+    bool operator!=(const AoeSaveSlot& o) const { return !(*this == o); }
+};
+constexpr int kAoeSlotsMax = 7;
 
 struct AoeSelection {
     int count = 0;                 // 0 = nichts gewählt
@@ -108,10 +142,12 @@ struct AoeMessage {
 
 // Spielmenü (Esc/F10/Y/Knopf „Menü“, Skizze 3) mit Unterseiten.
 struct AoeMenuModel {
-    enum Page { kMain = 0, kSettings, kNewMap, kPageCount };
+    enum Page { kMain = 0, kSettings, kNewMap, kSave, kLoad, kPageCount };
     bool open = false;
     int page = kMain;
     bool confirmSurrender = false;  // „Partie aufgeben“ scharf (erster Klick)
+    int confirmSlot = -1;           // Slot-Seite: Zeile scharf („Überschreiben?“ / „Spiel verwerfen?“), −1 = keine
+    std::vector<AoeSaveSlot> slots; // Spielstände (Seiten kSave/kLoad)
     double armedAt = 0.0;           // Zeit des Scharfschaltens (Frist kConfirmSeconds)
     // Einstellungen
     int speed = 1;                  // kGameSpeedLabels
@@ -126,7 +162,8 @@ struct AoeMenuModel {
     bool quest = false;             // Hinweis „App beenden: VR-Menü“ nur auf der Quest
     std::string mapInfo;            // „Karte #17 · Grasland 64 × 64 · 12:34 · Spiel angehalten“
     bool operator==(const AoeMenuModel& o) const {
-        return open == o.open && page == o.page && confirmSurrender == o.confirmSurrender && speed == o.speed &&
+        return open == o.open && page == o.page && confirmSurrender == o.confirmSurrender &&
+               confirmSlot == o.confirmSlot && slots == o.slots && speed == o.speed &&
                labels == o.labels && hotkeys == o.hotkeys && messages == o.messages && biome == o.biome &&
                size == o.size && opponent == o.opponent && seed == o.seed && saveAvailable == o.saveAvailable &&
                loadAvailable == o.loadAvailable && quest == o.quest && mapInfo == o.mapInfo;
@@ -151,6 +188,7 @@ struct AoeModel {
     AoeSelection selection;
     AoeMinimap minimap;
     std::vector<AoeMessage> messages;       // älteste zuerst, höchstens kAoeMessagesMax
+    std::vector<AoeOrder> orders;           // Bestellungen aller eigenen Gebäude (nach Restzeit), Auswahlfeld ohne Auswahl
 
     int shownSecond() const { return gameSeconds > 0.0 ? static_cast<int>(gameSeconds) : 0; }
     const AoeCommand& cell(int i) const {
@@ -163,7 +201,9 @@ struct AoeModel {
                paused == o.paused && age == o.age && ageIndex == o.ageIndex && plakette == o.plakette &&
                plaketteKind == o.plaketteKind && plaketteAt == o.plaketteAt;
     }
-    bool sameBar(const AoeModel& o) const { return grid == o.grid && selection == o.selection && minimap == o.minimap; }
+    bool sameBar(const AoeModel& o) const {
+        return grid == o.grid && selection == o.selection && minimap == o.minimap && orders == o.orders;
+    }
     bool sameMessages(const AoeModel& o) const { return messages == o.messages; }
 };
 

@@ -11,6 +11,8 @@
 #include "gamestate/combat/combat_state.h"
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
+#include "gamestate/production.h"
+#include "gamestate/save_game.h"
 #include "gamestate/simulation.h"
 #include "input/controller/game/controller.h"
 #include "presenter/presenter.h"
@@ -51,6 +53,10 @@ Engine::Engine(mode mode,
 	this->stop_simulation = this->simulation;
 	this->stop_time_loop = this->time_loop;
 	this->production = this->simulation->get_production();
+	// XR fork (save games)
+	this->map_settings = map_settings;
+	this->map_settings.load_file.clear();
+	this->save_dir = window_settings.save_dir;
 
 	// presenter (optional)
 	if (this->run_mode == mode::FULL) {
@@ -64,7 +70,13 @@ Engine::Engine(mode mode,
 			[this]() { return this->query_hud(0); },
 			[this](const gamestate::MapSettings &settings) { this->request_restart(settings); },
 			[this]() { this->stop(); },
-			map_settings);
+			this->map_settings);
+		// XR fork (save games): slots of the game menu
+		this->presenter->set_ui_save_hooks(
+			[this](int slot) { return this->save_slot(slot); },
+			[this](int slot) { return this->load_slot(slot); },
+			[this]() { return this->list_save_slots(); });
+		this->focus_presenter = this->presenter;
 	}
 
 	// spawn thread to run time loop
@@ -245,6 +257,129 @@ std::optional<gamestate::MapSettings> Engine::take_restart() {
 	auto request = this->restart_request;
 	this->restart_request.reset();
 	return request;
+}
+
+// ---- save games (XR fork) ----
+
+const gamestate::MapSettings &Engine::get_map_settings() const {
+	return this->map_settings;
+}
+
+bool Engine::post(gamestate::GameSimulation::Job job) {
+	auto simulation = this->stop_simulation.lock();
+	if (not simulation) {
+		return false;
+	}
+	simulation->post(std::move(job));
+	return true;
+}
+
+bool Engine::save_file(const std::string &file,
+                       const std::string &title,
+                       std::function<void(bool, const std::string &)> done) {
+	auto simulation = this->stop_simulation.lock();
+	if (not simulation) {
+		if (done) {
+			done(false, "Kein Spiel");
+		}
+		return false;
+	}
+	const gamestate::MapSettings map = this->map_settings;
+	simulation->post([file, title, done, map](const std::shared_ptr<gamestate::Game> &game, const time::time_t &time) {
+		if (not game) {
+			if (done) {
+				done(false, "Kein Spiel");
+			}
+			return;
+		}
+		auto data = gamestate::save::capture(game->get_state(), map, game->get_generated_entity_range(), time, title);
+		std::string error;
+		const bool ok = gamestate::save::write_text(file, gamestate::save::serialize(data), error);
+		if (ok) {
+			log::log(INFO << "Save: written " << file << " (" << data.entities.size() << " entities, t="
+			              << data.game_time << " s)");
+		}
+		else {
+			log::log(ERR << "Save: " << error);
+		}
+		if (done) {
+			done(ok, ok ? file : error);
+		}
+	});
+	return true;
+}
+
+bool Engine::save_slot(int slot) {
+	auto simulation = this->stop_simulation.lock();
+	if (not simulation or this->save_dir.empty() or not gamestate::save::slot_valid(slot)) {
+		log::log(WARN << "Save: no save directory or no game (slot " << slot << ")");
+		return false;
+	}
+	const gamestate::MapSettings map = this->map_settings;
+	const std::string dir = this->save_dir;
+	auto production = this->production;
+	simulation->post([slot, dir, map, production](const std::shared_ptr<gamestate::Game> &game, const time::time_t &time) {
+		if (not game) {
+			return;
+		}
+		const bool autosave = slot == gamestate::save::AUTOSAVE_SLOT;
+		const std::string title = (autosave ? "Automatisch: " : "Slot " + std::to_string(slot) + ": ")
+		                          + gamestate::save::map_text(map);
+		auto data = gamestate::save::capture(game->get_state(), map, game->get_generated_entity_range(), time, title);
+		std::string error;
+		if (gamestate::save::write_slot(dir, slot, data, error)) {
+			log::log(INFO << "Save: slot " << slot << " written (" << gamestate::save::slot_file(dir, slot).string()
+			              << ", " << data.entities.size() << " entities, t=" << data.game_time << " s)");
+			if (production) {
+				production->notify(autosave ? "Automatisch gespeichert" : "Gespeichert: Slot " + std::to_string(slot),
+				                   gamestate::prod::status_t::good);
+			}
+		}
+		else {
+			log::log(ERR << "Save: slot " << slot << ": " << error);
+			if (production) {
+				production->notify("Speichern fehlgeschlagen: " + error, gamestate::prod::status_t::warn);
+			}
+		}
+	});
+	return true;
+}
+
+std::string Engine::load_file(const std::string &file) {
+	gamestate::save::SaveData data;
+	std::string error;
+	if (not gamestate::save::read_save(file, data, error)) {
+		log::log(WARN << "Load: " << file << ": " << error);
+		if (this->production) {
+			this->production->notify("Laden fehlgeschlagen: " + error, gamestate::prod::status_t::warn);
+		}
+		return error;
+	}
+	gamestate::MapSettings settings = data.map;
+	settings.load_file = file;
+	log::log(INFO << "Load: " << file << " (" << data.title << ", t=" << data.game_time << " s): restart requested");
+	this->request_restart(settings);
+	return {};
+}
+
+std::string Engine::load_slot(int slot) {
+	if (this->save_dir.empty() or not gamestate::save::slot_valid(slot)) {
+		return "Kein Speicherordner";
+	}
+	return this->load_file(gamestate::save::slot_file(this->save_dir, slot).string());
+}
+
+std::vector<gamestate::save::SlotInfo> Engine::list_save_slots() const {
+	if (this->save_dir.empty()) {
+		return {};
+	}
+	return gamestate::save::list_slots(this->save_dir);
+}
+
+void Engine::focus_entity(uint64_t id) {
+	if (auto presenter = this->focus_presenter.lock()) {
+		presenter->focus_entity(id);
+	}
 }
 
 void Engine::loop() {

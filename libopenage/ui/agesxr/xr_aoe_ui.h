@@ -47,8 +47,11 @@ public:
         kNewMap,           // „Karte starten“ mit biome/size/opponent/seed
         kSurrenderArmed,   // erster Klick auf „Partie aufgeben“ (Doppelpuls)
         kSurrender,        // zweiter Klick innerhalb der Frist
-        kSave,             // „Speichern“ (nur mit menu().saveAvailable)
-        kLoad,             // „Laden“ (nur mit menu().loadAvailable)
+        kSlotsShown,       // Seite Speichern/Laden geöffnet: Aufrufer füllt menu().slots
+        kSlotArmed,        // erster Klick auf einen belegten Slot (Doppelpuls)
+        kSave,             // in Slot id speichern (Menü schließt)
+        kLoad,             // Slot id laden (Menü schließt)
+        kFocusOrder,       // index = Bestellung (Kamera zum Gebäude, auswählen)
         kBoardNewMap,      // Sieg-Tafel „Neue Karte ›“ → Spielmenü-Seite Neue Karte
         kBoardClosed,      // Sieg-Tafel „Schließen“
         kMinimapJump,      // (S3) Klick auf die Raute: fx/fy = Kartenanteile
@@ -61,7 +64,7 @@ public:
     };
 
     enum class Hit { kNone, kGrid, kQueue, kGarrison, kMulti, kMenuBtn, kMinimap, kCtxItem, kDlgRow, kDlgArrowL,
-                     kDlgArrowR, kDlgLoad, kBoardBtn };
+                     kDlgArrowR, kDlgLoad, kBoardBtn, kOrder };
     struct HitState {
         Hit kind = Hit::kNone;
         int index = -1;
@@ -155,9 +158,12 @@ public:
     Rect queueRect(int i) const;        // 0 … kAoeQueueShown − 1
     Rect garrisonRect(int i) const;     // 0 … kGarrisonVisible − 1
     Rect multiRect(int i) const;        // 0 … kAoeMultiShown − 1
+    Rect orderRect(int i) const;        // 0 … kAoeOrdersShown − 1 (Bestellungen, nichts gewählt)
     // Trefferzone eines Feldes (Hit::kQueue/kGarrison/kMulti): Feld + halbe Lücke, aus Basis-Kanten gerundet, damit
     // Nachbarn lückenlos und ohne Überlappung aneinanderstoßen.
     Rect slotHitRect(Hit kind, int i) const;
+    bool showsOrders() const { return mModel.selection.count <= 0 && !mModel.orders.empty(); }
+    static bool slotPage(int page) { return page == AoeMenuModel::kSave || page == AoeMenuModel::kLoad; }
     Rect messageRect(int i) const;      // i = 0 unterste (neueste) Zeile
     Rect contextRect() const;
     Rect contextItemRect(int index) const;

@@ -23,6 +23,8 @@ constexpr uint32_t kDim = rgba(10, 10, 18, 110);  // Abdunkeln hinter Spielmenü
 const char* rowLabel(int row) {
     switch (row) {
     case GameUi::kRowResume: return "Weiter";
+    case GameUi::kRowSave: return "Speichern …";
+    case GameUi::kRowLoad: return "Laden …";
     case GameUi::kRowPause: return "Pause";
     case GameUi::kRowSpeed: return "Spieltempo";
     case GameUi::kRowBiome: return "Landschaft";
@@ -41,7 +43,8 @@ bool isValueRow(int row) {
 }
 
 bool isButtonRow(int row) {
-    return row == GameUi::kRowResume || row == GameUi::kRowNewMap || row == GameUi::kRowQuit;
+    return row == GameUi::kRowResume || row == GameUi::kRowSave || row == GameUi::kRowLoad ||
+           row == GameUi::kRowNewMap || row == GameUi::kRowQuit;
 }
 
 int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -157,7 +160,19 @@ GameUi::Rect GameUi::drawnRect() const {
 
 // ---- Eingabe ------------------------------------------------------------------------------------
 
+bool GameUi::slotEnabled(int index) const {
+    if (index < 0 || index >= static_cast<int>(mMenu.slots.size())) return false;
+    const GameUiSlot& s = mMenu.slots[static_cast<size_t>(index)];
+    return mMenu.view == GameMenuModel::kViewSave ? s.slot != 0 : s.exists;
+}
+
 GameUi::HoverState GameUi::hitTest(int x, int y) const {
+    if (mMenu.open && mMenu.view != GameMenuModel::kViewMain) {
+        for (int i = 0; i < static_cast<int>(mMenu.slots.size()); ++i)
+            if (slotEnabled(i) && menuRowRect(i).contains(x, y)) return {Hover::kSlotRow, i};
+        if (menuRowRect(slotBackRow()).contains(x, y)) return {Hover::kSlotBack, slotBackRow()};
+        return {};
+    }
     if (mMenu.open) {
         if (mMenu.confirmQuit) {
             if (menuConfirmRect(true).contains(x, y)) return {Hover::kConfirmYes, kRowQuit};
@@ -189,6 +204,24 @@ GameUi::Result GameUi::onClick(int x, int y) {
     if (mMenu.open) {
         const HoverState h = mHover;
         switch (h.kind) {
+        case Hover::kSlotRow: {
+            const GameUiSlot& s = mMenu.slots[static_cast<size_t>(h.index)];
+            const bool save = mMenu.view == GameMenuModel::kViewSave;
+            // belegter Slot (Speichern) bzw. jeder Slot (Laden): erst Rückfrage, zweiter Klick führt aus
+            if ((!save || s.exists) && mMenu.confirmSlot != s.slot) {
+                mMenu.confirmSlot = s.slot;
+                return r;
+            }
+            r.action = save ? Action::kSave : Action::kLoad;
+            r.id = s.slot;
+            mMenu.view = GameMenuModel::kViewMain;
+            mMenu.confirmSlot = -1;
+            return r;
+        }
+        case Hover::kSlotBack:
+            mMenu.view = GameMenuModel::kViewMain;
+            mMenu.confirmSlot = -1;
+            return r;
         case Hover::kConfirmYes:
             r.action = Action::kQuit;
             return r;
@@ -218,6 +251,13 @@ GameUi::Result GameUi::onClick(int x, int y) {
                 mMenu.confirmQuit = false;
                 r.action = Action::kResume;
                 break;
+            case kRowSave:
+            case kRowLoad:
+                mMenu.view = h.index == kRowSave ? GameMenuModel::kViewSave : GameMenuModel::kViewLoad;
+                mMenu.confirmSlot = -1;
+                mMenu.confirmQuit = false;
+                r.action = Action::kShowSlots;
+                break;
             case kRowPause:
                 mMenu.paused = !mMenu.paused;
                 r.action = Action::kTogglePause;
@@ -232,8 +272,11 @@ GameUi::Result GameUi::onClick(int x, int y) {
             }
             return r;
         default:
-            // Klick neben die Tafel: Rückfrage zurücknehmen, Menü bleibt offen
-            if (!menuRect().contains(x, y)) mMenu.confirmQuit = false;
+            // Klick neben die Tafel: Rückfragen zurücknehmen, Menü bleibt offen
+            if (!menuRect().contains(x, y)) {
+                mMenu.confirmQuit = false;
+                mMenu.confirmSlot = -1;
+            }
             return r;
         }
     }
@@ -327,9 +370,58 @@ void GameUi::drawArrow(const Rect& r, bool right, bool hot) {
     mCanvas->fillSdf(r.x0, r.y0, r.x1, r.y1, kText, [&](float x, float y) { return sdf::triangle(x, y, v); });
 }
 
+void GameUi::drawSlots() {
+    const Rect r = menuRect();
+    const float s = scale();
+    const int rad = px(28.0f);
+    const bool save = mMenu.view == GameMenuModel::kViewSave;
+    mCanvas->roundRect(r.x0, r.y0, r.x1, r.y1, rad, kStoneRim);
+    mCanvas->roundRectV(r.x0 + 4, r.y0 + 4, r.x1 - 4, r.y1 - 4, rad - 4, kStoneTop, kStoneBottom);
+    const int ty = r.y0 + px(kMenuPad);
+    mCanvas->woodSign(r.x0 + px(kMenuPad), ty, r.x1 - px(kMenuPad), ty + px(kMenuTitle) - px(8.0f), px(14.0f), true);
+    const char* title = save ? "Spiel speichern" : "Spiel laden";
+    const float titlePx = kTitlePx * s;
+    mCanvas->textShadow(title, (r.x0 + r.x1 - mCanvas->textWidth(title, titlePx, true)) / 2, ty + px(12.0f), titlePx, kText, true);
+    const char* info = save ? "Slot wählen – belegter Slot fragt vor dem Überschreiben" : "Slot wählen – das laufende Spiel wird verworfen";
+    const float ipx = kSmallPx * s;
+    mCanvas->textShadow(info, (r.x0 + r.x1 - mCanvas->textWidth(info, ipx, false)) / 2, ty + px(kMenuTitle) + px(4.0f), ipx,
+                        kTextDim, false);
+    const float textPx = kTextPx * s * 0.86f;
+    for (int i = 0; i <= slotBackRow(); ++i) {
+        const Rect rr = menuRowRect(i);
+        if (rr.empty()) continue;
+        const int textY = rr.y0 + (rr.y1 - rr.y0 - static_cast<int>(textPx)) / 2;
+        if (i == slotBackRow()) {
+            const bool hot = mHover.kind == Hover::kSlotBack;
+            mCanvas->slab(rr.x0, rr.y0, rr.x1, rr.y1, px(12.0f), hot ? kLeafTop : kSlabTop, hot ? kLeafBottom : kSlabBottom);
+            const char* back = "‹ Zurück";
+            mCanvas->textShadow(back, (rr.x0 + rr.x1 - mCanvas->textWidth(back, textPx, true)) / 2, textY, textPx, kText, true);
+            continue;
+        }
+        const GameUiSlot& slot = mMenu.slots[static_cast<size_t>(i)];
+        const bool enabled = slotEnabled(i);
+        const bool hot = mHover.kind == Hover::kSlotRow && mHover.index == i;
+        const bool confirm = mMenu.confirmSlot == slot.slot;
+        if (confirm) mCanvas->slab(rr.x0, rr.y0, rr.x1, rr.y1, px(12.0f), kWarnTop, kWarnBottom);
+        else if (!enabled) mCanvas->roundRect(rr.x0, rr.y0, rr.x1, rr.y1, px(12.0f), kStoneDeep);
+        else mCanvas->slab(rr.x0, rr.y0, rr.x1, rr.y1, px(12.0f), hot ? kSlabHoverTop : kSlabTop, hot ? kSlabHoverBottom : kSlabBottom);
+        std::string text = confirm ? (save ? "Überschreiben? Nochmal klicken" : "Laufendes Spiel verwerfen? Nochmal klicken")
+                                   : slot.label;
+        float tpx = textPx;
+        const int maxW = rr.x1 - rr.x0 - px(32.0f);
+        while (tpx > 12.0f && mCanvas->textWidth(text.c_str(), tpx, false) > maxW) tpx -= 1.0f;
+        mCanvas->textShadow(text.c_str(), rr.x0 + px(16.0f), rr.y0 + (rr.y1 - rr.y0 - static_cast<int>(tpx)) / 2, tpx,
+                            !enabled ? kTextDim : hot && !confirm ? kLeaf : kText, confirm);
+    }
+}
+
 void GameUi::drawMenu() {
     const Rect r = menuRect();
     if (r.empty()) return;
+    if (mMenu.view != GameMenuModel::kViewMain) {
+        drawSlots();
+        return;
+    }
     const float s = scale();
     const int rad = px(28.0f);
     mCanvas->roundRect(r.x0, r.y0, r.x1, r.y1, rad, kStoneRim);

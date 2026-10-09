@@ -354,6 +354,39 @@ public:
 		return true;
 	}
 
+	/// add an item as it was saved (XR fork, save games): keeps its start time
+	void restore(const Item &item) {
+		if (this->items.size() < MAX_QUEUE) {
+			this->items.push_back(item);
+		}
+	}
+
+	/// remove the item at an index (its cost is refunded by the caller); the next
+	/// item starts from now if the first one is removed
+	std::optional<Item> cancel_at(size_t index) {
+		if (index >= this->items.size()) {
+			return std::nullopt;
+		}
+		auto item = this->items[index];
+		this->items.erase(this->items.begin() + static_cast<std::ptrdiff_t>(index));
+		if (index == 0 and not this->items.empty()) {
+			this->items.front().started = -1.0;
+		}
+		if (this->items.empty()) {
+			this->waiting = false;
+		}
+		return item;
+	}
+
+	/// seconds left for the first item (negative while it waits)
+	double remaining(double now) const {
+		if (this->items.empty() or this->items.front().started < 0.0) {
+			return -1.0;
+		}
+		const auto &head = this->items.front();
+		return std::max(0.0, head.started + head.time - now);
+	}
+
 	/// remove the last item (its cost is refunded by the caller)
 	std::optional<Item> cancel_last() {
 		if (this->items.empty()) {

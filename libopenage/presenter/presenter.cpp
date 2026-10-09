@@ -68,6 +68,9 @@
 #include "time/clock.h"
 #include "time/time_loop.h"
 #include "ui/aoe_ui_controller.h"
+#include "gamestate/component/internal/position.h"
+#include "gamestate/game_entity.h"
+#include "gamestate/production.h"
 #include "ui/game_ui_controller.h"
 #include "util/path.h"
 
@@ -110,6 +113,61 @@ void Presenter::set_ui_hooks(std::function<engine::HudInfo()> query_hud,
 	this->ui_map = std::make_shared<gamestate::MapSettings>(map);
 }
 
+void Presenter::set_ui_save_hooks(std::function<bool(int)> save_slot,
+                                  std::function<std::string(int)> load_slot,
+                                  std::function<std::vector<gamestate::save::SlotInfo>()> list_slots) {
+	this->ui_save_slot = std::move(save_slot);
+	this->ui_load_slot = std::move(load_slot);
+	this->ui_list_slots = std::move(list_slots);
+}
+
+void Presenter::request_focus(double ne, double se, gamestate::entity_id_t id) {
+	std::lock_guard<std::mutex> lock{this->focus_mutex};
+	this->focus_request = FocusRequest{ne, se, id};
+}
+
+void Presenter::focus_entity(gamestate::entity_id_t id) {
+	if (not this->simulation) {
+		return;
+	}
+	this->simulation->post([this, id](const std::shared_ptr<gamestate::Game> &game, const time::time_t &time) {
+		if (not game) {
+			return;
+		}
+		const auto &entities = game->get_state()->get_game_entities();
+		auto it = entities.find(id);
+		if (it == entities.end() or not it->second->has_component(gamestate::component::component_t::POSITION)) {
+			log::log(INFO << "Presenter: focus entity " << id << " is gone");
+			return;
+		}
+		auto position = std::dynamic_pointer_cast<gamestate::component::Position>(
+			it->second->get_component(gamestate::component::component_t::POSITION));
+		auto pos = position->get_positions().get(time);
+		this->request_focus(pos.ne.to_double(), pos.se.to_double(), id);
+	});
+}
+
+void Presenter::apply_focus() {
+	std::optional<FocusRequest> request;
+	{
+		std::lock_guard<std::mutex> lock{this->focus_mutex};
+		request.swap(this->focus_request);
+	}
+	if (not request or not this->camera) {
+		return;
+	}
+	this->camera->look_at_coord(coord::scene3{request->ne, request->se, 0});
+	auto controller = this->controller_slot->get();
+	if (controller) {
+		controller->set_selected({request->id});
+		if (this->simulation) {
+			this->simulation->get_production()->set_selection({request->id});
+		}
+	}
+	log::log(INFO << "Presenter: focus entity " << request->id << " at tile (" << request->ne << ", " << request->se
+	              << "), selected");
+}
+
 double Presenter::now() const {
 	return std::chrono::duration<double>(std::chrono::steady_clock::now() - this->start_time).count();
 }
@@ -127,6 +185,10 @@ void Presenter::init_ui(const renderer::window_settings &window_settings) {
 	};
 	hooks.restart = this->ui_restart;
 	hooks.quit = this->ui_quit;
+	hooks.save_slot = this->ui_save_slot;
+	hooks.load_slot = this->ui_load_slot;
+	hooks.list_slots = this->ui_list_slots;
+	hooks.focus_entity = [this](uint64_t id) { this->focus_entity(static_cast<gamestate::entity_id_t>(id)); };
 	if (not hooks.quit) {
 		hooks.quit = [this]() { this->stop(); };
 	}
@@ -780,6 +842,24 @@ void Presenter::update_selection_markers() {
 	}
 	this->hud_renderer->set_selection_markers(std::move(markers));
 
+	// rally point flag of the selected building (XR fork)
+	std::optional<Eigen::Vector2f> flag;
+	if (not selected.empty() and this->simulation) {
+		auto snapshot = this->simulation->get_production()->snapshot();
+		if (snapshot.queue and snapshot.queue->rally
+		    and std::find(selected.begin(), selected.end(), snapshot.queue->building) != selected.end()) {
+			const auto &r = *snapshot.queue->rally;
+			coord::phys3 pos{coord::phys_t{r[0]}, coord::phys_t{r[1]}, coord::phys_t{r[2]}};
+			auto w = pos.to_scene3().to_world_space();
+			Eigen::Matrix4f m = this->camera->get_projection_matrix() * this->camera->get_view_matrix();
+			Eigen::Vector4f clip = m * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+			if (clip.w() != 0.0f) {
+				flag = Eigen::Vector2f{clip.x() / clip.w(), clip.y() / clip.w()};
+			}
+		}
+	}
+	this->hud_renderer->set_rally_flag(flag);
+
 	// ground markers (ground pass, under the sprites)
 	const Eigen::Matrix4f view_proj = this->camera->get_projection_matrix() * this->camera->get_view_matrix();
 	const float px_x = 2.0f / static_cast<float>(std::max<size_t>(viewport[0], 1));
@@ -919,6 +999,7 @@ void Presenter::apply_map_view() {
 void Presenter::render() {
 	// initial camera for the generated map first, then camera input of an embedder
 	this->apply_map_view();
+	this->apply_focus();
 	this->apply_sink_camera();
 	this->apply_sink_background();
 

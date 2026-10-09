@@ -36,6 +36,10 @@ bool Constructable::add_work(double seconds) {
 	return this->is_complete();
 }
 
+void Constructable::set_progress(double progress) {
+	this->progress = progress < 0.0 ? 0.0 : progress > 1.0 ? 1.0 : progress;
+}
+
 double Constructable::get_build_time() const {
 	return this->build_time;
 }

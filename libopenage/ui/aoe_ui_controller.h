@@ -9,6 +9,7 @@
 
 #include "engine/hud_info.h"
 #include "gamestate/map_settings.h"
+#include "gamestate/save_format.h"
 #include "ui/agesxr/aoe_feed.h"
 #include "ui/agesxr/xr_aoe_ui.h"
 #include "ui/game_ui_controller.h"
@@ -26,9 +27,7 @@ struct AoeHooks {
 	std::function<bool(float &cx, float &cy, float &w, float &h)> camera_view{};
 	/// select exactly these entities (portrait of a multiple selection)
 	std::function<void(const std::vector<uint64_t> &ids)> select{};
-	/// save / load the game (game menu); null = not available yet
-	std::function<bool()> save{};
-	std::function<bool()> load{};
+	// save games and the orders use UiHooks (save_slot, load_slot, list_slots, focus_entity)
 };
 
 /**
@@ -121,6 +120,9 @@ private:
 	std::string map_info() const;
 	gamestate::MapSettings menu_map_settings() const;
 	void show_board(bool good, const std::string &headline, const std::vector<std::string> &lines);
+	void refresh_slots();
+	void save_slot(int slot, const char *why);
+	void load_slot(int slot, const char *why);
 	void run_demo(double now);
 
 	gamestate::MapSettings map;
@@ -137,6 +139,8 @@ private:
 	bool paused_sent = false;
 	bool menu_pause = false;
 	bool match_over = false;
+	// autosave every AUTOSAVE_SECONDS of game time (as the classic interface)
+	gamestate::save::AutosaveTimer autosave{};
 	// right button hold
 	bool right_held = false;
 	bool right_context = false;

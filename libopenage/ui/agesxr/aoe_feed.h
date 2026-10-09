@@ -68,6 +68,23 @@ public:
         aoeFixedRow(m, game && p.valid && p.queue && !p.queueItems.empty(), game && p.valid && !p.placement.empty());
 
         m.selection = game ? selectionOf(s) : AoeSelection{};
+        // Bestellungen aller eigenen Gebäude (0.6.0-xr.0.11), Restzeit auf ganze Sekunden (weniger Neuzeichnen)
+        m.orders.clear();
+        if (game && p.valid) {
+            for (const HudProdOrder& o : p.orders) {
+                AoeOrder a;
+                a.entity = o.entity;
+                a.icon = o.construction ? aoeIconForName(o.label, true, false, false, false) : aoeIconFor(0, o.icon);
+                a.label = o.label;
+                a.building = o.building;
+                a.count = o.count;
+                a.remaining = std::isfinite(o.remaining) && o.remaining >= 0.0 ? std::ceil(static_cast<float>(o.remaining)) : -1.0f;
+                a.progress = static_cast<float>(std::clamp(std::isfinite(o.progress) ? o.progress : 0.0, 0.0, 1.0));
+                a.progress = std::round(a.progress * 50.0f) / 50.0f;  // 2-%-Schritte
+                a.construction = o.construction;
+                m.orders.push_back(a);
+            }
+        }
 
         // Meldungen der Produktion: Plakette oben (8 s) + Zeile über der Leiste
         if (game && p.valid && p.statusSeq != mLastSeq) {
@@ -168,7 +185,12 @@ private:
             return sel;
         }
         if (p.valid && p.queue && !p.queueItems.empty()) {
-            for (const std::string& q : p.queueItems) sel.queue.push_back({q, aoeIconForName(q, false, false, false, false)});
+            for (size_t i = 0; i < p.queueItems.size(); ++i) {
+                // Symbol-Hinweis der Engine (0.6.0-xr.0.11), sonst nach dem Namen
+                const std::string& q = p.queueItems[i];
+                const bool hint = i < p.queueIcons.size() && !p.queueIcons[i].empty();
+                sel.queue.push_back({q, hint ? aoeIconFor(0, p.queueIcons[i]) : aoeIconForName(q, false, false, false, false)});
+            }
             sel.queueProgress = static_cast<float>(std::clamp(p.queueProgress, 0.0, 1.0));
             if (p.waitingForHousing) sel.detail = p.queueItems.front() + " – wartet auf ein Haus";
         } else if (p.valid && p.construction >= 0.0) {

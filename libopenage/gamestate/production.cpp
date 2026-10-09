@@ -26,6 +26,7 @@
 #include "gamestate/api/types.h"
 #include "gamestate/component/api/builder.h"
 #include "gamestate/component/api/constructable.h"
+#include "gamestate/component/api/harvestable.h"
 #include "gamestate/component/api/idle.h"
 #include "gamestate/component/api/live.h"
 #include "gamestate/component/api/move.h"
@@ -34,10 +35,12 @@
 #include "gamestate/component/internal/activity.h"
 #include "gamestate/component/internal/command_queue.h"
 #include "gamestate/component/internal/commands/build.h"
+#include "gamestate/component/internal/commands/gather.h"
 #include "gamestate/component/internal/commands/move.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
 #include "gamestate/component/types.h"
+#include "gamestate/econ.h"
 #include "gamestate/econ_math.h"
 #include "gamestate/entity_factory.h"
 #include "gamestate/game_entity.h"
@@ -416,7 +419,55 @@ std::shared_ptr<GameEntity> spawn_unit(const std::shared_ptr<GameState> &state,
 	if (production.rally_point and entity->has_component(component::component_t::MOVE)) {
 		auto queue = std::dynamic_pointer_cast<component::CommandQueue>(
 			entity->get_component(component::component_t::COMMANDQUEUE));
-		queue->add_command(time, std::make_shared<component::command::MoveCommand>(*production.rally_point));
+		using rally_t = ProductionComp::rally_t;
+		const auto kind = production.rally_target ? production.rally_target->kind : rally_t::GROUND;
+		auto target = production.rally_target ? find_entity(state, production.rally_target->entity) : nullptr;
+		bool done = false;
+		if (kind == rally_t::RESOURCE and entity->has_component(component::component_t::GATHER)) {
+			// the rally resource, or the next spot of its type near the rally point if it is empty
+			std::shared_ptr<GameEntity> spot = econ::can_gather_from(entity, target) ? target : nullptr;
+			if (spot == nullptr) {
+				double best = 16.0 * 16.0;
+				const auto &rally = *production.rally_point;
+				for (const auto &[id, candidate] : state->get_game_entities()) {
+					auto h = component_of<component::Harvestable>(candidate, component::component_t::HARVESTABLE);
+					if (h == nullptr or h->is_depleted() or h->get_resource() != production.rally_target->resource
+					    or not econ::can_gather_from(entity, candidate)) {
+						continue;
+					}
+					auto p = position_of(candidate, time);
+					double dn = p.ne.to_double() - rally.ne.to_double();
+					double ds = p.se.to_double() - rally.se.to_double();
+					if (dn * dn + ds * ds < best) {
+						best = dn * dn + ds * ds;
+						spot = candidate;
+					}
+				}
+			}
+			if (spot != nullptr) {
+				queue->add_command(time, std::make_shared<component::command::GatherCommand>(spot->get_id()));
+				log::log(INFO << "Production: new unit " << entity->get_id() << " gathers "
+				              << to_string(production.rally_target->resource) << " at entity " << spot->get_id()
+				              << " (rally point)");
+				done = true;
+			}
+		}
+		else if (kind == rally_t::ENEMY and target != nullptr and state->get_combat() != nullptr
+		         and state->get_combat()->order_attack(state, entity->get_id(), target->get_id(), time)) {
+			log::log(INFO << "Production: new unit " << entity->get_id() << " attacks entity " << target->get_id()
+			              << " (rally point)");
+			done = true;
+		}
+		else if (kind == rally_t::ENTITY and target != nullptr) {
+			// walk to the entity where it is now
+			queue->add_command(time, std::make_shared<component::command::MoveCommand>(position_of(target, time)));
+			log::log(INFO << "Production: new unit " << entity->get_id() << " walks to entity " << target->get_id()
+			              << " (rally point)");
+			done = true;
+		}
+		if (not done) {
+			queue->add_command(time, std::make_shared<component::command::MoveCommand>(*production.rally_point));
+		}
 	}
 	return entity;
 }
@@ -728,6 +779,22 @@ void Production::cancel_training() {
 	this->push(std::move(request));
 }
 
+void Production::cancel_training_at(size_t index) {
+	Request request;
+	request.kind = Request::kind_t::CANCEL_AT;
+	request.index = index;
+	this->push(std::move(request));
+}
+
+void Production::notify(const std::string &text, status_t kind) {
+	this->set_status(text, kind);
+}
+
+void Production::track_foundation(entity_id_t building) {
+	// simulation thread (save games are restored before the loop runs)
+	this->foundations.insert(building);
+}
+
 bool Production::start_placement(const std::string &id) {
 	std::lock_guard<std::mutex> lock{this->mutex};
 	std::vector<const Option *> buildings;
@@ -852,6 +919,55 @@ size_t queued_in(const std::shared_ptr<GameEntity> &building) {
 
 bool is_finished(const std::shared_ptr<GameEntity> &building) {
 	return is_complete(building);
+}
+
+bool set_rally_point(const std::shared_ptr<GameState> &state,
+                     const std::shared_ptr<GameEntity> &building,
+                     const coord::phys3 &ground,
+                     const std::shared_ptr<GameEntity> &target_entity,
+                     const time::time_t &time) {
+	auto production = component_of<ProductionComp>(building, component::component_t::PRODUCTION_QUEUE);
+	if (production == nullptr) {
+		return false;
+	}
+	using rally_t = ProductionComp::rally_t;
+	ProductionComp::RallyTarget rally;
+	coord::phys3 point = ground;
+	std::string what = "ground";
+	if (target_entity != nullptr and target_entity != building
+	    and target_entity->has_component(component::component_t::POSITION)) {
+		point = position_of(target_entity, time);
+		rally.entity = target_entity->get_id();
+		auto harvestable = component_of<component::Harvestable>(target_entity, component::component_t::HARVESTABLE);
+		const auto combat = state->get_combat();
+		const bool own = target_entity->has_component(component::component_t::OWNERSHIP)
+		                 and owner_of(target_entity, time) == owner_of(building, time);
+		if (harvestable != nullptr and not harvestable->is_depleted()) {
+			rally.kind = rally_t::RESOURCE;
+			rally.resource = harvestable->get_resource();
+			what = std::string{"resource "} + to_string(rally.resource);
+		}
+		else if (own) {
+			rally.kind = rally_t::ENTITY;
+			what = "own " + entity_name(target_entity);
+		}
+		else {
+			rally.kind = rally_t::ENEMY;
+			what = "enemy " + entity_name(target_entity);
+		}
+	}
+	production->rally_point = point;
+	if (rally.kind == rally_t::GROUND) {
+		production->rally_target.reset();
+	}
+	else {
+		production->rally_target = rally;
+	}
+	log::log(INFO << "Production: rally point set on " << what
+	              << (rally.kind == rally_t::GROUND ? std::string{} : " (entity " + std::to_string(rally.entity) + ")")
+	              << " at tile " << tile_str(point) << " for " << entity_name(building) << " (entity "
+	              << building->get_id() << ")");
+	return true;
 }
 // ---- end ai (XR fork)
 
@@ -1003,14 +1119,20 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			status(label_of(creatable->name) + " wird ausgebildet", status_t::info);
 		} break;
 
-		case Request::kind_t::CANCEL: {
+		case Request::kind_t::CANCEL:
+		case Request::kind_t::CANCEL_AT: {
 			bool done = false;
 			for (const auto &entity : own) {
 				auto production = component_of<ProductionComp>(entity, component::component_t::PRODUCTION_QUEUE);
 				if (production == nullptr or production->get_queue().size() == 0) {
 					continue;
 				}
-				auto item = production->get_queue().cancel_last();
+				auto item = request.kind == Request::kind_t::CANCEL_AT
+				                ? production->get_queue().cancel_at(request.index)
+				                : production->get_queue().cancel_last();
+				if (not item) {
+					continue;
+				}
 				auto owner = owner_of(entity, now);
 				auto &stock = state->get_player(owner)->get_resources();
 				for (size_t i = 0; i < RESOURCE_COUNT; ++i) {
@@ -1310,12 +1432,79 @@ void Production::update(const std::shared_ptr<GameState> &state,
 		queue.building = producer->get_id();
 		queue.label = label_of_entity(producer);
 		for (const auto &item : production->get_queue().get_items()) {
-			queue.items.push_back({item.name, label_of(item.name)});
+			const auto *entry = known(item.name);
+			queue.items.push_back({item.name, label_of(item.name), entry ? entry->icon : "sword"});
 		}
 		queue.progress = production->get_queue().progress(t);
 		queue.waiting_for_housing = production->get_queue().is_waiting();
+		if (production->rally_point) {
+			const auto &r = *production->rally_point;
+			queue.rally = std::array<double, 3>{r.ne.to_double(), r.se.to_double(), r.up.to_double()};
+			using rally_t = ProductionComp::rally_t;
+			const auto kind = production->rally_target ? production->rally_target->kind : rally_t::GROUND;
+			queue.rally_kind = kind == rally_t::RESOURCE ? "resource" : kind == rally_t::ENTITY ? "entity"
+			                 : kind == rally_t::ENEMY    ? "enemy"
+			                                             : "ground";
+		}
 		snap.queue = queue;
 	}
+
+	// orders (XR fork): every training queue and foundation of the player
+	for (const auto &[id, entity] : entities) {
+		if (not entity->has_component(component::component_t::OWNERSHIP) or owner_of(entity, now) != player_id
+		    or (state->get_combat() != nullptr and state->get_combat()->is_dead(id))) {
+			continue;
+		}
+		auto production = component_of<ProductionComp>(entity, component::component_t::PRODUCTION_QUEUE);
+		auto constructable = component_of<ConstructableComp>(entity, component::component_t::CONSTRUCTABLE);
+		if ((production == nullptr or production->get_queue().size() == 0 or not is_complete(entity))
+		    and (constructable == nullptr or constructable->is_complete())) {
+			continue;
+		}
+		auto pos = position_of(entity, now);
+		if (production != nullptr and production->get_queue().size() > 0 and is_complete(entity)) {
+			const auto &head = production->get_queue().get_items().front();
+			const auto *entry = known(head.name);
+			Order order;
+			order.building = id;
+			order.building_label = label_of_entity(entity);
+			order.label = label_of(head.name);
+			order.icon = entry ? entry->icon : "sword";
+			order.construction = false;
+			order.count = production->get_queue().size();
+			order.remaining = production->get_queue().remaining(t);
+			order.progress = production->get_queue().progress(t);
+			order.ne = pos.ne.to_double();
+			order.se = pos.se.to_double();
+			snap.orders.push_back(order);
+		}
+		if (constructable != nullptr and not constructable->is_complete()) {
+			const auto name = entity_name(entity);
+			const auto *entry = known(name);
+			Order order;
+			order.building = id;
+			order.building_label = label_of(name);
+			order.label = "Bau";
+			order.icon = entry ? entry->icon : "hammer";
+			order.construction = true;
+			order.count = 1;
+			order.progress = constructable->get_progress();
+			// one builder: the rest of the build time
+			order.remaining = std::max(0.0, (1.0 - order.progress) * constructable->get_build_time());
+			order.ne = pos.ne.to_double();
+			order.se = pos.se.to_double();
+			snap.orders.push_back(order);
+		}
+	}
+	std::stable_sort(snap.orders.begin(), snap.orders.end(), [](const Order &a, const Order &b) {
+		if (a.construction != b.construction) {
+			return not a.construction;
+		}
+		if ((a.remaining < 0.0) != (b.remaining < 0.0)) {
+			return a.remaining >= 0.0;
+		}
+		return a.remaining < b.remaining;
+	});
 
 	std::lock_guard<std::mutex> lock{this->mutex};
 	// the placement mode ends if the selection cannot build the building any more

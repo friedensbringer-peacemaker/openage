@@ -3,9 +3,13 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
+#include <mutex>
 #include <shared_mutex>
+#include <vector>
 
 #include "gamestate/map_settings.h"
+#include "time/time.h"
 #include "util/path.h"
 
 namespace openage {
@@ -144,6 +148,14 @@ public:
 	const std::shared_ptr<gamestate::prod::Production> get_production();
 
 	/**
+	 * Work for the simulation thread (XR fork): save games, lookups for the
+	 * presenter. Runs after the next simulation step with the game and the
+	 * current time. Safe to call from any thread.
+	 */
+	using Job = std::function<void(const std::shared_ptr<gamestate::Game> &, const time::time_t &)>;
+	void post(Job job);
+
+	/**
 	 * Attach a renderer to the simulation.
 	 *
 	 * @param factory Factory for creating render entities.
@@ -247,6 +259,17 @@ private:
 	 * Mutex for thread-safe access to the simulation.
 	 */
 	std::shared_mutex mutex;
+
+	/**
+	 * Posted jobs (XR fork), run in the simulation thread.
+	 */
+	std::mutex jobs_mutex;
+	std::vector<Job> jobs;
+
+	/**
+	 * Run the posted jobs (simulation thread).
+	 */
+	void run_jobs(const time::time_t &time);
 };
 
 } // namespace gamestate

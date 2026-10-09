@@ -38,6 +38,12 @@ public:
 	/// remaining amount
 	double get_amount() const;
 
+	/// starting amount (XR fork, save games: only changed spots are stored)
+	double get_start_amount() const;
+
+	/// set the remaining amount (XR fork, loading a save game)
+	void set_amount(double amount);
+
 	/**
 	 * Take up to \p amount from the spot.
 	 *
@@ -54,6 +60,7 @@ public:
 private:
 	resource_t resource;
 	double amount;
+	double start_amount;
 	bool depleted;
 
 public:

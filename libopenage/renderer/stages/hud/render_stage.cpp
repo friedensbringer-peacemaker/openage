@@ -78,6 +78,11 @@ void HudRenderStage::set_selection_markers(std::vector<SelectionMarker> &&marker
 	this->selection_markers = std::move(markers);
 }
 
+void HudRenderStage::set_rally_flag(std::optional<Eigen::Vector2f> ndc) {
+	std::unique_lock lock{this->mutex};
+	this->rally_flag = ndc;
+}
+
 void HudRenderStage::update_selection_markers() {
 	// XR fork (AoE layout): health bar above each selected (or hovered, damaged)
 	// sprite: dark track, fill green -> yellow -> red; width follows the sprite
@@ -107,10 +112,20 @@ void HudRenderStage::update_selection_markers() {
 			fill.rect(l, b, l + w * f, b + h);
 		}
 	}
+	// rally point (XR fork): pole 30 px high, pennant to the right, small foot
+	ColorBatch flag{Eigen::Vector4f{1.0f, 1.0f, 1.0f, 0.9f}, {}};
+	if (this->rally_flag) {
+		const float x = this->rally_flag->x();
+		const float y = this->rally_flag->y();
+		const float top = y + 30.0f * px_y;
+		flag.rect(x - px_x, y, x + px_x, top);
+		flag.rect(x - 5.0f * px_x, y - px_y, x + 5.0f * px_x, y + px_y);
+		flag.tri(x + px_x, top, x + px_x, top - 12.0f * px_y, x + 18.0f * px_x, top - 6.0f * px_y);
+	}
 	if (not this->marker_batches) {
 		this->marker_batches = std::make_unique<ColorBatches>(this->renderer, this->drag_select_shader);
 	}
-	this->marker_batches->commit(this->render_pass, {track, good, mid, low});
+	this->marker_batches->commit(this->render_pass, {track, good, mid, low, flag});
 }
 
 void HudRenderStage::update() {

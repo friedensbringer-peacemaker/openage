@@ -87,6 +87,9 @@ struct window_settings {
 	// The interface runs in the Quest app (hint "App beenden: VR-Menü", labels
 	// on, hotkey letters off).
 	bool ui_quest = false;
+	// Directory of the save game slots (XR fork, gamestate/save_format.h):
+	// "slot-N.save"/"slot-N.meta" and the autosave. Empty: no saving.
+	std::string save_dir{};
 };
 
 
