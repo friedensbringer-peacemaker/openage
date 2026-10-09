@@ -140,6 +140,29 @@ struct Option {
 struct QueueEntry {
 	std::string id;
 	std::string label;
+	/// icon hint ("villager", "sword", ...)
+	std::string icon;
+};
+
+/// a running training or construction of the player (XR fork, "Bestellungen")
+struct Order {
+	/// building (or foundation) entity
+	entity_id_t building = 0;
+	/// German label of the building ("Dorfzentrum") and of what is made ("Dorfbewohner")
+	std::string building_label;
+	std::string label;
+	std::string icon;
+	/// true: foundation under construction, false: training queue
+	bool construction = false;
+	/// queued units (training) or 1 (construction)
+	size_t count = 0;
+	/// seconds left for the first item (negative: waits for a population slot)
+	double remaining = -1.0;
+	/// progress 0..1 of the first item
+	double progress = 0.0;
+	/// position of the building (tiles), for jumping there
+	double ne = 0.0;
+	double se = 0.0;
 };
 
 /// training queue of a building
@@ -174,6 +197,9 @@ struct Snapshot {
 	std::vector<Option> options;
 	/// training queue of the selected building
 	std::optional<QueueState> queue;
+
+	/// all trainings and constructions of the player (sorted by remaining time)
+	std::vector<Order> orders;
 
 	/// building being placed (empty: no placement mode)
 	std::string placement;
@@ -217,6 +243,15 @@ public:
 
 	/// cancel the last queued unit of the selected building (costs are refunded)
 	void cancel_training();
+
+	/// cancel the queued unit at an index of the selected building (costs are refunded)
+	void cancel_training_at(size_t index);
+
+	/// show a status message in the HUD (e.g. "Spielstand gespeichert")
+	void notify(const std::string &text, status_t kind);
+
+	/// a foundation created outside of place() (XR fork, save games): report when it is done
+	void track_foundation(entity_id_t building);
 
 	/**
 	 * Start placing a building with the selected villagers. Empty id: the next
@@ -272,11 +307,13 @@ private:
 			TRAIN,
 			TRAIN_IN,
 			CANCEL,
+			CANCEL_AT,
 			PLACE,
 		};
 		kind_t kind = kind_t::TRAIN;
 		std::string id;
 		entity_id_t building = 0;
+		size_t index = 0;
 		coord::phys3 pos{0, 0, 0};
 		// ai (XR fork): request of a computer opponent (no HUD status) and its builders
 		std::optional<player_id_t> for_player{};

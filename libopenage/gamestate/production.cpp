@@ -728,6 +728,22 @@ void Production::cancel_training() {
 	this->push(std::move(request));
 }
 
+void Production::cancel_training_at(size_t index) {
+	Request request;
+	request.kind = Request::kind_t::CANCEL_AT;
+	request.index = index;
+	this->push(std::move(request));
+}
+
+void Production::notify(const std::string &text, status_t kind) {
+	this->set_status(text, kind);
+}
+
+void Production::track_foundation(entity_id_t building) {
+	// simulation thread (save games are restored before the loop runs)
+	this->foundations.insert(building);
+}
+
 bool Production::start_placement(const std::string &id) {
 	std::lock_guard<std::mutex> lock{this->mutex};
 	std::vector<const Option *> buildings;
@@ -1001,14 +1017,20 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			status(label_of(creatable->name) + " wird ausgebildet", status_t::info);
 		} break;
 
-		case Request::kind_t::CANCEL: {
+		case Request::kind_t::CANCEL:
+		case Request::kind_t::CANCEL_AT: {
 			bool done = false;
 			for (const auto &entity : own) {
 				auto production = component_of<ProductionComp>(entity, component::component_t::PRODUCTION_QUEUE);
 				if (production == nullptr or production->get_queue().size() == 0) {
 					continue;
 				}
-				auto item = production->get_queue().cancel_last();
+				auto item = request.kind == Request::kind_t::CANCEL_AT
+				                ? production->get_queue().cancel_at(request.index)
+				                : production->get_queue().cancel_last();
+				if (not item) {
+					continue;
+				}
 				auto owner = owner_of(entity, now);
 				auto &stock = state->get_player(owner)->get_resources();
 				for (size_t i = 0; i < RESOURCE_COUNT; ++i) {
@@ -1308,12 +1330,70 @@ void Production::update(const std::shared_ptr<GameState> &state,
 		queue.building = producer->get_id();
 		queue.label = label_of_entity(producer);
 		for (const auto &item : production->get_queue().get_items()) {
-			queue.items.push_back({item.name, label_of(item.name)});
+			const auto *entry = known(item.name);
+			queue.items.push_back({item.name, label_of(item.name), entry ? entry->icon : "sword"});
 		}
 		queue.progress = production->get_queue().progress(t);
 		queue.waiting_for_housing = production->get_queue().is_waiting();
 		snap.queue = queue;
 	}
+
+	// orders (XR fork): every training queue and foundation of the player
+	for (const auto &[id, entity] : entities) {
+		if (not entity->has_component(component::component_t::OWNERSHIP) or owner_of(entity, now) != player_id
+		    or (state->get_combat() != nullptr and state->get_combat()->is_dead(id))) {
+			continue;
+		}
+		auto production = component_of<ProductionComp>(entity, component::component_t::PRODUCTION_QUEUE);
+		auto constructable = component_of<ConstructableComp>(entity, component::component_t::CONSTRUCTABLE);
+		if ((production == nullptr or production->get_queue().size() == 0 or not is_complete(entity))
+		    and (constructable == nullptr or constructable->is_complete())) {
+			continue;
+		}
+		auto pos = position_of(entity, now);
+		if (production != nullptr and production->get_queue().size() > 0 and is_complete(entity)) {
+			const auto &head = production->get_queue().get_items().front();
+			const auto *entry = known(head.name);
+			Order order;
+			order.building = id;
+			order.building_label = label_of_entity(entity);
+			order.label = label_of(head.name);
+			order.icon = entry ? entry->icon : "sword";
+			order.construction = false;
+			order.count = production->get_queue().size();
+			order.remaining = production->get_queue().remaining(t);
+			order.progress = production->get_queue().progress(t);
+			order.ne = pos.ne.to_double();
+			order.se = pos.se.to_double();
+			snap.orders.push_back(order);
+		}
+		if (constructable != nullptr and not constructable->is_complete()) {
+			const auto name = entity_name(entity);
+			const auto *entry = known(name);
+			Order order;
+			order.building = id;
+			order.building_label = label_of(name);
+			order.label = "Bau";
+			order.icon = entry ? entry->icon : "hammer";
+			order.construction = true;
+			order.count = 1;
+			order.progress = constructable->get_progress();
+			// one builder: the rest of the build time
+			order.remaining = std::max(0.0, (1.0 - order.progress) * constructable->get_build_time());
+			order.ne = pos.ne.to_double();
+			order.se = pos.se.to_double();
+			snap.orders.push_back(order);
+		}
+	}
+	std::stable_sort(snap.orders.begin(), snap.orders.end(), [](const Order &a, const Order &b) {
+		if (a.construction != b.construction) {
+			return not a.construction;
+		}
+		if ((a.remaining < 0.0) != (b.remaining < 0.0)) {
+			return a.remaining >= 0.0;
+		}
+		return a.remaining < b.remaining;
+	});
 
 	std::lock_guard<std::mutex> lock{this->mutex};
 	// the placement mode ends if the selection cannot build the building any more
