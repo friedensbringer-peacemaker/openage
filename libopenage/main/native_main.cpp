@@ -1446,7 +1446,34 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> aoe_replay_steps(con
 	click(22.9, surrender_row, E::kLeftButton);
 	capture(23.5, "-8-aufgeben");
 	key(23.8, 0x01000000);
-	capture(24.5, nullptr);
+	// 7. save games: F5 quick save, game menu -> "Speichern" (slot list), slot 1 (empty: one click saves and
+	// closes the menu), game menu -> "Laden" (slot list), "< Zurück", close (Esc); nothing is loaded
+	layout.menu().loadAvailable = true;
+	auto save_row = centre(layout.dialogRowRect(agesxr::AoeUi::kMainSave));
+	auto load_button = centre(layout.dialogLoadRect());
+	layout.menu().page = agesxr::AoeMenuModel::kSave;
+	layout.menu().slots.assign(agesxr::kAoeSlotsMax, agesxr::AoeSaveSlot{});
+	auto slot1_row = centre(layout.dialogRowRect(0));
+	auto back_row = centre(layout.dialogRowRect(agesxr::kAoeSlotsMax));
+	log::log(INFO << "aoe replay: save row (" << save_row.first << ", " << save_row.second << "), load button ("
+	              << load_button.first << ", " << load_button.second << "), slot 1 (" << slot1_row.first << ", "
+	              << slot1_row.second << ")");
+	capture(24.3, "-sync-7");
+	key(24.5, 0x01000034);  // F5
+	capture(25.5, "-sync-8");
+	key(25.8, 0x01000000);
+	capture(26.4, "-sync-9");
+	click(26.6, save_row, E::kLeftButton);
+	capture(27.4, "-9-speichern");
+	click(27.6, slot1_row, E::kLeftButton);
+	capture(28.6, "-sync-10");
+	key(29.0, 0x01000000);
+	capture(29.6, "-sync-11");
+	click(29.8, load_button, E::kLeftButton);
+	capture(30.6, "-10-laden");
+	click(30.8, back_row, E::kLeftButton);
+	key(31.3, 0x01000000);
+	capture(32.0, nullptr);
 	return steps;
 }
 
@@ -1637,6 +1664,9 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> markers_replay_steps
 	capture(24.0, "-m6-fundament");
 	capture(24.5, nullptr);
 	return steps;
+}
+
+/**
  * Default save directory: $XROA_SAVE_DIR, else ~/.local/share/xr-ages/saves.
  */
 std::string default_save_dir() {
