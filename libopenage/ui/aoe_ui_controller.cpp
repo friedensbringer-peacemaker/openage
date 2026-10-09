@@ -47,9 +47,23 @@ agesxr::HudProdState prod_to_hud(const gamestate::prod::Snapshot &s) {
 		p.queue = true;
 		for (const auto &item : s.queue->items) {
 			p.queueItems.push_back(item.label.empty() ? item.id : item.label);
+			p.queueIcons.push_back(item.icon);
 		}
 		p.queueProgress = s.queue->progress;
 		p.waitingForHousing = s.queue->waiting_for_housing;
+	}
+	// all orders of the player (same conversion as the classic interface)
+	for (const auto &o : s.orders) {
+		agesxr::HudProdOrder h;
+		h.entity = o.building;
+		h.construction = o.construction;
+		h.label = o.construction ? o.building_label : o.label;
+		h.building = o.construction ? std::string{} : o.building_label;
+		h.icon = o.icon;
+		h.count = static_cast<int>(o.count);
+		h.remaining = o.remaining;
+		h.progress = o.progress;
+		p.orders.push_back(h);
 	}
 	p.placement = s.placement;
 	p.status = s.status;
