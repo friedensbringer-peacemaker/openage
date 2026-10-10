@@ -255,15 +255,15 @@ void check_slots() {
 	std::printf("== slots\n");
 	const auto dir = std::filesystem::temp_directory_path() / "xr-ages-save-format-check";
 	std::filesystem::remove_all(dir);
-	auto slots = list_slots(dir);
-	CHECK(slots.size() == static_cast<size_t>(SLOT_COUNT) + 2, "slot count %zu", slots.size());
-	CHECK(slots[SLOT_COUNT].slot == QUICK_SLOT and slot_file(dir, QUICK_SLOT).filename() == "quicksave.save",
+	auto slot_list = list_slots(dir);
+	CHECK(slot_list.size() == static_cast<size_t>(SLOT_COUNT) + 2, "slot count %zu", slot_list.size());
+	CHECK(slot_list[SLOT_COUNT].slot == QUICK_SLOT and slot_file(dir, QUICK_SLOT).filename() == "quicksave.save",
 	      "quick slot");
-	for (const auto &s : slots) {
+	for (const auto &s : slot_list) {
 		CHECK(not s.exists, "slot %d empty", s.slot);
 		CHECK(s.label().find("leer") != std::string::npos, "label %s", s.label().c_str());
 	}
-	CHECK(slots.back().slot == AUTOSAVE_SLOT and slots.back().label().rfind("Automatisch", 0) == 0, "autosave last");
+	CHECK(slot_list.back().slot == AUTOSAVE_SLOT and slot_list.back().label().rfind("Automatisch", 0) == 0, "autosave last");
 	CHECK(slot_file(dir, 3).filename() == "slot-3.save" and slot_meta_file(dir, 0).filename() == "autosave.meta",
 	      "file names");
 	CHECK(slot_valid(0) and slot_valid(5) and slot_valid(QUICK_SLOT) and not slot_valid(QUICK_SLOT + 1)

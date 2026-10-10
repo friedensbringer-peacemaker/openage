@@ -55,7 +55,7 @@ struct GameMenuModel {
     enum View { kViewMain, kViewSave, kViewLoad };
     bool open = false;
     int view = kViewMain;             // Hauptseite oder Slot-Liste zum Speichern/Laden
-    std::vector<GameUiSlot> slots;    // Slot-Liste (von der Engine gefüllt)
+    std::vector<GameUiSlot> slot_list;    // Slot-Liste (von der Engine gefüllt)
     int confirmSlot = -1;             // Slot mit offener Rückfrage (Überschreiben/Verwerfen), −1 = keine
     bool paused = false;    // Nutzerpause (Anzeige des Kippschalters)
     int speed = 1;          // kGameSpeedLabels
@@ -66,7 +66,7 @@ struct GameMenuModel {
     bool confirmQuit = false;
     std::string mapInfo;    // laufende Karte, Hinweiszeile unter dem Titel
     bool operator==(const GameMenuModel& o) const {
-        return open == o.open && view == o.view && slots == o.slots && confirmSlot == o.confirmSlot &&
+        return open == o.open && view == o.view && slot_list == o.slot_list && confirmSlot == o.confirmSlot &&
                paused == o.paused && speed == o.speed && biome == o.biome && size == o.size &&
                opponent == o.opponent && seed == o.seed && confirmQuit == o.confirmQuit && mapInfo == o.mapInfo;
     }
@@ -161,7 +161,7 @@ public:
     enum Row { kRowResume = 0, kRowSave, kRowLoad, kRowPause, kRowSpeed, kRowBiome, kRowSize, kRowOpponent, kRowSeed,
                kRowNewMap, kRowQuit, kRowCount };
     // Slot-Liste: Zeile i = menu().slots[i], danach „Zurück“ (slotBackRow()).
-    int slotBackRow() const { return static_cast<int>(mMenu.slots.size()); }
+    int slotBackRow() const { return static_cast<int>(mMenu.slot_list.size()); }
     bool slotEnabled(int index) const;  // Speichern: alle außer automatisch; Laden: nur belegte
     Rect menuRowRect(int row) const;
     Rect menuArrowRect(int row, bool right) const;

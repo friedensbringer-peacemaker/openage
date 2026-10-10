@@ -208,7 +208,7 @@ private:
     void drawDialog();
     void drawBoard();
     void drawArrow(const Rect& r, bool right, SkinState st);
-    void drawSlotRow(const std::vector<AoeSlot>& slots, int shown, int x0, int y0, Hit kind, float progressFirst,
+    void drawSlotRow(const std::vector<AoeSlot>& slot_list, int shown, int x0, int y0, Hit kind, float progressFirst,
                      bool enabled, int maxX);
     void textIn(const char* utf8, const Rect& r, float pxSize, uint32_t color, bool bold, bool shadow, int align);
     SkinState stateOf(const HitState& h, bool enabled) const;

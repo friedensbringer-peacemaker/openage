@@ -234,7 +234,7 @@ int AoeUi::dialogRowCount() const {
     case AoeMenuModel::kNewMap: return kNewCount;
     case AoeMenuModel::kSave:
     case AoeMenuModel::kLoad:
-        return std::min(static_cast<int>(mMenu.slots.size()), kAoeSlotsMax) + 1;  // + „‹ Zurück“
+        return std::min(static_cast<int>(mMenu.slot_list.size()), kAoeSlotsMax) + 1;  // + „‹ Zurück“
     default: return kMainCount;
     }
 }
@@ -242,12 +242,12 @@ int AoeUi::dialogRowCount() const {
 AoeUi::Rect AoeUi::dialogRowRect(int row) const {
     const Rect d = dialogRect();
     if (d.empty() || row < 0 || row >= dialogRowCount()) return {};
-    const bool slots = slotPage(mMenu.page);
-    const int w = px(kDlgBtnW) + (mMenu.page == AoeMenuModel::kNewMap || slots ? px(kDlgWWide - kDlgW) : 0);
+    const bool slot_list = slotPage(mMenu.page);
+    const int w = px(kDlgBtnW) + (mMenu.page == AoeMenuModel::kNewMap || slot_list ? px(kDlgWWide - kDlgW) : 0);
     // slot pages: 8 rows in the same dialog (pitch 64, rows 56 – still ≥ 48 px)
-    const int pitch = slots ? px(64) : px(kDlgPitch);
+    const int pitch = slot_list ? px(64) : px(kDlgPitch);
     const int y0 = d.y0 + px(kDlgRowsY + 8) + row * pitch;
-    Rect r = r4(d.cx() - w / 2, y0, d.cx() + w / 2, y0 + (slots ? px(56) : px(kDlgBtnH)));
+    Rect r = r4(d.cx() - w / 2, y0, d.cx() + w / 2, y0 + (slot_list ? px(56) : px(kDlgBtnH)));
     if (mMenu.page == AoeMenuModel::kMain && row == kMainSave && mMenu.loadAvailable) r.x1 = r.cx() - px(4);
     return r;
 }
@@ -280,7 +280,7 @@ bool AoeUi::dialogRowEnabled(int row) const {
         return true;
     }
     if (slotPage(mMenu.page) && row < dialogRowCount() - 1) {
-        const AoeSaveSlot& s = mMenu.slots[static_cast<size_t>(row)];
+        const AoeSaveSlot& s = mMenu.slot_list[static_cast<size_t>(row)];
         return mMenu.page == AoeMenuModel::kSave ? s.writable : s.exists;
     }
     return true;
@@ -291,7 +291,7 @@ std::string AoeUi::dialogRowLabel(int row) const {
         if (row >= dialogRowCount() - 1) return "‹ Zurück";
         if (row == mMenu.confirmSlot)
             return mMenu.page == AoeMenuModel::kSave ? "Überschreiben? Nochmal klicken" : "Spiel verwerfen? Nochmal klicken";
-        return mMenu.slots[static_cast<size_t>(row)].label;
+        return mMenu.slot_list[static_cast<size_t>(row)].label;
     }
     switch (mMenu.page) {
     case AoeMenuModel::kSettings:
@@ -519,7 +519,7 @@ AoeUi::Result AoeUi::dialogClick(const HitState& h, double now) {
         }
         if (!dialogRowEnabled(row)) return r;
         setPressed(h, now);
-        const AoeSaveSlot& slot = mMenu.slots[static_cast<size_t>(row)];
+        const AoeSaveSlot& slot = mMenu.slot_list[static_cast<size_t>(row)];
         // belegten Slot überschreiben bzw. laden (laufendes Spiel geht verloren): zweiter Klick innerhalb 3 s
         const bool needsConfirm = mMenu.page == AoeMenuModel::kLoad || slot.exists;
         if (needsConfirm && mMenu.confirmSlot != row) {
@@ -1128,10 +1128,10 @@ void AoeUi::drawGrid() {
     }
 }
 
-void AoeUi::drawSlotRow(const std::vector<AoeSlot>& slots, int shown, int x0, int y0, Hit kind, float progressFirst,
+void AoeUi::drawSlotRow(const std::vector<AoeSlot>& slot_list, int shown, int x0, int y0, Hit kind, float progressFirst,
                         bool enabled, int maxX) {
     const float s = scale();
-    const int n = static_cast<int>(slots.size());
+    const int n = static_cast<int>(slot_list.size());
     const int vis = std::min(n, shown);
     for (int i = 0; i < vis; ++i) {
         const Rect r = kind == Hit::kQueue ? queueRect(i) : kind == Hit::kGarrison ? garrisonRect(i) : multiRect(i);
@@ -1139,7 +1139,7 @@ void AoeUi::drawSlotRow(const std::vector<AoeSlot>& slots, int shown, int x0, in
         const HitState h{kind, i};
         const SkinState st = stateOf(h, enabled);
         mSkin->drawButton(*mCanvas, SkinButton::kSlot, r, st, s);
-        mSkin->drawIcon(*mCanvas, slots[static_cast<size_t>(i)].icon, r.cx(), r.cy() - (i == 0 && progressFirst >= 0.0f ? px(4) : 0), s * 1.1f, st);
+        mSkin->drawIcon(*mCanvas, slot_list[static_cast<size_t>(i)].icon, r.cx(), r.cy() - (i == 0 && progressFirst >= 0.0f ? px(4) : 0), s * 1.1f, st);
         if (i == 0 && progressFirst >= 0.0f)
             mSkin->drawBar(*mCanvas, SkinBar::kQueue, r4(r.x0 + px(2), r.y1 - px(12), r.x1 - px(2), r.y1 - px(2)), progressFirst, s);
         if (mFocusMode && mFocus == h) mSkin->drawFocus(*mCanvas, r, s);

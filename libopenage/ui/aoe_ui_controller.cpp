@@ -283,7 +283,7 @@ void AoeUiController::run_demo(double now) {
 			menu.confirmSlot = -1;
 			this->refresh_slots();
 			this->aoe_ui.invalidate();
-			log::log(INFO << "UI: demo slot list '" << step.what << "' with " << menu.slots.size() << " slots");
+			log::log(INFO << "UI: demo slot list '" << step.what << "' with " << menu.slot_list.size() << " slots");
 		}
 		else if (step.what == "close-menu") {
 			this->open_menu(false, now);
@@ -679,7 +679,7 @@ void AoeUiController::handle(const agesxr::AoeUi::Result &result, double now) {
 	case Action::kSlotsShown:
 		this->refresh_slots();
 		log::log(INFO << "UI: slot list '" << (menu.page == agesxr::AoeMenuModel::kSave ? "save" : "load") << "' with "
-		              << menu.slots.size() << " slots");
+		              << menu.slot_list.size() << " slots");
 		break;
 	case Action::kSlotArmed:
 		log::log(INFO << "UI: slot " << result.id << " armed (3 s)");
@@ -715,12 +715,12 @@ void AoeUiController::handle(const agesxr::AoeUi::Result &result, double now) {
 
 void AoeUiController::refresh_slots() {
 	auto &menu = this->aoe_ui.menu();
-	menu.slots.clear();
+	menu.slot_list.clear();
 	if (not this->hooks.list_slots) {
 		return;
 	}
 	for (const auto &s : this->hooks.list_slots()) {
-		if (static_cast<int>(menu.slots.size()) >= agesxr::kAoeSlotsMax) {
+		if (static_cast<int>(menu.slot_list.size()) >= agesxr::kAoeSlotsMax) {
 			break;
 		}
 		agesxr::AoeSaveSlot slot;
@@ -728,7 +728,7 @@ void AoeUiController::refresh_slots() {
 		slot.label = s.label();
 		slot.exists = s.exists;
 		slot.writable = s.slot != gamestate::save::AUTOSAVE_SLOT;
-		menu.slots.push_back(slot);
+		menu.slot_list.push_back(slot);
 	}
 }
 

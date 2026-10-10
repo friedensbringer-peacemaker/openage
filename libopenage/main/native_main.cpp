@@ -1452,7 +1452,7 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> aoe_replay_steps(con
 	auto save_row = centre(layout.dialogRowRect(agesxr::AoeUi::kMainSave));
 	auto load_button = centre(layout.dialogLoadRect());
 	layout.menu().page = agesxr::AoeMenuModel::kSave;
-	layout.menu().slots.assign(agesxr::kAoeSlotsMax, agesxr::AoeSaveSlot{});
+	layout.menu().slot_list.assign(agesxr::kAoeSlotsMax, agesxr::AoeSaveSlot{});
 	auto slot1_row = centre(layout.dialogRowRect(0));
 	auto back_row = centre(layout.dialogRowRect(agesxr::kAoeSlotsMax));
 	log::log(INFO << "aoe replay: save row (" << save_row.first << ", " << save_row.second << "), load button ("
@@ -2019,11 +2019,11 @@ bool save_check(const native_args &args, const openage::util::Path &root) {
 			scene.entities.push_back(house);
 		}
 		std::string err;
-		const fs::path slots = dir / "slots";
-		fs::remove_all(slots);
+		const fs::path slot_list = dir / "slots";
+		fs::remove_all(slot_list);
 		bool ok = save::write_text(dir / "orders.save", save::serialize(scene), err)
-		          and save::write_slot(slots, 2, scene, err) and save::write_slot(slots, 1, a, err)
-		          and save::write_slot(slots, save::AUTOSAVE_SLOT, a, err);
+		          and save::write_slot(slot_list, 2, scene, err) and save::write_slot(slot_list, 1, a, err)
+		          and save::write_slot(slot_list, save::AUTOSAVE_SLOT, a, err);
 		expect(ok and tc != nullptr, "Szenario orders.save + Slots 1, 2, automatisch geschrieben " + err);
 	}
 

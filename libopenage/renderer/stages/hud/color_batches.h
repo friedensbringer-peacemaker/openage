@@ -67,7 +67,7 @@ private:
 
 	std::shared_ptr<Renderer> renderer;
 	std::shared_ptr<ShaderProgram> shader;
-	std::vector<Slot> slots;
+	std::vector<Slot> slot_list;
 };
 
 } // namespace hud

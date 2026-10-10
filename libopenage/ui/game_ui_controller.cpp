@@ -283,7 +283,7 @@ void GameUiController::run_demo(double now) {
 			this->ui.menu().view = step.what == "save-menu" ? agesxr::GameMenuModel::kViewSave
 			                                                : agesxr::GameMenuModel::kViewLoad;
 			this->refresh_slots();
-			log::log(INFO << "UI: demo slot list '" << step.what << "' with " << this->ui.menu().slots.size() << " slots");
+			log::log(INFO << "UI: demo slot list '" << step.what << "' with " << this->ui.menu().slot_list.size() << " slots");
 		}
 		else if (step.what == "close-menu") {
 			this->open_menu(false);
@@ -589,12 +589,12 @@ void GameUiController::menu_action(agesxr::GameUi::Result result) {
 
 void GameUiController::refresh_slots() {
 	auto &menu = this->ui.menu();
-	menu.slots.clear();
+	menu.slot_list.clear();
 	if (not this->hooks.list_slots) {
 		return;
 	}
 	for (const auto &s : this->hooks.list_slots()) {
-		menu.slots.push_back({s.slot, s.label(), s.exists});
+		menu.slot_list.push_back({s.slot, s.label(), s.exists});
 	}
 }
 

@@ -161,14 +161,14 @@ GameUi::Rect GameUi::drawnRect() const {
 // ---- Eingabe ------------------------------------------------------------------------------------
 
 bool GameUi::slotEnabled(int index) const {
-    if (index < 0 || index >= static_cast<int>(mMenu.slots.size())) return false;
-    const GameUiSlot& s = mMenu.slots[static_cast<size_t>(index)];
+    if (index < 0 || index >= static_cast<int>(mMenu.slot_list.size())) return false;
+    const GameUiSlot& s = mMenu.slot_list[static_cast<size_t>(index)];
     return mMenu.view == GameMenuModel::kViewSave ? s.slot != 0 : s.exists;
 }
 
 GameUi::HoverState GameUi::hitTest(int x, int y) const {
     if (mMenu.open && mMenu.view != GameMenuModel::kViewMain) {
-        for (int i = 0; i < static_cast<int>(mMenu.slots.size()); ++i)
+        for (int i = 0; i < static_cast<int>(mMenu.slot_list.size()); ++i)
             if (slotEnabled(i) && menuRowRect(i).contains(x, y)) return {Hover::kSlotRow, i};
         if (menuRowRect(slotBackRow()).contains(x, y)) return {Hover::kSlotBack, slotBackRow()};
         return {};
@@ -205,7 +205,7 @@ GameUi::Result GameUi::onClick(int x, int y) {
         const HoverState h = mHover;
         switch (h.kind) {
         case Hover::kSlotRow: {
-            const GameUiSlot& s = mMenu.slots[static_cast<size_t>(h.index)];
+            const GameUiSlot& s = mMenu.slot_list[static_cast<size_t>(h.index)];
             const bool save = mMenu.view == GameMenuModel::kViewSave;
             // belegter Slot (Speichern) bzw. jeder Slot (Laden): erst Rückfrage, zweiter Klick führt aus
             if ((!save || s.exists) && mMenu.confirmSlot != s.slot) {
@@ -398,7 +398,7 @@ void GameUi::drawSlots() {
             mCanvas->textShadow(back, (rr.x0 + rr.x1 - mCanvas->textWidth(back, textPx, true)) / 2, textY, textPx, kText, true);
             continue;
         }
-        const GameUiSlot& slot = mMenu.slots[static_cast<size_t>(i)];
+        const GameUiSlot& slot = mMenu.slot_list[static_cast<size_t>(i)];
         const bool enabled = slotEnabled(i);
         const bool hot = mHover.kind == Hover::kSlotRow && mHover.index == i;
         const bool confirm = mMenu.confirmSlot == slot.slot;

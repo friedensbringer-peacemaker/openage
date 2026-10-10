@@ -1311,8 +1311,8 @@ void Production::update(const std::shared_ptr<GameState> &state,
 		});
 		for (auto &[entity, production] : producers) {
 			auto owner = owner_of(entity, now);
-			auto &slots = free[owner];
-			auto done = production->get_queue().advance(t, slots);
+			auto &slot_list = free[owner];
+			auto done = production->get_queue().advance(t, slot_list);
 			for (const auto &item : done) {
 				auto unit = spawn_unit(state, loop, factory, entity, *production, item.fqon, now);
 				log::log(INFO << "Production: " << item.name << " (entity " << unit->get_id() << ") trained in "

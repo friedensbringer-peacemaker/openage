@@ -55,7 +55,7 @@ ColorBatches::ColorBatches(const std::shared_ptr<Renderer> &renderer, const std:
 	shader{shader} {}
 
 void ColorBatches::reset() {
-	this->slots.clear();
+	this->slot_list.clear();
 }
 
 void ColorBatches::drop(const std::shared_ptr<RenderPass> &pass, Slot &slot) {
@@ -71,25 +71,25 @@ void ColorBatches::drop(const std::shared_ptr<RenderPass> &pass, Slot &slot) {
 }
 
 void ColorBatches::commit(const std::shared_ptr<RenderPass> &pass, const std::vector<ColorBatch> &batches) {
-	std::vector<bool> used(this->slots.size(), false);
+	std::vector<bool> used(this->slot_list.size(), false);
 	for (const auto &batch : batches) {
 		if (batch.verts.empty()) {
 			continue;
 		}
 		// slot of this color (exact match), else a new one
-		size_t index = this->slots.size();
-		for (size_t i = 0; i < this->slots.size(); ++i) {
-			if (not used[i] and this->slots[i].color == batch.color) {
+		size_t index = this->slot_list.size();
+		for (size_t i = 0; i < this->slot_list.size(); ++i) {
+			if (not used[i] and this->slot_list[i].color == batch.color) {
 				index = i;
 				break;
 			}
 		}
-		if (index == this->slots.size()) {
-			this->slots.push_back(Slot{batch.color, nullptr, nullptr, 0});
+		if (index == this->slot_list.size()) {
+			this->slot_list.push_back(Slot{batch.color, nullptr, nullptr, 0});
 			used.push_back(false);
 		}
 		used[index] = true;
-		Slot &slot = this->slots[index];
+		Slot &slot = this->slot_list[index];
 		const size_t count = batch.verts.size() / 2;
 		std::vector<uint8_t> data(batch.verts.size() * sizeof(float));
 		std::memcpy(data.data(), batch.verts.data(), data.size());
@@ -107,9 +107,9 @@ void ColorBatches::commit(const std::shared_ptr<RenderPass> &pass, const std::ve
 		pass->add_renderables(Renderable{slot.uniforms, slot.geometry, true, false});
 	}
 	// colors not shown any more
-	for (size_t i = 0; i < this->slots.size(); ++i) {
-		if (not used[i] and this->slots[i].geometry) {
-			this->drop(pass, this->slots[i]);
+	for (size_t i = 0; i < this->slot_list.size(); ++i) {
+		if (not used[i] and this->slot_list[i].geometry) {
+			this->drop(pass, this->slot_list[i]);
 		}
 	}
 }

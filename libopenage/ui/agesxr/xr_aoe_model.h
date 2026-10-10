@@ -147,7 +147,7 @@ struct AoeMenuModel {
     int page = kMain;
     bool confirmSurrender = false;  // „Partie aufgeben“ scharf (erster Klick)
     int confirmSlot = -1;           // Slot-Seite: Zeile scharf („Überschreiben?“ / „Spiel verwerfen?“), −1 = keine
-    std::vector<AoeSaveSlot> slots; // Spielstände (Seiten kSave/kLoad)
+    std::vector<AoeSaveSlot> slot_list; // Spielstände (Seiten kSave/kLoad)
     double armedAt = 0.0;           // Zeit des Scharfschaltens (Frist kConfirmSeconds)
     // Einstellungen
     int speed = 1;                  // kGameSpeedLabels
@@ -163,7 +163,7 @@ struct AoeMenuModel {
     std::string mapInfo;            // „Karte #17 · Grasland 64 × 64 · 12:34 · Spiel angehalten“
     bool operator==(const AoeMenuModel& o) const {
         return open == o.open && page == o.page && confirmSurrender == o.confirmSurrender &&
-               confirmSlot == o.confirmSlot && slots == o.slots && speed == o.speed &&
+               confirmSlot == o.confirmSlot && slot_list == o.slot_list && speed == o.speed &&
                labels == o.labels && hotkeys == o.hotkeys && messages == o.messages && biome == o.biome &&
                size == o.size && opponent == o.opponent && seed == o.seed && saveAvailable == o.saveAvailable &&
                loadAvailable == o.loadAvailable && quest == o.quest && mapInfo == o.mapInfo;
