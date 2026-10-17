@@ -73,6 +73,10 @@ void WorldRenderStage::update() {
 		if (not obj->is_removed()) {
 			return false;
 		}
+		// XR fork (vision): a gone building/resource stays as the last seen stand-in in the fog
+		if (this->display and this->display(obj->get_id()) == 1) {
+			return false;
+		}
 		this->display_applied.erase(obj->get_id());
 		const auto &uniforms = obj->get_uniforms();
 		this->render_pass->remove_renderables([&uniforms](const Renderable &renderable) {

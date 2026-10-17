@@ -398,6 +398,36 @@ void VisionState::tick(const std::shared_ptr<GameState> &state, const time::time
 				dots->push_back(make_dot(info, d));
 			}
 		}
+		// stand-ins (spec 05 §5.6): foreign buildings and resources the view player saw stay "last seen"
+		// in the fog after they are gone, until their place is in sight again
+		if (view != this->static_view) {
+			this->seen_static.clear();
+		}
+		if (view_fog) {
+			for (const auto &[id, info] : this->static_cache) {
+				if (info.owner != view
+				    and this->grid.footprint_state(view, info.ne, info.se, info.radius) == tile_state_t::VISIBLE) {
+					this->seen_static[id] = info;
+				}
+			}
+			for (auto it = this->seen_static.begin(); it != this->seen_static.end();) {
+				const auto &info = it->second;
+				if (this->static_cache.contains(it->first)) {
+					++it;
+					continue;
+				}
+				if (this->grid.footprint_state(view, info.ne, info.se, info.radius) == tile_state_t::VISIBLE) {
+					it = this->seen_static.erase(it);
+					continue;
+				}
+				display->emplace(static_cast<uint32_t>(it->first), static_cast<uint8_t>(display_t::FOGGED));
+				dots->push_back(make_dot(info, display_t::FOGGED));
+				++it;
+			}
+		}
+		else {
+			this->seen_static.clear();
+		}
 		std::sort(dots->begin(), dots->end(), by_paint_order);
 		this->static_display = std::move(display);
 		this->static_dots = std::move(dots);

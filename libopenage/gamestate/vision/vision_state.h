@@ -179,6 +179,8 @@ private:
 	std::shared_ptr<const std::vector<MinimapDot>> static_dots;
 	player_id_t static_view = UINT64_MAX;
 	size_t static_rebuilds = 0;
+	/// foreign static entities the view player saw (stand-ins in the fog once they are gone)
+	std::unordered_map<entity_id_t, EntityInfo> seen_static;
 	/// entities of the last snapshot shown darkened / hidden (log)
 	size_t shown_fogged = 0;
 	size_t shown_hidden = 0;
