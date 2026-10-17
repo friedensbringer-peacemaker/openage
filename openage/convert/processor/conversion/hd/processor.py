@@ -57,6 +57,8 @@ class HDProcessor:
 
         # Create a new container for the conversion process
         dataset = cls._pre_processor(gamespec, args.game_version, string_resources, existing_graphics)
+        # XR fork: main palette for the minimap colors in engine.xr.util.GenieData
+        dataset.xr_palette = (getattr(args, "palettes", None) or {}).get(50500)
         debug_converter_objects(args.debugdir, args.debug_info, dataset)
 
         # Create the custom openage formats (nyan, sprite, terrain, etc.)
@@ -101,6 +103,7 @@ class HDProcessor:
         AoCProcessor.extract_genie_sounds(gamespec, dataset)
         AoCProcessor.extract_genie_terrains(gamespec, dataset)
         AoCProcessor.extract_genie_restrictions(gamespec, dataset)
+        AoCProcessor.extract_xr_player_colors(gamespec, dataset)
 
         return dataset
 

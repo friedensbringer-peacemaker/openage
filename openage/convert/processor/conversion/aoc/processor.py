@@ -96,6 +96,8 @@ class AoCProcessor:
 
         # Create a new container for the conversion process
         dataset = cls._pre_processor(gamespec, args.game_version, string_resources, existing_graphics)
+        # XR fork: main palette for the minimap colors in engine.xr.util.GenieData
+        dataset.xr_palette = (getattr(args, "palettes", None) or {}).get(50500)
         debug_converter_objects(args.debugdir, args.debug_info, dataset)
 
         # Create the custom openae formats (nyan, sprite, terrain)
@@ -140,6 +142,7 @@ class AoCProcessor:
         cls.extract_genie_sounds(gamespec, dataset)
         cls.extract_genie_terrains(gamespec, dataset)
         cls.extract_genie_restrictions(gamespec, dataset)
+        cls.extract_xr_player_colors(gamespec, dataset)
 
         return dataset
 
@@ -472,6 +475,17 @@ class AoCProcessor:
 
             terrain = GenieTerrainObject(terrain_index, full_data_set, members=terrain_members)
             full_data_set.genie_terrains.update({terrain.get_id(): terrain})
+
+    @staticmethod
+    def extract_xr_player_colors(gamespec: ArrayMember, full_data_set: GenieObjectContainer) -> None:
+        """
+        XR fork: keep the player color table (minimap colors) for engine.xr.util.GenieData.
+
+        :param gamespec: Gamedata from empires.dat file.
+        :type gamespec: class: ...dataformat.value_members.ArrayMember
+        """
+        if "player_colors" in gamespec[0].value:
+            full_data_set.xr_player_colors = list(gamespec[0]["player_colors"].value)
 
     @staticmethod
     def extract_genie_restrictions(gamespec: ArrayMember, full_data_set: GenieObjectContainer) -> None:

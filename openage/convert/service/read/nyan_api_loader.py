@@ -5081,6 +5081,7 @@ XR_GENIE_UNIT_FIELDS: tuple[tuple[str, str, int | float, str], ...] = (
     ("enable_auto_gather", "int", 0, "enable_auto_gather"),
     ("resource_gather_drop", "int", 0, "resource_gather_drop"),
     ("recyclable", "int", 0, "recyclable"),
+    ("doppelgaenger_on_death", "int", 0, "doppelgaenger_on_death"),
     # combat, stances, garrison arrows, area damage, conversion (W4, W6)
     ("hit_points", "int", 0, "hit_points"),
     ("line_of_sight", "float", 0.0, "line_of_sight"),
@@ -5158,6 +5159,15 @@ XR_GENIE_TECH_FIELDS: tuple[tuple[str, str, int | float, str], ...] = (
     ("required_tech_count", "int", 0, "required_tech_count"),
 )
 
+# minimap colors (.dat members, palette indices) of terrains and player colors
+XR_GENIE_TERRAIN_COLORS: tuple[str, ...] = (
+    "map_color_hi", "map_color_med", "map_color_low", "map_color_cliff_lt", "map_color_cliff_rt",
+)
+XR_GENIE_PLAYER_COLORS: tuple[str, ...] = (
+    "player_color_base", "outline_color", "unit_selection_color1", "unit_selection_color2",
+    "minimap_color1", "minimap_color2", "minimap_color3", "statistics_text_color", "minimap_color",
+)
+
 _XR_PRIMITIVES = {"int": N_INT, "float": N_FLOAT}
 
 
@@ -5199,6 +5209,8 @@ def _create_xr_objects(api_objects: dict[str, NyanObject]) -> None:
     _xr_object(api_objects, "engine.xr.util.GenieCiv", [root])
     _xr_object(api_objects, "engine.xr.util.GenieTerrainRestriction", [root])
     _xr_object(api_objects, "engine.xr.util.GenieTech", [root])
+    _xr_object(api_objects, "engine.xr.util.GenieTerrainColor", [root])
+    _xr_object(api_objects, "engine.xr.util.GeniePlayerColor", [root])
     _xr_object(api_objects, "engine.xr.util.GenieData", [root])
     # first parent stays engine.ability.Ability: the engine dispatches abilities on parents()[0]
     _xr_object(
@@ -5240,6 +5252,7 @@ def _insert_xr_members(api_objects: dict[str, NyanObject]) -> None:
     # engine.xr.util.GenieUnitData
     api_object = api_objects["engine.xr.util.GenieUnitData"]
     _xr_fields(api_object, XR_GENIE_UNIT_FIELDS)
+    _xr_member(api_object, "minimap_color_rgb", N_INT, -1)
     _xr_member(api_object, "drop_sites", int_set, [])
     _xr_member(api_object, "resource_storages", ordered("engine.xr.util.GenieResourceStorage"), [])
     _xr_member(api_object, "annexes", ordered("engine.xr.util.GenieAnnex"), [])
@@ -5272,6 +5285,20 @@ def _insert_xr_members(api_objects: dict[str, NyanObject]) -> None:
     _xr_fields(api_object, XR_GENIE_TECH_FIELDS)
     _xr_member(api_object, "required_techs", int_set, [])
 
+    # engine.xr.util.GenieTerrainColor (minimap: palette index and 0xRRGGBB, -1 = unknown)
+    api_object = api_objects["engine.xr.util.GenieTerrainColor"]
+    _xr_member(api_object, "terrain_id", N_INT, -1)
+    for name in XR_GENIE_TERRAIN_COLORS:
+        _xr_member(api_object, name, N_INT, -1)
+        _xr_member(api_object, f"{name}_rgb", N_INT, -1)
+
+    # engine.xr.util.GeniePlayerColor (palette indices and 0xRRGGBB, -1 = unknown)
+    api_object = api_objects["engine.xr.util.GeniePlayerColor"]
+    _xr_member(api_object, "color_id", N_INT, -1)
+    for name in XR_GENIE_PLAYER_COLORS:
+        _xr_member(api_object, name, N_INT, -1)
+        _xr_member(api_object, f"{name}_rgb", N_INT, -1)
+
     # engine.xr.util.GenieData
     api_object = api_objects["engine.xr.util.GenieData"]
     terrain_type = NyanMemberType(api_objects["engine.util.terrain.Terrain"])
@@ -5279,3 +5306,5 @@ def _insert_xr_members(api_objects: dict[str, NyanObject]) -> None:
     _xr_member(api_object, "terrains", NyanMemberType(MemberType.DICT, (N_INT, terrain_type)), {})
     _xr_member(api_object, "terrain_restrictions", ordered("engine.xr.util.GenieTerrainRestriction"), [])
     _xr_member(api_object, "techs", ordered("engine.xr.util.GenieTech"), [])
+    _xr_member(api_object, "terrain_colors", ordered("engine.xr.util.GenieTerrainColor"), [])
+    _xr_member(api_object, "player_colors", ordered("engine.xr.util.GeniePlayerColor"), [])

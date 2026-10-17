@@ -20,7 +20,13 @@ from ....entity_object.conversion.aoc.genie_unit import (
 from ....entity_object.conversion.combined_sound import CombinedSound
 from ....entity_object.conversion.converter_object import ConverterObjectGroup, RawAPIObject
 from ....service.conversion import internal_name_lookups
-from ....service.read.nyan_api_loader import XR_GENIE_TASK_FIELDS, XR_GENIE_TECH_FIELDS, XR_GENIE_UNIT_FIELDS
+from ....service.read.nyan_api_loader import (
+    XR_GENIE_PLAYER_COLORS,
+    XR_GENIE_TASK_FIELDS,
+    XR_GENIE_TECH_FIELDS,
+    XR_GENIE_TERRAIN_COLORS,
+    XR_GENIE_UNIT_FIELDS,
+)
 from ....value_object.conversion.forward_ref import ForwardRef
 
 if typing.TYPE_CHECKING:
@@ -796,6 +802,15 @@ class AoCXrSubprocessor:
 
         cls._add_fields(raw_api_object, genie_unit, XR_GENIE_UNIT_FIELDS, origin)
 
+        minimap_rgb = -1
+        palette = getattr(dataset, "xr_palette", None)
+        minimap_index = int(cls._value(genie_unit, "minimap_color", -1))
+        if palette is not None and 0 <= minimap_index < len(palette.palette):
+            red, green, blue = palette.palette[minimap_index][:3]
+            minimap_rgb = (int(red) << 16) | (int(green) << 8) | int(blue)
+
+        raw_api_object.add_raw_member("minimap_color_rgb", minimap_rgb, origin)
+
         drop_sites = [member.value for member in cls._value(genie_unit, "drop_sites", [])]
         raw_api_object.add_raw_member("drop_sites", [site for site in drop_sites if site > -1], origin)
 
@@ -1073,6 +1088,48 @@ class AoCXrSubprocessor:
             techs.append(ForwardRef(group, tech_ref))
 
         data_raw_api_object.add_raw_member("techs", techs, origin)
+
+        # Minimap colors: palette index + RGB from the main palette (Spec 08 §8.4, LÜCKEN L63)
+        def add_colors(raw_api_object, genie_obj, names, color_origin):
+            palette = full_data_set.xr_palette
+            for name in names:
+                index = int(cls._value(genie_obj, name, -1))
+                rgb = -1
+                if palette is not None and 0 <= index < len(palette.palette):
+                    red, green, blue = palette.palette[index][:3]
+                    rgb = (int(red) << 16) | (int(green) << 8) | int(blue)
+
+                raw_api_object.add_raw_member(name, index, color_origin)
+                raw_api_object.add_raw_member(f"{name}_rgb", rgb, color_origin)
+
+        terrain_colors = []
+        for terrain_id, terrain in sorted(full_data_set.genie_terrains.items()):
+            color_ref = f"{data_ref}.TerrainColor{terrain_id}"
+            color_raw_api_object = RawAPIObject(color_ref, f"TerrainColor{terrain_id}", api_objects)
+            color_raw_api_object.add_raw_parent("engine.xr.util.GenieTerrainColor")
+            color_raw_api_object.set_location(ForwardRef(group, data_ref))
+            color_origin = "engine.xr.util.GenieTerrainColor"
+            color_raw_api_object.add_raw_member("terrain_id", terrain_id, color_origin)
+            add_colors(color_raw_api_object, terrain, XR_GENIE_TERRAIN_COLORS, color_origin)
+            group.add_raw_api_object(color_raw_api_object)
+            terrain_colors.append(ForwardRef(group, color_ref))
+
+        data_raw_api_object.add_raw_member("terrain_colors", terrain_colors, origin)
+
+        player_colors = []
+        for index, player_color in enumerate(full_data_set.xr_player_colors):
+            color_id = int(cls._value(player_color, "id", index))
+            color_ref = f"{data_ref}.PlayerColor{index}"
+            color_raw_api_object = RawAPIObject(color_ref, f"PlayerColor{index}", api_objects)
+            color_raw_api_object.add_raw_parent("engine.xr.util.GeniePlayerColor")
+            color_raw_api_object.set_location(ForwardRef(group, data_ref))
+            color_origin = "engine.xr.util.GeniePlayerColor"
+            color_raw_api_object.add_raw_member("color_id", color_id, color_origin)
+            add_colors(color_raw_api_object, player_color, XR_GENIE_PLAYER_COLORS, color_origin)
+            group.add_raw_api_object(color_raw_api_object)
+            player_colors.append(ForwardRef(group, color_ref))
+
+        data_raw_api_object.add_raw_member("player_colors", player_colors, origin)
 
         group.create_nyan_objects()
         group.create_nyan_members()

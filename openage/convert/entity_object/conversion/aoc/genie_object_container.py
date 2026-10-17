@@ -108,6 +108,10 @@ class GenieObjectContainer(ConverterObjectContainer):
         self.genie_terrains: dict[int, GenieTerrainObject] = {}
         self.genie_terrain_restrictions: dict[int, GenieTerrainRestriction] = {}
 
+        # XR fork: raw tables for engine.xr.util.GenieData (player colors, main palette for minimap colors)
+        self.xr_player_colors: list = []
+        self.xr_palette = None
+
         # Phase 2: API-like objects
         # ConverterObjectGroup types (things that will become
         # nyan objects)

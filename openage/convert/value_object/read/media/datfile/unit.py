@@ -472,7 +472,7 @@ class UnitObject(GenieStructure):
                 (READ_GEN, "hot_keys", StorageType.ID_MEMBER, "int32_t"),
                 (READ_GEN, "recyclable", StorageType.BOOLEAN_MEMBER, "int8_t"),
                 (READ_GEN, "enable_auto_gather", StorageType.BOOLEAN_MEMBER, "int8_t"),
-                (SKIP, "doppelgaenger_on_death", StorageType.BOOLEAN_MEMBER, "int8_t"),
+                (READ_GEN, "doppelgaenger_on_death", StorageType.BOOLEAN_MEMBER, "int8_t"),
                 (READ_GEN, "resource_gather_drop", StorageType.INT_MEMBER, "int8_t"),
             ]
         )
