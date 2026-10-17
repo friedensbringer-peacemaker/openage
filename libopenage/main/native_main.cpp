@@ -1436,14 +1436,14 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> aoe_replay_steps(con
 		layout.closeContext();
 		log::log(INFO << "aoe replay: context item 0 at pixel (" << item0.first << ", " << item0.second << ")");
 		click(11.1, item0, E::kLeftButton);
-		// 5. barracks (hotkey T) placed next to the villagers, then the archery range (A): not enough wood
+		// 5. barracks (hotkey T) placed next to the villagers, then the mill (W, 100 wood; the archery range needs the Feudal Age since W1): not enough wood
 		std::pair<int, int> site{std::max(vp.first - 220, 80), std::max(vp.second - 60, layout.topBarPx() + 80)};
 		key(11.8, 'T');
 		click(12.5, site, E::kLeftButton);
 		log::log(INFO << "aoe replay: barracks site at pixel (" << site.first << ", " << site.second << ")");
 		// a frame after the placement (the sink delivers later inputs only after this capture)
 		capture(14.0, "-sync-5");
-		key(19.0, 'A');
+		key(19.0, 'W');
 		capture(20.0, "-5-holz");
 	}
 	else {
