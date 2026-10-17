@@ -1011,6 +1011,10 @@ class AoCXrSubprocessor:
             if terrain_id not in terrain_lookup_dict:
                 continue
 
+            if not terrain_lookup_dict[terrain_id][2].isidentifier():
+                # e.g. "pine-forest": its file cannot be imported in nyan, so it cannot be referenced
+                continue
+
             terrain_ref = terrain_lookup_dict[terrain_id][1]
             if terrain_group.has_raw_api_object(terrain_ref):
                 terrains[terrain_id] = ForwardRef(terrain_group, terrain_ref)
