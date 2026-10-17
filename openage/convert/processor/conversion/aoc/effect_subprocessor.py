@@ -56,6 +56,24 @@ class AoCEffectSubprocessor:
 
         armor_lookup_dict = internal_name_lookups.get_armor_class_lookups(dataset.game_version)
 
+        # XR fork: area damage of the attacker (blast radius) as engine.effect.property.type.Area;
+        # projectiles lose effect linearly to the edge, melee area attacks keep it (AoE II)
+        attacker = line.get_head_unit()
+        blast_range = 0.0
+        if attacker.has_member("blast_range"):
+            blast_range = float(attacker["blast_range"].value)
+
+        # AoE II: area attacks with range < 1 are melee (war elephant), the others ranged (mangonel)
+        weapon_range = 0.0
+        if attacker.has_member("weapon_range_max"):
+            weapon_range = float(attacker["weapon_range_max"].value)
+
+        if weapon_range < 1.0:
+            dropoff = dataset.nyan_api_objects["engine.util.dropoff_type.type.NoDropoff"]
+
+        else:
+            dropoff = dataset.nyan_api_objects["engine.util.dropoff_type.type.Linear"]
+
         # FlatAttributeChangeDecrease
         effect_parent = "engine.effect.discrete.flat_attribute_change.FlatAttributeChange"
         attack_parent = "engine.effect.discrete.flat_attribute_change.type.FlatAttributeChangeDecrease"
@@ -107,6 +125,20 @@ class AoCEffectSubprocessor:
 
             # Ignore protection
             attack_raw_api_object.add_raw_member("ignore_protection", [], effect_parent)
+
+            if blast_range > 0.0:
+                area_ref = f"{attack_ref}.Area"
+                area_raw_api_object = RawAPIObject(area_ref, "Area", dataset.nyan_api_objects)
+                area_raw_api_object.add_raw_parent("engine.effect.property.type.Area")
+                area_raw_api_object.set_location(ForwardRef(line, attack_ref))
+                area_raw_api_object.add_raw_member("range", blast_range, "engine.effect.property.type.Area")
+                area_raw_api_object.add_raw_member("dropoff", dropoff, "engine.effect.property.type.Area")
+                line.add_raw_api_object(area_raw_api_object)
+
+                properties = {
+                    dataset.nyan_api_objects["engine.effect.property.type.Area"]: ForwardRef(line, area_ref)
+                }
+                attack_raw_api_object.add_raw_member("properties", properties, "engine.effect.Effect")
 
             line.add_raw_api_object(attack_raw_api_object)
             attack_forward_ref = ForwardRef(line, attack_ref)

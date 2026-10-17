@@ -15,8 +15,6 @@ from .lookup_dicts import (
     ATTACK_MODES,
     BLAST_DEFENSE_TYPES,
     BLAST_OFFENSE_TYPES,
-    BOUNDARY_IDS,
-    COMBAT_LEVELS,
     COMMAND_ABILITY,
     CREATABLE_TYPES,
     DAMAGE_DRAW_TYPE,
@@ -24,15 +22,12 @@ from .lookup_dicts import (
     FOG_VISIBILITY,
     GARRISON_TYPES,
     INTERACTION_MODES,
-    MINIMAP_MODES,
     OBSTRUCTION_TYPES,
-    OWNER_TYPE,
     RESOURCE_HANDLING,
     RESOURCE_TYPES,
     SELECTION_EFFECTS,
     TERRAIN_RESTRICTIONS,
     UNIT_CLASSES,
-    UNIT_LEVELS,
 )
 
 if typing.TYPE_CHECKING:
@@ -56,7 +51,7 @@ class UnitCommand(GenieStructure):
             # Type (0 = Generic, 1 = Tribe)
             (READ_GEN, "command_used", StorageType.INT_MEMBER, "int16_t"),
             (READ_GEN, "command_id", StorageType.ID_MEMBER, "int16_t"),
-            (SKIP, "is_default", StorageType.BOOLEAN_MEMBER, "int8_t"),
+            (READ_GEN, "is_default", StorageType.BOOLEAN_MEMBER, "int8_t"),
             (
                 READ_GEN,
                 "type",
@@ -67,7 +62,7 @@ class UnitCommand(GenieStructure):
             ),
             (READ_GEN, "class_id", StorageType.ID_MEMBER, "int16_t"),
             (READ_GEN, "unit_id", StorageType.ID_MEMBER, "int16_t"),
-            (SKIP, "terrain_id", StorageType.ID_MEMBER, "int16_t"),
+            (READ_GEN, "terrain_id", StorageType.ID_MEMBER, "int16_t"),
             (READ_GEN, "resource_in", StorageType.INT_MEMBER, "int16_t"),  # carry resource
             # resource that multiplies the amount you can gather
             (READ_GEN, "resource_multiplier", StorageType.INT_MEMBER, "int16_t"),
@@ -75,27 +70,23 @@ class UnitCommand(GenieStructure):
             (SKIP, "unused_resource", StorageType.INT_MEMBER, "int16_t"),
             (READ_GEN, "work_value1", StorageType.FLOAT_MEMBER, "float"),  # quantity
             (READ_GEN, "work_value2", StorageType.FLOAT_MEMBER, "float"),  # execution radius?
-            (SKIP, "work_range", StorageType.FLOAT_MEMBER, "float"),
-            (SKIP, "search_mode", StorageType.BOOLEAN_MEMBER, "int8_t"),
-            (SKIP, "search_time", StorageType.FLOAT_MEMBER, "float"),
-            (SKIP, "enable_targeting", StorageType.BOOLEAN_MEMBER, "int8_t"),
-            (SKIP, "combat_level_flag", StorageType.ID_MEMBER, "int8_t"),
-            (SKIP, "gather_type", StorageType.INT_MEMBER, "int16_t"),
-            (SKIP, "work_mode2", StorageType.INT_MEMBER, "int16_t"),
+            (READ_GEN, "work_range", StorageType.FLOAT_MEMBER, "float"),
+            (READ_GEN, "search_mode", StorageType.BOOLEAN_MEMBER, "int8_t"),
+            (READ_GEN, "search_time", StorageType.FLOAT_MEMBER, "float"),
+            (READ_GEN, "enable_targeting", StorageType.BOOLEAN_MEMBER, "int8_t"),
+            (READ_GEN, "combat_level_flag", StorageType.ID_MEMBER, "int8_t"),
+            (READ_GEN, "gather_type", StorageType.INT_MEMBER, "int16_t"),
+            (READ_GEN, "work_mode2", StorageType.INT_MEMBER, "int16_t"),
             (
-                SKIP,
+                READ_GEN,
                 "owner_type",
                 StorageType.ID_MEMBER,
-                EnumLookupMember(
-                    # what can be selected as a target for the unit command?
-                    raw_type="int8_t",
-                    type_name="selection_type",
-                    lookup_dict=OWNER_TYPE,
-                ),
+                # XR fork: raw value (lookup OWNER_TYPE), values outside the dict must not abort reading
+                "int8_t",
             ),
             # checks if the targeted unit has > 0 resources
-            (SKIP, "carry_check", StorageType.BOOLEAN_MEMBER, "int8_t"),
-            (SKIP, "state_build", StorageType.BOOLEAN_MEMBER, "int8_t"),
+            (READ_GEN, "carry_check", StorageType.BOOLEAN_MEMBER, "int8_t"),
+            (READ_GEN, "state_build", StorageType.BOOLEAN_MEMBER, "int8_t"),
             # walking with tool but no resource
             (READ_GEN, "move_sprite_id", StorageType.ID_MEMBER, "int16_t"),
             # proceeding resource gathering or attack
@@ -263,9 +254,9 @@ class BuildingAnnex(GenieStructure):
         Return the members in this struct.
         """
         data_format = [
-            (SKIP, "unit_id", StorageType.ID_MEMBER, "int16_t"),
-            (SKIP, "misplaced0", StorageType.FLOAT_MEMBER, "float"),
-            (SKIP, "misplaced1", StorageType.FLOAT_MEMBER, "float"),
+            (READ_GEN, "unit_id", StorageType.ID_MEMBER, "int16_t"),
+            (READ_GEN, "misplaced0", StorageType.FLOAT_MEMBER, "float"),
+            (READ_GEN, "misplaced1", StorageType.FLOAT_MEMBER, "float"),
         ]
 
         return data_format
@@ -299,14 +290,14 @@ class UnitObject(GenieStructure):
             data_format.extend(
                 [
                     (READ_GEN, "language_dll_name", StorageType.ID_MEMBER, "uint32_t"),
-                    (SKIP, "language_dll_creation", StorageType.ID_MEMBER, "uint32_t"),
+                    (READ_GEN, "language_dll_creation", StorageType.ID_MEMBER, "uint32_t"),
                 ]
             )
         else:
             data_format.extend(
                 [
                     (READ_GEN, "language_dll_name", StorageType.ID_MEMBER, "uint16_t"),
-                    (SKIP, "language_dll_creation", StorageType.ID_MEMBER, "uint16_t"),
+                    (READ_GEN, "language_dll_creation", StorageType.ID_MEMBER, "uint16_t"),
                 ]
             )
 
@@ -368,10 +359,10 @@ class UnitObject(GenieStructure):
         data_format.extend(
             [
                 # 0=placable on top of others in scenario editor, 5=can't
-                (SKIP, "placement_mode", StorageType.ID_MEMBER, "int8_t"),
-                (SKIP, "can_be_built_on", StorageType.BOOLEAN_MEMBER, "int8_t"),  # 1=no footprints
+                (READ_GEN, "placement_mode", StorageType.ID_MEMBER, "int8_t"),
+                (READ_GEN, "can_be_built_on", StorageType.BOOLEAN_MEMBER, "int8_t"),  # 1=no footprints
                 # frame id of the icon slp (57029) to place on the creation button
-                (SKIP, "icon_id", StorageType.ID_MEMBER, "int16_t"),
+                (READ_GEN, "icon_id", StorageType.ID_MEMBER, "int16_t"),
                 (SKIP, "hidden_in_editor", StorageType.BOOLEAN_MEMBER, "int8_t"),
                 (SKIP, "old_portrait_icon_id", StorageType.ID_MEMBER, "int16_t"),
                 # 0=unlocked by research, 1=insta-available
@@ -380,18 +371,18 @@ class UnitObject(GenieStructure):
         )
 
         if game_version.edition.game_id not in ("ROR", "AOE1DE"):
-            data_format.append((READ, "disabled", StorageType.BOOLEAN_MEMBER, "int8_t"))
+            data_format.append((READ_GEN, "disabled", StorageType.BOOLEAN_MEMBER, "int8_t"))
 
         data_format.extend(
             [
                 # terrain id that's needed somewhere on the foundation (e.g. dock
                 # water)
-                (SKIP, "placement_side_terrain0", StorageType.ID_MEMBER, "int16_t"),
-                (SKIP, "placement_side_terrain1", StorageType.ID_MEMBER, "int16_t"),  # second slot for ^
+                (READ_GEN, "placement_side_terrain0", StorageType.ID_MEMBER, "int16_t"),
+                (READ_GEN, "placement_side_terrain1", StorageType.ID_MEMBER, "int16_t"),  # second slot for ^
                 # terrain needed for placement (e.g. dock: water)
-                (SKIP, "placement_terrain0", StorageType.ID_MEMBER, "int16_t"),
+                (READ_GEN, "placement_terrain0", StorageType.ID_MEMBER, "int16_t"),
                 # alternative terrain needed for placement (e.g. dock: shallows)
-                (SKIP, "placement_terrain1", StorageType.ID_MEMBER, "int16_t"),
+                (READ_GEN, "placement_terrain1", StorageType.ID_MEMBER, "int16_t"),
                 # minimum space required to allow placement in editor
                 (READ_GEN, "clearance_size_x", StorageType.FLOAT_MEMBER, "float"),
                 (READ_GEN, "clearance_size_y", StorageType.FLOAT_MEMBER, "float"),
@@ -440,10 +431,11 @@ class UnitObject(GenieStructure):
                     ),
                 ),
                 (
-                    SKIP,
+                    READ_GEN,
                     "combat_level",
                     StorageType.ID_MEMBER,
-                    EnumLookupMember(raw_type="int8_t", type_name="combat_levels", lookup_dict=COMBAT_LEVELS),
+                    # XR fork: raw value (lookup COMBAT_LEVELS), values outside the dict must not abort reading
+                    "int8_t",
                 ),
                 (
                     READ_GEN,
@@ -457,39 +449,31 @@ class UnitObject(GenieStructure):
                     ),
                 ),
                 (
-                    SKIP,
+                    READ_GEN,
                     "map_draw_level",
                     StorageType.ID_MEMBER,
-                    EnumLookupMember(
-                        # how does the unit show up on the minimap?
-                        raw_type="int8_t",
-                        type_name="minimap_modes",
-                        lookup_dict=MINIMAP_MODES,
-                    ),
+                    # XR fork: raw value (lookup MINIMAP_MODES), values outside the dict must not abort reading
+                    "int8_t",
                 ),
                 (
-                    SKIP,
+                    READ_GEN,
                     "unit_level",
                     StorageType.ID_MEMBER,
-                    EnumLookupMember(
-                        # selects the available ui command buttons for the unit
-                        raw_type="int8_t",
-                        type_name="command_attributes",
-                        lookup_dict=UNIT_LEVELS,
-                    ),
+                    # XR fork: raw value (lookup UNIT_LEVELS), values outside the dict must not abort reading
+                    "int8_t",
                 ),
-                (SKIP, "attack_reaction", StorageType.FLOAT_MEMBER, "float"),
+                (READ_GEN, "attack_reaction", StorageType.FLOAT_MEMBER, "float"),
                 # palette color id for the minimap
-                (SKIP, "minimap_color", StorageType.ID_MEMBER, "int8_t"),
+                (READ_GEN, "minimap_color", StorageType.ID_MEMBER, "int8_t"),
                 # help text for this unit, stored in the translation dll.
-                (SKIP, "language_dll_help", StorageType.ID_MEMBER, "int32_t"),
-                (SKIP, "language_dll_hotkey_text", StorageType.ID_MEMBER, "int32_t"),
+                (READ_GEN, "language_dll_help", StorageType.ID_MEMBER, "int32_t"),
+                (READ_GEN, "language_dll_hotkey_text", StorageType.ID_MEMBER, "int32_t"),
                 # language dll dependent (kezb lazouts!)
-                (SKIP, "hot_keys", StorageType.ID_MEMBER, "int32_t"),
-                (SKIP, "recyclable", StorageType.BOOLEAN_MEMBER, "int8_t"),
-                (SKIP, "enable_auto_gather", StorageType.BOOLEAN_MEMBER, "int8_t"),
+                (READ_GEN, "hot_keys", StorageType.ID_MEMBER, "int32_t"),
+                (READ_GEN, "recyclable", StorageType.BOOLEAN_MEMBER, "int8_t"),
+                (READ_GEN, "enable_auto_gather", StorageType.BOOLEAN_MEMBER, "int8_t"),
                 (SKIP, "doppelgaenger_on_death", StorageType.BOOLEAN_MEMBER, "int8_t"),
-                (SKIP, "resource_gather_drop", StorageType.INT_MEMBER, "int8_t"),
+                (READ_GEN, "resource_gather_drop", StorageType.INT_MEMBER, "int8_t"),
             ]
         )
 
@@ -788,7 +772,7 @@ class ActionUnit(MovingUnit):
             # monument and sheep: 107 = enemy convert.
             # all auto-convertible units: 0, most other units: -1
             # e.g. when sheep are discovered
-            (SKIP, "default_task_id", StorageType.ID_MEMBER, "int16_t"),
+            (READ_GEN, "default_task_id", StorageType.ID_MEMBER, "int16_t"),
             (READ_GEN, "search_radius", StorageType.FLOAT_MEMBER, "float"),
             (READ_GEN, "work_rate", StorageType.FLOAT_MEMBER, "float"),
         ]
@@ -875,9 +859,9 @@ class ProjectileUnit(ActionUnit):
         ]
 
         if game_version.edition.game_id == "ROR":
-            data_format.append((SKIP, "default_armor", StorageType.INT_MEMBER, "uint8_t"))
+            data_format.append((READ_GEN, "default_armor", StorageType.INT_MEMBER, "uint8_t"))
         else:
-            data_format.append((SKIP, "default_armor", StorageType.INT_MEMBER, "int16_t"))
+            data_format.append((READ_GEN, "default_armor", StorageType.INT_MEMBER, "int16_t"))
 
         data_format.extend(
             [
@@ -902,16 +886,11 @@ class ProjectileUnit(ActionUnit):
                     ),
                 ),
                 (
-                    SKIP,
+                    READ_GEN,
                     "boundary_id",
                     StorageType.ID_MEMBER,
-                    EnumLookupMember(
-                        # the damage received by this unit is multiplied by
-                        # the accessible values on the specified terrain restriction
-                        raw_type="int16_t",
-                        type_name="boundary_ids",
-                        lookup_dict=BOUNDARY_IDS,
-                    ),
+                    # XR fork: raw value (lookup BOUNDARY_IDS), values outside the dict must not abort reading
+                    "int16_t",
                 ),
             ]
         )
@@ -929,7 +908,7 @@ class ProjectileUnit(ActionUnit):
                 # probablity of attack hit in percent
                 (READ_GEN, "accuracy", StorageType.INT_MEMBER, "int16_t"),
                 # = tower mode?; not used anywhere
-                (SKIP, "break_off_combat", StorageType.INT_MEMBER, "int8_t"),
+                (READ_GEN, "break_off_combat", StorageType.INT_MEMBER, "int8_t"),
                 # the frame number at which the missile is fired, = delay
                 (READ_GEN, "frame_delay", StorageType.INT_MEMBER, "int16_t"),
                 # graphics displacement in x, y and z
@@ -1088,7 +1067,7 @@ class LivingUnit(ProjectileUnit):
                 # |----|----|----|----|----|
                 # | 31 | 32 | 33 | 34 | 35 |
                 # +------------------------+
-                (READ, "creation_button_id", StorageType.ID_MEMBER, "int8_t"),
+                (READ_GEN, "creation_button_id", StorageType.ID_MEMBER, "int8_t"),
             ]
         )
 
@@ -1229,9 +1208,9 @@ class BuildingUnit(LivingUnit):
         data_format.extend(
             [
                 # 1=adjacent units may change the graphics
-                (SKIP, "adjacent_mode", StorageType.BOOLEAN_MEMBER, "int8_t"),
+                (READ_GEN, "adjacent_mode", StorageType.BOOLEAN_MEMBER, "int8_t"),
                 (SKIP, "graphics_angle", StorageType.INT_MEMBER, "int16_t"),
-                (SKIP, "disappears_when_built", StorageType.BOOLEAN_MEMBER, "int8_t"),
+                (READ_GEN, "disappears_when_built", StorageType.BOOLEAN_MEMBER, "int8_t"),
                 # second building to place directly on top
                 (READ_GEN, "stack_unit_id", StorageType.ID_MEMBER, "int16_t"),
                 # change underlying terrain to this id when building completed
@@ -1249,7 +1228,7 @@ class BuildingUnit(LivingUnit):
                 [
                     (SKIP, "can_burn", StorageType.BOOLEAN_MEMBER, "int8_t"),
                     (
-                        SKIP,
+                        READ_GEN,
                         "building_annex",
                         StorageType.ARRAY_CONTAINER,
                         SubdataMember(ref_type=BuildingAnnex, length=4),
@@ -1284,7 +1263,7 @@ class BuildingUnit(LivingUnit):
                         ),
                     ),
                     (READ_GEN, "garrison_heal_rate", StorageType.FLOAT_MEMBER, "float"),
-                    (SKIP, "garrison_repair_rate", StorageType.FLOAT_MEMBER, "float"),
+                    (READ_GEN, "garrison_repair_rate", StorageType.FLOAT_MEMBER, "float"),
                     # id of the unit used for salvages
                     (SKIP, "salvage_unit_id", StorageType.ID_MEMBER, "int16_t"),
                     # list of attributes for salvages (looting table)

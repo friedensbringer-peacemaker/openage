@@ -33,6 +33,7 @@ from ....entity_object.conversion.combined_sprite import CombinedSprite
 from ....entity_object.conversion.converter_object import RawAPIObject, RawMemberPush
 from ....service.conversion import internal_name_lookups
 from ....value_object.conversion.forward_ref import ForwardRef
+from .auxiliary_subprocessor import AoCXrSubprocessor
 from .effect_subprocessor import AoCEffectSubprocessor
 
 if typing.TYPE_CHECKING:
@@ -3118,6 +3119,7 @@ class AoCAbilitySubprocessor:
             ability_animation_id = -1
             harvestable_class_ids = OrderedSet()
             harvestable_unit_ids = OrderedSet()
+            gather_commands = []  # XR fork: exported as engine.xr.property.GenieTasks
 
             for command in unit_commands:
                 # Find a gather ability. It doesn't matter which one because
@@ -3126,6 +3128,8 @@ class AoCAbilitySubprocessor:
 
                 if type_id not in (5, 110):
                     continue
+
+                gather_commands.append(command)
 
                 target_class_id = command["class_id"].value
                 if target_class_id > -1:
@@ -3253,14 +3257,24 @@ class AoCAbilitySubprocessor:
             property_forward_ref = ForwardRef(line, property_ref)
             properties.update({api_objects["engine.ability.property.type.Diplomatic"]: property_forward_ref})
 
+            # XR fork: the Genie gather tasks (work range, search time, productivity resource, ...)
+            property_key, property_forward_ref = AoCXrSubprocessor.genie_tasks_property(
+                line, ability_ref, gatherer, gather_commands
+            )
+            properties.update({property_key: property_forward_ref})
+
             ability_raw_api_object.add_raw_member("properties", properties, "engine.ability.Ability")
 
             # Auto resume
             ability_raw_api_object.add_raw_member("auto_resume", True, "engine.ability.type.Gather")
 
-            # search range
+            # search range (XR fork: Genie search radius of the gatherer, AoE II searches nearby spots)
+            resume_search_range = MemberSpecialValue.NYAN_INF
+            if gatherer.has_member("search_radius") and gatherer["search_radius"].value > 0:
+                resume_search_range = gatherer["search_radius"].value
+
             ability_raw_api_object.add_raw_member(
-                "resume_search_range", MemberSpecialValue.NYAN_INF, "engine.ability.type.Gather"
+                "resume_search_range", resume_search_range, "engine.ability.type.Gather"
             )
 
             # Gather rate

@@ -21,7 +21,7 @@ from ....entity_object.conversion.converter_object import RawAPIObject
 from ....service.conversion import internal_name_lookups
 from ....value_object.conversion.forward_ref import ForwardRef
 from .ability_subprocessor import AoCAbilitySubprocessor
-from .auxiliary_subprocessor import AoCAuxiliarySubprocessor
+from .auxiliary_subprocessor import AoCAuxiliarySubprocessor, AoCXrSubprocessor
 from .civ_subprocessor import AoCCivSubprocessor
 from .modifier_subprocessor import AoCModifierSubprocessor
 from .tech_subprocessor import AoCTechSubprocessor
@@ -54,6 +54,8 @@ class AoCNyanSubprocessor:
         cls._process_game_entities(full_data_set)
         cls._create_nyan_objects(full_data_set)
         cls._create_nyan_members(full_data_set)
+        # XR fork: global Genie tables (civ resources, terrain restrictions, techs)
+        AoCXrSubprocessor.genie_data(full_data_set)
 
         cls._check_objects(full_data_set)
 
@@ -353,6 +355,8 @@ class AoCNyanSubprocessor:
         # =======================================================================
         # TODO: Transform
         # =======================================================================
+        # XR fork: raw Genie fields (engine.xr.ability.GenieUnit)
+        abilities_set.append(AoCXrSubprocessor.genie_unit_ability(unit_line))
         raw_api_object.add_raw_member("abilities", abilities_set, "engine.util.game_entity.GameEntity")
 
         # =======================================================================
@@ -514,6 +518,8 @@ class AoCNyanSubprocessor:
             # Market trading
             abilities_set.extend(AoCAbilitySubprocessor.exchange_resources_ability(building_line))
 
+        # XR fork: raw Genie fields (engine.xr.ability.GenieUnit)
+        abilities_set.append(AoCXrSubprocessor.genie_unit_ability(building_line))
         raw_api_object.add_raw_member("abilities", abilities_set, "engine.util.game_entity.GameEntity")
 
         # =======================================================================
@@ -606,6 +612,8 @@ class AoCNyanSubprocessor:
         # =======================================================================
         # Abilities
         # =======================================================================
+        # XR fork: raw Genie fields (engine.xr.ability.GenieUnit)
+        abilities_set.append(AoCXrSubprocessor.genie_unit_ability(ambient_group))
         raw_api_object.add_raw_member("abilities", abilities_set, "engine.util.game_entity.GameEntity")
 
         # =======================================================================
@@ -689,6 +697,8 @@ class AoCNyanSubprocessor:
         if variant_group.is_harvestable():
             abilities_set.append(AoCAbilitySubprocessor.harvestable_ability(variant_group))
 
+        # XR fork: raw Genie fields (engine.xr.ability.GenieUnit)
+        abilities_set.append(AoCXrSubprocessor.genie_unit_ability(variant_group))
         raw_api_object.add_raw_member("abilities", abilities_set, "engine.util.game_entity.GameEntity")
 
         # =======================================================================
@@ -1250,6 +1260,11 @@ class AoCNyanSubprocessor:
             )
             abilities_set.append(
                 AoCAbilitySubprocessor.apply_discrete_effect_ability(line, 7, False, projectile_num)
+            )
+            # XR fork: raw Genie fields of the projectile unit (engine.xr.ability.GenieUnit)
+            projectile_id = current_unit[f"projectile_id{projectile_num}"].value
+            abilities_set.append(
+                AoCXrSubprocessor.genie_unit_ability(line, obj_ref, dataset.genie_units[projectile_id])
             )
             # TODO: Death, Despawn
             proj_raw_api_object.add_raw_member(

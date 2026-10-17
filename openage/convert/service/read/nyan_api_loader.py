@@ -39,6 +39,10 @@ def load_api() -> dict[str, NyanObject]:
     api_objects = _create_objects(api_objects)
     _insert_members(api_objects)
 
+    # XR fork (xr.ages): raw Genie fields for later rounds, see _create_xr_objects()
+    _create_xr_objects(api_objects)
+    _insert_xr_members(api_objects)
+
     return api_objects
 
 
@@ -4994,3 +4998,284 @@ def _insert_members(api_objects: dict[str, NyanObject]) -> None:
     member_type = NyanMemberType(api_objects["engine.util.storage.StorageElementDefinition"])
     member = NyanMember("storage_element", member_type, None, None, 0)
     api_object.add_member(member)
+
+
+# =============================================================================
+# XR fork (xr.ages): engine.xr.* - raw Genie fields that the openage API does
+# not model (yet). The converter fills them 1:1 from the .dat file so that later
+# engine rounds can implement AoE II rules without changing the converter again.
+#
+# - engine.xr.util.GenieUnitData    all fields of one Genie unit (incl. tasks)
+# - engine.xr.ability.GenieUnit     ability on every converted GameEntity
+#                                   (= GenieUnitData of the head unit + variants)
+# - engine.xr.property.GenieTasks   property on Gather abilities: their Genie tasks
+# - engine.xr.util.GenieData        global tables (civ resources, terrain
+#                                   restrictions, terrain ids, tech UI data)
+#
+# The objects live in the engine modpack (engine/xr/*.nyan), because the API
+# export writes every API object there. Every member has a default value, so
+# data objects may leave members out, and the engine ignores the ability
+# (unknown parent). Ints are raw .dat values (booleans 0/1, IDs -1 = none).
+# Documentation: XR-openage docs/KONVERTER-FELDER.md
+# =============================================================================
+
+# (nyan member, type, default, .dat member) of engine.xr.util.GenieUnitData
+XR_GENIE_UNIT_FIELDS: tuple[tuple[str, str, int | float, str], ...] = (
+    # identity
+    ("unit_id", "int", -1, "id0"),
+    ("unit_type", "int", -1, "unit_type"),
+    ("unit_class", "int", -1, "unit_class"),
+    ("unit_line_id", "int", -1, "unit_line_id"),
+    ("task_group", "int", 0, "task_group"),
+    ("default_task_id", "int", -1, "default_task_id"),
+    # interface: strings, hotkeys, buttons, minimap (W8)
+    ("language_dll_name", "int", -1, "language_dll_name"),
+    ("language_dll_creation", "int", -1, "language_dll_creation"),
+    ("language_dll_help", "int", -1, "language_dll_help"),
+    ("language_dll_hotkey_text", "int", -1, "language_dll_hotkey_text"),
+    ("hot_keys", "int", -1, "hot_keys"),
+    ("icon_id", "int", -1, "icon_id"),
+    ("creation_button_id", "int", 0, "creation_button_id"),
+    ("train_location_id", "int", -1, "train_location_id"),
+    ("creation_time", "int", 0, "creation_time"),
+    ("creatable_type", "int", 0, "creatable_type"),
+    ("enabled", "int", 0, "enabled"),
+    ("disabled", "int", 0, "disabled"),
+    ("minimap_color", "int", 0, "minimap_color"),
+    ("map_draw_level", "int", 0, "map_draw_level"),
+    ("unit_level", "int", 0, "unit_level"),
+    ("interaction_mode", "int", 0, "interaction_mode"),
+    ("combat_level", "int", 0, "combat_level"),
+    ("visible_in_fog", "int", 0, "visible_in_fog"),
+    # placement and buildings (W3 dock, W5)
+    ("placement_mode", "int", 0, "placement_mode"),
+    ("can_be_built_on", "int", 0, "can_be_built_on"),
+    ("placement_terrain0", "int", -1, "placement_terrain0"),
+    ("placement_terrain1", "int", -1, "placement_terrain1"),
+    ("placement_side_terrain0", "int", -1, "placement_side_terrain0"),
+    ("placement_side_terrain1", "int", -1, "placement_side_terrain1"),
+    ("elevation_mode", "int", 0, "elevation_mode"),
+    ("terrain_restriction", "int", -1, "terrain_restriction"),
+    ("fly_mode", "int", 0, "fly_mode"),
+    ("clearance_size_x", "float", 0.0, "clearance_size_x"),
+    ("clearance_size_y", "float", 0.0, "clearance_size_y"),
+    ("obstruction_type", "int", 0, "obstruction_type"),
+    ("obstruction_class", "int", 0, "obstruction_class"),
+    ("foundation_terrain_id", "int", -1, "foundation_terrain_id"),
+    ("stack_unit_id", "int", -1, "stack_unit_id"),
+    ("head_unit_id", "int", -1, "head_unit_id"),
+    ("transform_unit_id", "int", -1, "transform_unit_id"),
+    ("disappears_when_built", "int", 0, "disappears_when_built"),
+    ("adjacent_mode", "int", 0, "adjacent_mode"),
+    ("research_id", "int", -1, "research_id"),
+    ("garrison_type", "int", 0, "garrison_type"),
+    ("garrison_capacity", "int", 0, "garrison_capacity"),
+    ("garrison_heal_rate", "float", 0.0, "garrison_heal_rate"),
+    ("garrison_repair_rate", "float", 0.0, "garrison_repair_rate"),
+    # economy (W3, W7)
+    ("work_rate", "float", 0.0, "work_rate"),
+    ("search_radius", "float", 0.0, "search_radius"),
+    ("resource_capacity", "int", 0, "resource_capacity"),
+    ("resource_decay", "float", 0.0, "resource_decay"),
+    ("dead_unit_id", "int", -1, "dead_unit_id"),
+    ("enable_auto_gather", "int", 0, "enable_auto_gather"),
+    ("resource_gather_drop", "int", 0, "resource_gather_drop"),
+    ("recyclable", "int", 0, "recyclable"),
+    # combat, stances, garrison arrows, area damage, conversion (W4, W6)
+    ("hit_points", "int", 0, "hit_points"),
+    ("line_of_sight", "float", 0.0, "line_of_sight"),
+    ("speed", "float", 0.0, "speed"),
+    ("attack_reaction", "float", 0.0, "attack_reaction"),
+    ("break_off_combat", "int", 0, "break_off_combat"),
+    ("default_armor", "int", 1000, "default_armor"),
+    ("defense_terrain_bonus", "int", -1, "boundary_id"),
+    ("weapon_range_min", "float", 0.0, "weapon_range_min"),
+    ("weapon_range_max", "float", 0.0, "weapon_range_max"),
+    ("attack_speed", "float", 0.0, "attack_speed"),
+    ("accuracy", "int", 0, "accuracy"),
+    ("accuracy_dispersion", "float", 0.0, "accuracy_dispersion"),
+    ("frame_delay", "int", 0, "frame_delay"),
+    ("blast_range", "float", 0.0, "blast_range"),
+    ("blast_damage", "float", 0.0, "blast_damage"),
+    ("blast_level_offence", "int", 0, "blast_level_offence"),
+    ("blast_defense_level", "int", 0, "blast_defense_level"),
+    ("projectile_id0", "int", -1, "projectile_id0"),
+    ("projectile_id1", "int", -1, "projectile_id1"),
+    ("projectile_min_count", "int", 0, "projectile_min_count"),
+    ("projectile_max_count", "int", 0, "projectile_max_count"),
+    ("projectile_spawning_area_width", "float", 0.0, "projectile_spawning_area_width"),
+    ("projectile_spawning_area_length", "float", 0.0, "projectile_spawning_area_length"),
+    ("projectile_spawning_area_randomness", "float", 0.0, "projectile_spawning_area_randomness"),
+    # projectiles (type 60, W4/W6)
+    ("projectile_type", "int", 0, "projectile_type"),
+    ("smart_mode", "int", 0, "smart_mode"),
+    ("drop_animation_mode", "int", 0, "drop_animation_mode"),
+    ("penetration_mode", "int", 0, "penetration_mode"),
+    ("area_of_effect_special", "int", 0, "area_of_effect_special"),
+    ("projectile_arc", "float", 0.0, "projectile_arc"),
+)
+
+# (nyan member, type, default, .dat member) of engine.xr.util.GenieTask
+XR_GENIE_TASK_FIELDS: tuple[tuple[str, str, int | float, str], ...] = (
+    ("task_id", "int", -1, "command_id"),
+    ("task_type", "int", -1, "type"),
+    ("is_default", "int", 0, "is_default"),
+    ("class_id", "int", -1, "class_id"),
+    ("unit_id", "int", -1, "unit_id"),
+    ("terrain_id", "int", -1, "terrain_id"),
+    ("resource_in", "int", -1, "resource_in"),
+    ("resource_multiplier", "int", -1, "resource_multiplier"),
+    ("resource_out", "int", -1, "resource_out"),
+    ("work_value1", "float", 0.0, "work_value1"),
+    ("work_value2", "float", 0.0, "work_value2"),
+    ("work_range", "float", 0.0, "work_range"),
+    ("search_mode", "int", 0, "search_mode"),
+    ("search_time", "float", 0.0, "search_time"),
+    ("enable_targeting", "int", 0, "enable_targeting"),
+    ("combat_level_flag", "int", 0, "combat_level_flag"),
+    ("gather_type", "int", 0, "gather_type"),
+    ("work_mode2", "int", 0, "work_mode2"),
+    ("owner_type", "int", 0, "owner_type"),
+    ("carry_check", "int", 0, "carry_check"),
+    ("state_build", "int", 0, "state_build"),
+)
+
+# (nyan member, type, default, .dat member) of engine.xr.util.GenieTech
+XR_GENIE_TECH_FIELDS: tuple[tuple[str, str, int | float, str], ...] = (
+    ("research_location_id", "int", -1, "research_location_id"),
+    ("research_time", "int", 0, "research_time"),
+    ("button_id", "int", 0, "button_id"),
+    ("hotkey", "int", -1, "hotkey"),
+    ("icon_id", "int", -1, "icon_id"),
+    ("language_dll_name", "int", -1, "language_dll_name"),
+    ("language_dll_description", "int", -1, "language_dll_description"),
+    ("language_dll_help", "int", -1, "language_dll_help"),
+    ("language_dll_techtree", "int", -1, "language_dll_techtree"),
+    ("tech_type", "int", 0, "tech_type"),
+    ("tech_effect_id", "int", -1, "tech_effect_id"),
+    ("civilization_id", "int", -1, "civilization_id"),
+    ("full_tech_mode", "int", 0, "full_tech_mode"),
+    ("required_tech_count", "int", 0, "required_tech_count"),
+)
+
+_XR_PRIMITIVES = {"int": N_INT, "float": N_FLOAT}
+
+
+def _xr_object(api_objects: dict[str, NyanObject], fqon: str, parent_fqons: list[str]) -> None:
+    """
+    Create one engine.xr API object.
+    """
+    parents = OrderedSet([api_objects[parent] for parent in parent_fqons])
+    nyan_object = NyanObject(fqon.split(".")[-1], parents)
+    nyan_object.set_fqon(fqon)
+    api_objects.update({fqon: nyan_object})
+
+
+def _xr_member(api_object: NyanObject, name: str, member_type: NyanMemberType, default) -> None:
+    """
+    Add a member with a default value (data objects may leave it out).
+    """
+    member = NyanMember(name, member_type, default, MemberOperator.ASSIGN, 0)
+    api_object.add_member(member)
+
+
+def _xr_fields(api_object: NyanObject, fields: tuple[tuple[str, str, int | float, str], ...]) -> None:
+    """
+    Add primitive members from a field table.
+    """
+    for name, type_name, default, _ in fields:
+        _xr_member(api_object, name, _XR_PRIMITIVES[type_name], default)
+
+
+def _create_xr_objects(api_objects: dict[str, NyanObject]) -> None:
+    """
+    Creates the engine.xr API objects of the XR fork.
+    """
+    root = "engine.root.Object"
+    _xr_object(api_objects, "engine.xr.util.GenieTask", [root])
+    _xr_object(api_objects, "engine.xr.util.GenieResourceStorage", [root])
+    _xr_object(api_objects, "engine.xr.util.GenieAnnex", [root])
+    _xr_object(api_objects, "engine.xr.util.GenieUnitData", [root])
+    _xr_object(api_objects, "engine.xr.util.GenieCiv", [root])
+    _xr_object(api_objects, "engine.xr.util.GenieTerrainRestriction", [root])
+    _xr_object(api_objects, "engine.xr.util.GenieTech", [root])
+    _xr_object(api_objects, "engine.xr.util.GenieData", [root])
+    # first parent stays engine.ability.Ability: the engine dispatches abilities on parents()[0]
+    _xr_object(
+        api_objects, "engine.xr.ability.GenieUnit", ["engine.ability.Ability", "engine.xr.util.GenieUnitData"]
+    )
+    _xr_object(api_objects, "engine.xr.property.GenieTasks", ["engine.ability.property.AbilityProperty"])
+
+
+def _insert_xr_members(api_objects: dict[str, NyanObject]) -> None:
+    """
+    Creates the members of the engine.xr API objects.
+    """
+    int_set = NyanMemberType(MemberType.ORDEREDSET, (N_INT,))
+    int_float_dict = NyanMemberType(MemberType.DICT, (N_INT, N_FLOAT))
+
+    def ordered(fqon: str) -> NyanMemberType:
+        return NyanMemberType(MemberType.ORDEREDSET, (NyanMemberType(api_objects[fqon]),))
+
+    def optional(fqon: str) -> NyanMemberType:
+        return NyanMemberType(MemberType.OPTIONAL, (NyanMemberType(api_objects[fqon]),))
+
+    # engine.xr.util.GenieTask
+    api_object = api_objects["engine.xr.util.GenieTask"]
+    _xr_member(api_object, "source_unit_id", N_INT, -1)
+    _xr_fields(api_object, XR_GENIE_TASK_FIELDS)
+
+    # engine.xr.util.GenieResourceStorage
+    api_object = api_objects["engine.xr.util.GenieResourceStorage"]
+    _xr_member(api_object, "type", N_INT, -1)
+    _xr_member(api_object, "amount", N_FLOAT, 0.0)
+    _xr_member(api_object, "used_mode", N_INT, 0)
+
+    # engine.xr.util.GenieAnnex
+    api_object = api_objects["engine.xr.util.GenieAnnex"]
+    _xr_member(api_object, "unit_id", N_INT, -1)
+    _xr_member(api_object, "offset_x", N_FLOAT, 0.0)
+    _xr_member(api_object, "offset_y", N_FLOAT, 0.0)
+
+    # engine.xr.util.GenieUnitData
+    api_object = api_objects["engine.xr.util.GenieUnitData"]
+    _xr_fields(api_object, XR_GENIE_UNIT_FIELDS)
+    _xr_member(api_object, "drop_sites", int_set, [])
+    _xr_member(api_object, "resource_storages", ordered("engine.xr.util.GenieResourceStorage"), [])
+    _xr_member(api_object, "annexes", ordered("engine.xr.util.GenieAnnex"), [])
+    _xr_member(api_object, "tasks", ordered("engine.xr.util.GenieTask"), [])
+
+    # engine.xr.ability.GenieUnit
+    api_object = api_objects["engine.xr.ability.GenieUnit"]
+    _xr_member(api_object, "line_unit_ids", int_set, [])
+    _xr_member(api_object, "variants", ordered("engine.xr.util.GenieUnitData"), [])
+
+    # engine.xr.property.GenieTasks
+    api_object = api_objects["engine.xr.property.GenieTasks"]
+    _xr_member(api_object, "tasks", ordered("engine.xr.util.GenieTask"), [])
+
+    # engine.xr.util.GenieCiv
+    api_object = api_objects["engine.xr.util.GenieCiv"]
+    _xr_member(api_object, "civ_id", N_INT, -1)
+    _xr_member(api_object, "setup", optional("engine.util.setup.PlayerSetup"), MemberSpecialValue.NYAN_NONE)
+    _xr_member(api_object, "resources", int_float_dict, {})
+
+    # engine.xr.util.GenieTerrainRestriction
+    api_object = api_objects["engine.xr.util.GenieTerrainRestriction"]
+    _xr_member(api_object, "restriction_id", N_INT, -1)
+    _xr_member(api_object, "factors", int_float_dict, {})
+
+    # engine.xr.util.GenieTech
+    api_object = api_objects["engine.xr.util.GenieTech"]
+    _xr_member(api_object, "research_id", N_INT, -1)
+    _xr_member(api_object, "tech", optional("engine.util.tech.Tech"), MemberSpecialValue.NYAN_NONE)
+    _xr_fields(api_object, XR_GENIE_TECH_FIELDS)
+    _xr_member(api_object, "required_techs", int_set, [])
+
+    # engine.xr.util.GenieData
+    api_object = api_objects["engine.xr.util.GenieData"]
+    terrain_type = NyanMemberType(api_objects["engine.util.terrain.Terrain"])
+    _xr_member(api_object, "civs", ordered("engine.xr.util.GenieCiv"), [])
+    _xr_member(api_object, "terrains", NyanMemberType(MemberType.DICT, (N_INT, terrain_type)), {})
+    _xr_member(api_object, "terrain_restrictions", ordered("engine.xr.util.GenieTerrainRestriction"), [])
+    _xr_member(api_object, "techs", ordered("engine.xr.util.GenieTech"), [])

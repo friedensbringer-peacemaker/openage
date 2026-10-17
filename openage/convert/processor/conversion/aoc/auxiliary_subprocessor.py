@@ -20,6 +20,7 @@ from ....entity_object.conversion.aoc.genie_unit import (
 from ....entity_object.conversion.combined_sound import CombinedSound
 from ....entity_object.conversion.converter_object import ConverterObjectGroup, RawAPIObject
 from ....service.conversion import internal_name_lookups
+from ....service.read.nyan_api_loader import XR_GENIE_TASK_FIELDS, XR_GENIE_TECH_FIELDS, XR_GENIE_UNIT_FIELDS
 from ....value_object.conversion.forward_ref import ForwardRef
 
 if typing.TYPE_CHECKING:
@@ -708,3 +709,371 @@ class AoCAuxiliarySubprocessor:
             converter_obj_group.add_raw_api_object(gate_raw_api_object)
             gate_forward_ref = ForwardRef(converter_obj_group, gate_ref)
             return [gate_forward_ref]
+
+
+class AoCXrSubprocessor:
+    """
+    XR fork (xr.ages): fills the engine.xr.* extension objects with raw Genie
+    fields that the openage API does not model (see nyan_api_loader.py and
+    XR-openage docs/KONVERTER-FELDER.md).
+    """
+
+    @staticmethod
+    def _value(obj, member: str, default):
+        """
+        Raw value of a Genie member, default if the struct has no such member.
+        """
+        if hasattr(obj, "has_member"):
+            present = obj.has_member(member)
+
+        else:
+            present = member in obj.value
+
+        if not present:
+            return default
+
+        value = obj[member].value
+        if isinstance(value, bool):
+            return int(value)
+
+        return value
+
+    @classmethod
+    def _add_fields(cls, raw_api_object: RawAPIObject, genie_obj, fields, origin: str) -> None:
+        """
+        Primitive members from a field table of nyan_api_loader.
+        """
+        for name, type_name, default, dat_name in fields:
+            value = cls._value(genie_obj, dat_name, default)
+            if type_name == "int":
+                value = int(value)
+
+            else:
+                value = float(value)
+
+            raw_api_object.add_raw_member(name, value, origin)
+
+    @classmethod
+    def _task_refs(
+        cls,
+        group: ConverterObjectGroup,
+        location_ref: str,
+        prefix: str,
+        genie_unit,
+        commands=None,
+    ) -> list[ForwardRef]:
+        """
+        engine.xr.util.GenieTask objects nested in location_ref, one per unit command.
+        """
+        dataset = group.data
+        if commands is None:
+            commands = cls._value(genie_unit, "unit_commands", [])
+
+        unit_id = cls._value(genie_unit, "id0", -1)
+        refs = []
+        for index, command in enumerate(commands):
+            task_ref = f"{location_ref}.{prefix}{index}"
+            task_raw_api_object = RawAPIObject(task_ref, f"{prefix}{index}", dataset.nyan_api_objects)
+            task_raw_api_object.add_raw_parent("engine.xr.util.GenieTask")
+            task_raw_api_object.set_location(ForwardRef(group, location_ref))
+
+            task_raw_api_object.add_raw_member("source_unit_id", unit_id, "engine.xr.util.GenieTask")
+            cls._add_fields(task_raw_api_object, command, XR_GENIE_TASK_FIELDS, "engine.xr.util.GenieTask")
+
+            group.add_raw_api_object(task_raw_api_object)
+            refs.append(ForwardRef(group, task_ref))
+
+        return refs
+
+    @classmethod
+    def _fill_unit_data(cls, group: ConverterObjectGroup, raw_api_object: RawAPIObject, genie_unit) -> None:
+        """
+        All engine.xr.util.GenieUnitData members of one Genie unit.
+        """
+        dataset = group.data
+        origin = "engine.xr.util.GenieUnitData"
+        obj_ref = raw_api_object.get_id()
+
+        cls._add_fields(raw_api_object, genie_unit, XR_GENIE_UNIT_FIELDS, origin)
+
+        drop_sites = [member.value for member in cls._value(genie_unit, "drop_sites", [])]
+        raw_api_object.add_raw_member("drop_sites", [site for site in drop_sites if site > -1], origin)
+
+        storages = []
+        for index, storage in enumerate(cls._value(genie_unit, "resource_storage", [])):
+            storage_type = cls._value(storage, "type", -1)
+            if storage_type < 0:
+                continue
+
+            storage_ref = f"{obj_ref}.Storage{index}"
+            storage_raw_api_object = RawAPIObject(storage_ref, f"Storage{index}", dataset.nyan_api_objects)
+            storage_raw_api_object.add_raw_parent("engine.xr.util.GenieResourceStorage")
+            storage_raw_api_object.set_location(ForwardRef(group, obj_ref))
+            storage_origin = "engine.xr.util.GenieResourceStorage"
+            storage_raw_api_object.add_raw_member("type", storage_type, storage_origin)
+            storage_raw_api_object.add_raw_member(
+                "amount", float(cls._value(storage, "amount", 0.0)), storage_origin
+            )
+            storage_raw_api_object.add_raw_member(
+                "used_mode", int(cls._value(storage, "used_mode", 0)), storage_origin
+            )
+            group.add_raw_api_object(storage_raw_api_object)
+            storages.append(ForwardRef(group, storage_ref))
+
+        raw_api_object.add_raw_member("resource_storages", storages, origin)
+
+        annexes = []
+        for index, annex in enumerate(cls._value(genie_unit, "building_annex", [])):
+            annex_unit_id = cls._value(annex, "unit_id", -1)
+            if annex_unit_id < 0:
+                continue
+
+            annex_ref = f"{obj_ref}.Annex{index}"
+            annex_raw_api_object = RawAPIObject(annex_ref, f"Annex{index}", dataset.nyan_api_objects)
+            annex_raw_api_object.add_raw_parent("engine.xr.util.GenieAnnex")
+            annex_raw_api_object.set_location(ForwardRef(group, obj_ref))
+            annex_origin = "engine.xr.util.GenieAnnex"
+            annex_raw_api_object.add_raw_member("unit_id", annex_unit_id, annex_origin)
+            annex_raw_api_object.add_raw_member(
+                "offset_x", float(cls._value(annex, "misplaced0", 0.0)), annex_origin
+            )
+            annex_raw_api_object.add_raw_member(
+                "offset_y", float(cls._value(annex, "misplaced1", 0.0)), annex_origin
+            )
+            group.add_raw_api_object(annex_raw_api_object)
+            annexes.append(ForwardRef(group, annex_ref))
+
+        raw_api_object.add_raw_member("annexes", annexes, origin)
+
+        tasks = cls._task_refs(group, obj_ref, "Task", genie_unit)
+        raw_api_object.add_raw_member("tasks", tasks, origin)
+
+    @staticmethod
+    def _variant_units(line: ConverterObjectGroup) -> list:
+        """
+        Genie units that belong to the game entity besides the head unit
+        (villager task units, monk with relic, packed/unpacked, stacked building).
+        """
+        head_unit = line.get_head_unit()
+        units = []
+        if isinstance(line, GenieVillagerGroup):
+            for variant in line.variants:
+                units.extend(variant.line)
+
+        for attr in ("transform_unit", "switch_unit", "stack"):
+            unit = getattr(line, attr, None)
+            if unit is not None:
+                units.append(unit)
+
+        result = []
+        seen = {head_unit["id0"].value}
+        for unit in units:
+            unit_id = unit["id0"].value
+            if unit_id not in seen:
+                seen.add(unit_id)
+                result.append(unit)
+
+        return result
+
+    @classmethod
+    def genie_unit_ability(
+        cls,
+        line: ConverterObjectGroup,
+        entity_ref: str | None = None,
+        genie_unit=None,
+    ) -> ForwardRef:
+        """
+        Adds the engine.xr.ability.GenieUnit ability to a game entity.
+
+        :param line: Group that owns the game entity.
+        :param entity_ref: Raw API object ID of the game entity (default: the line's entity).
+        :param genie_unit: Genie unit of the entity (default: the line's head unit).
+        """
+        dataset = line.data
+        if entity_ref is None:
+            name_lookup_dict = internal_name_lookups.get_entity_lookups(dataset.game_version)
+            entity_ref = name_lookup_dict[line.get_head_unit_id()][0]
+
+        variants_units = []
+        line_unit_ids = []
+        if genie_unit is None:
+            genie_unit = line.get_head_unit()
+            variants_units = cls._variant_units(line)
+            for unit in getattr(line, "line", []):
+                unit_id = unit["id0"].value
+                if unit_id not in line_unit_ids:
+                    line_unit_ids.append(unit_id)
+
+        ability_ref = f"{entity_ref}.GenieUnit"
+        ability_raw_api_object = RawAPIObject(ability_ref, "GenieUnit", dataset.nyan_api_objects)
+        ability_raw_api_object.add_raw_parent("engine.xr.ability.GenieUnit")
+        ability_raw_api_object.set_location(ForwardRef(line, entity_ref))
+        line.add_raw_api_object(ability_raw_api_object)
+
+        cls._fill_unit_data(line, ability_raw_api_object, genie_unit)
+
+        variants = []
+        for unit in variants_units:
+            variant_ref = f"{ability_ref}.Variant{unit['id0'].value}"
+            variant_raw_api_object = RawAPIObject(
+                variant_ref, f"Variant{unit['id0'].value}", dataset.nyan_api_objects
+            )
+            variant_raw_api_object.add_raw_parent("engine.xr.util.GenieUnitData")
+            variant_raw_api_object.set_location(ForwardRef(line, ability_ref))
+            line.add_raw_api_object(variant_raw_api_object)
+            cls._fill_unit_data(line, variant_raw_api_object, unit)
+            variants.append(ForwardRef(line, variant_ref))
+
+        ability_raw_api_object.add_raw_member("variants", variants, "engine.xr.ability.GenieUnit")
+        ability_raw_api_object.add_raw_member("line_unit_ids", line_unit_ids, "engine.xr.ability.GenieUnit")
+
+        return ForwardRef(line, ability_ref)
+
+    @classmethod
+    def genie_tasks_property(
+        cls,
+        line: ConverterObjectGroup,
+        ability_ref: str,
+        genie_unit,
+        commands: list,
+    ) -> tuple[typing.Any, ForwardRef]:
+        """
+        engine.xr.property.GenieTasks for an ability that implements Genie tasks.
+
+        :returns: (property key, forward reference) for Ability.properties
+        """
+        dataset = line.data
+        property_ref = f"{ability_ref}.GenieTasks"
+        property_raw_api_object = RawAPIObject(property_ref, "GenieTasks", dataset.nyan_api_objects)
+        property_raw_api_object.add_raw_parent("engine.xr.property.GenieTasks")
+        property_raw_api_object.set_location(ForwardRef(line, ability_ref))
+        line.add_raw_api_object(property_raw_api_object)
+
+        tasks = cls._task_refs(line, property_ref, "Task", genie_unit, commands)
+        property_raw_api_object.add_raw_member("tasks", tasks, "engine.xr.property.GenieTasks")
+
+        key = dataset.nyan_api_objects["engine.xr.property.GenieTasks"]
+        return key, ForwardRef(line, property_ref)
+
+    @classmethod
+    def genie_data(cls, full_data_set) -> None:
+        """
+        Global tables in <modpack>/data/util/xr/genie.nyan (GenieData): player
+        resources per civ, terrain restrictions, Genie terrain IDs and tech UI data.
+        Must run after the nyan objects of terrains, techs and civs exist.
+        """
+        api_objects = full_data_set.nyan_api_objects
+        group = ConverterObjectGroup(-2)
+
+        terrain_lookup_dict = internal_name_lookups.get_terrain_lookups(full_data_set.game_version)
+        civ_lookup_dict = internal_name_lookups.get_civ_lookups(full_data_set.game_version)
+        tech_lookup_dict = internal_name_lookups.get_tech_lookups(full_data_set.game_version)
+
+        data_ref = "util.xr.genie.GenieData"
+        data_raw_api_object = RawAPIObject(data_ref, "GenieData", api_objects, "data/util/xr/")
+        data_raw_api_object.set_filename("genie")
+        data_raw_api_object.add_raw_parent("engine.xr.util.GenieData")
+        group.add_raw_api_object(data_raw_api_object)
+        origin = "engine.xr.util.GenieData"
+
+        # Player resources per civ (index = Genie resource ID)
+        civs = []
+        for civ_id, civ in sorted(full_data_set.genie_civs.items()):
+            civ_ref = f"{data_ref}.Civ{civ_id}"
+            civ_raw_api_object = RawAPIObject(civ_ref, f"Civ{civ_id}", api_objects)
+            civ_raw_api_object.add_raw_parent("engine.xr.util.GenieCiv")
+            civ_raw_api_object.set_location(ForwardRef(group, data_ref))
+            civ_origin = "engine.xr.util.GenieCiv"
+            civ_raw_api_object.add_raw_member("civ_id", civ_id, civ_origin)
+
+            setup = MemberSpecialValue.NYAN_NONE
+            civ_group = full_data_set.civ_groups.get(civ_id)
+            if civ_group is not None and civ_id in civ_lookup_dict:
+                setup_ref = civ_lookup_dict[civ_id][0]
+                if civ_group.has_raw_api_object(setup_ref):
+                    setup = ForwardRef(civ_group, setup_ref)
+
+            civ_raw_api_object.add_raw_member("setup", setup, civ_origin)
+
+            resources = {}
+            for index, member in enumerate(cls._value(civ, "resources", [])):
+                resources[index] = float(member.value)
+
+            civ_raw_api_object.add_raw_member("resources", resources, civ_origin)
+            group.add_raw_api_object(civ_raw_api_object)
+            civs.append(ForwardRef(group, civ_ref))
+
+        data_raw_api_object.add_raw_member("civs", civs, origin)
+
+        # Genie terrain ID -> converted terrain
+        terrains = {}
+        for terrain_id, terrain_group in sorted(full_data_set.terrain_groups.items()):
+            if terrain_id not in terrain_lookup_dict:
+                continue
+
+            terrain_ref = terrain_lookup_dict[terrain_id][1]
+            if terrain_group.has_raw_api_object(terrain_ref):
+                terrains[terrain_id] = ForwardRef(terrain_group, terrain_ref)
+
+        data_raw_api_object.add_raw_member("terrains", terrains, origin)
+
+        # Terrain restrictions: factor per Genie terrain ID (pass > 0, build > 0.05, damage 0 = 1)
+        restrictions = []
+        for restriction_id, restriction in sorted(full_data_set.genie_terrain_restrictions.items()):
+            restriction_ref = f"{data_ref}.TerrainRestriction{restriction_id}"
+            restriction_raw_api_object = RawAPIObject(
+                restriction_ref, f"TerrainRestriction{restriction_id}", api_objects
+            )
+            restriction_raw_api_object.add_raw_parent("engine.xr.util.GenieTerrainRestriction")
+            restriction_raw_api_object.set_location(ForwardRef(group, data_ref))
+            restriction_origin = "engine.xr.util.GenieTerrainRestriction"
+            restriction_raw_api_object.add_raw_member("restriction_id", restriction_id, restriction_origin)
+
+            factors = {}
+            for terrain_id, member in enumerate(cls._value(restriction, "accessible_dmgmultiplier", [])):
+                factors[terrain_id] = float(member.value)
+
+            restriction_raw_api_object.add_raw_member("factors", factors, restriction_origin)
+            group.add_raw_api_object(restriction_raw_api_object)
+            restrictions.append(ForwardRef(group, restriction_ref))
+
+        data_raw_api_object.add_raw_member("terrain_restrictions", restrictions, origin)
+
+        # Tech interface data (buttons, hotkeys, strings); tech = converted Tech if any
+        techs = []
+        for tech_id, genie_tech in sorted(full_data_set.genie_techs.items()):
+            tech_ref = f"{data_ref}.Tech{tech_id}"
+            tech_raw_api_object = RawAPIObject(tech_ref, f"Tech{tech_id}", api_objects)
+            tech_raw_api_object.add_raw_parent("engine.xr.util.GenieTech")
+            tech_raw_api_object.set_location(ForwardRef(group, data_ref))
+            tech_origin = "engine.xr.util.GenieTech"
+            tech_raw_api_object.add_raw_member("research_id", tech_id, tech_origin)
+
+            tech = MemberSpecialValue.NYAN_NONE
+            tech_group = full_data_set.tech_groups.get(tech_id)
+            if tech_group is not None and tech_id in tech_lookup_dict:
+                tech_name = tech_lookup_dict[tech_id][0]
+                if tech_group.has_raw_api_object(tech_name):
+                    tech = ForwardRef(tech_group, tech_name)
+
+            tech_raw_api_object.add_raw_member("tech", tech, tech_origin)
+            cls._add_fields(tech_raw_api_object, genie_tech, XR_GENIE_TECH_FIELDS, tech_origin)
+
+            required = []
+            for member in cls._value(genie_tech, "required_techs", []):
+                if member.value > -1 and member.value not in required:
+                    required.append(member.value)
+
+            tech_raw_api_object.add_raw_member("required_techs", required, tech_origin)
+            group.add_raw_api_object(tech_raw_api_object)
+            techs.append(ForwardRef(group, tech_ref))
+
+        data_raw_api_object.add_raw_member("techs", techs, origin)
+
+        group.create_nyan_objects()
+        group.create_nyan_members()
+        group.check_readiness()
+
+        # exported with the pregenerated objects (AoCModpackSubprocessor.organize_nyan_objects)
+        for raw_api_object in group.get_raw_api_objects().values():
+            full_data_set.pregen_nyan_objects.update({raw_api_object.get_id(): raw_api_object})

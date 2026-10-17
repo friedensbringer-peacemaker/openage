@@ -138,9 +138,9 @@ class Tech(GenieStructure):
                     # 0: normal tech, 2: show in Age progress bar
                     (READ_GEN, "tech_type", StorageType.ID_MEMBER, "int16_t"),
                     # frame id - 1 in icon slp (57029)
-                    (SKIP, "icon_id", StorageType.ID_MEMBER, "int16_t"),
+                    (READ_GEN, "icon_id", StorageType.ID_MEMBER, "int16_t"),
                     # 100000 + the language file id for the name/description
-                    (SKIP, "language_dll_help", StorageType.ID_MEMBER, "int32_t"),
+                    (READ_GEN, "language_dll_help", StorageType.ID_MEMBER, "int32_t"),
                     (READ_GEN, "language_dll_techtree", StorageType.ID_MEMBER, "int32_t"),
                 ]
             )
@@ -154,11 +154,11 @@ class Tech(GenieStructure):
                     # 0: normal tech, 2: show in Age progress bar
                     (READ_GEN, "tech_type", StorageType.ID_MEMBER, "int16_t"),
                     # frame id - 1 in icon slp (57029)
-                    (SKIP, "icon_id", StorageType.ID_MEMBER, "int16_t"),
+                    (READ_GEN, "icon_id", StorageType.ID_MEMBER, "int16_t"),
                     # button id as defined in the unit.py button matrix
                     (READ_GEN, "button_id", StorageType.ID_MEMBER, "int8_t"),
                     # 100000 + the language file id for the name/description
-                    (SKIP, "language_dll_help", StorageType.ID_MEMBER, "int32_t"),
+                    (READ_GEN, "language_dll_help", StorageType.ID_MEMBER, "int32_t"),
                     (
                         READ_GEN,
                         "language_dll_techtree",
