@@ -25,6 +25,7 @@
 #include "gamestate/manager.h"
 #include "gamestate/map.h"
 #include "gamestate/system/idle.h"
+#include "gamestate/vision/vision_state.h"
 
 
 namespace openage::gamestate::combat {
@@ -128,6 +129,10 @@ void CombatState::set_neutral_players(const std::unordered_set<player_id_t> &pla
 	this->neutral = players;
 }
 
+void CombatState::set_vision(const std::shared_ptr<vision::VisionState> &vision) {
+	this->vision = vision;
+}
+
 // ---------------------------------------------------------------- helpers
 
 CombatState::Combatant *CombatState::find(entity_id_t id) {
@@ -183,9 +188,18 @@ double CombatState::edge_between(const Combatant &a, const Combatant &b, const t
 std::optional<entity_id_t> CombatState::nearest_enemy(const Combatant &self, double range, const time::time_t &time) const {
 	std::optional<entity_id_t> best;
 	double best_score = 1e30;
+	// XR fork (vision): only enemies the owner sees
+	const auto self_owner = this->vision ? this->owner_of(self.entity, time) : player_id_t{0};
 	for (const auto &[id, other] : this->combatants) {
 		if (not this->is_enemy(self, other, time)) {
 			continue;
+		}
+		if (this->vision) {
+			auto pos = this->position_of(other.entity, time);
+			if (not this->vision->sees(self_owner, pos.ne.to_double(), pos.se.to_double(),
+			                           other.stats->building ? other.stats->radius : 0.0)) {
+				continue;
+			}
 		}
 		double edge = this->edge_between(self, other, time);
 		if (edge > range) {
@@ -296,6 +310,14 @@ std::shared_ptr<GameEntity> CombatState::pick_enemy(const std::shared_ptr<GameSt
 		auto owner = this->owner_of(entity, time);
 		if (owner == player or this->neutral.contains(owner)) {
 			return std::nullopt;
+		}
+		// XR fork (vision): enemies in the fog cannot be picked, remembered buildings can
+		if (this->vision) {
+			auto pos = this->position_of(entity, time);
+			if (not this->vision->knows(player, entity->get_id(), pos.ne.to_double(), pos.se.to_double(),
+			                            c->stats->building ? c->stats->radius : 0.0, c->stats->building)) {
+				return std::nullopt;
+			}
 		}
 		// units: upright sprite about one tile high; buildings: as high as wide
 		return PickShape{c->stats->radius, c->stats->building ? c->stats->radius : 1.0};

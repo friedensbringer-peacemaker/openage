@@ -121,6 +121,24 @@ AoeUi::Rect AoeUi::minimapRect() const {
     return r4(cx - px(kMiniW) / 2, cy - px(kMiniH) / 2, cx + px(kMiniW) / 2, cy + px(kMiniH) / 2);
 }
 
+AoeUi::Rect AoeUi::minimapImageRect() const {
+    const Rect m = minimapRect();
+    if (m.empty()) return {};
+    // gleiche Ursprungsregel wie die Rautenmaske der Leiste (Pixel x0 = cx − w/2), Größe (w + 1) × (h + 1)
+    const int x0 = m.cx() - m.w() / 2, y0 = m.cy() - m.h() / 2;
+    return r4(x0, y0, x0 + m.w() + 1, y0 + m.h() + 1);
+}
+
+bool AoeUi::minimapFrac(int x, int y, float& u, float& v) const {
+    const Rect m = minimapRect();
+    if (m.empty()) return false;
+    const float a = (static_cast<float>(x) + 0.5f - static_cast<float>(m.cx())) / (static_cast<float>(m.w()) * 0.5f);
+    const float b = (static_cast<float>(y) + 0.5f - static_cast<float>(m.cy())) / (static_cast<float>(m.h()) * 0.5f);
+    u = std::clamp((a + b + 1.0f) * 0.5f, 0.0f, 1.0f);
+    v = std::clamp((b - a + 1.0f) * 0.5f, 0.0f, 1.0f);
+    return std::fabs(a) + std::fabs(b) <= 1.0f;
+}
+
 AoeUi::Rect AoeUi::gridRect(int cell) const {
     if (cell < 0 || cell >= kAoeGridCells) return {};
     const int c = cell % kGridCols, r = cell / kGridCols;
@@ -245,9 +263,11 @@ AoeUi::Rect AoeUi::dialogRowRect(int row) const {
     const bool slot_list = slotPage(mMenu.page);
     const int w = px(kDlgBtnW) + (mMenu.page == AoeMenuModel::kNewMap || slot_list ? px(kDlgWWide - kDlgW) : 0);
     // slot pages: 8 rows in the same dialog (pitch 64, rows 56 – still ≥ 48 px)
-    const int pitch = slot_list ? px(64) : px(kDlgPitch);
+    // „Neue Karte“: 7 Zeilen (mit „Sicht“) – Abstand 68, Zeile 60 (≥ 48 px), passt über die Hinweiszeile
+    const bool new_map = mMenu.page == AoeMenuModel::kNewMap;
+    const int pitch = slot_list ? px(64) : new_map ? px(68) : px(kDlgPitch);
     const int y0 = d.y0 + px(kDlgRowsY + 8) + row * pitch;
-    Rect r = r4(d.cx() - w / 2, y0, d.cx() + w / 2, y0 + (slot_list ? px(56) : px(kDlgBtnH)));
+    Rect r = r4(d.cx() - w / 2, y0, d.cx() + w / 2, y0 + (slot_list ? px(56) : new_map ? px(60) : px(kDlgBtnH)));
     if (mMenu.page == AoeMenuModel::kMain && row == kMainSave && mMenu.loadAvailable) r.x1 = r.cx() - px(4);
     return r;
 }
@@ -261,7 +281,7 @@ AoeUi::Rect AoeUi::dialogLoadRect() const {
 
 bool AoeUi::dialogRowIsValue(int row) const {
     if (mMenu.page == AoeMenuModel::kSettings) return row != kSetBack;
-    if (mMenu.page == AoeMenuModel::kNewMap) return row <= kNewSeed;
+    if (mMenu.page == AoeMenuModel::kNewMap) return row <= kNewVision;
     return false;
 }
 
@@ -309,6 +329,7 @@ std::string AoeUi::dialogRowLabel(int row) const {
         case kNewSize: return "Kartengröße";
         case kNewOpponent: return "Gegner";
         case kNewSeed: return "Kartennummer";
+        case kNewVision: return "Sicht";
         case kNewStart: return "Karte starten";
         case kNewBack: return "‹ Zurück";
         default: return "";
@@ -346,6 +367,7 @@ std::string AoeUi::dialogRowValue(int row) const {
             return buf;
         }
         case kNewOpponent: return kGameUiOpponentLabels[clampi(mMenu.opponent, 0, kGameUiOpponentCount - 1)];
+        case kNewVision: return kAoeVisionLabels[clampi(mMenu.vision, 0, kAoeVisionCount - 1)];
         case kNewSeed:
             std::snprintf(buf, sizeof(buf), "%d", mMenu.seed);
             return buf;
@@ -487,6 +509,7 @@ AoeUi::Result AoeUi::stepValue(int row, int dir, double now) {
         case kNewSize: mMenu.size = clampi(mMenu.size + dir, 0, kGameUiSizeCount - 1); break;
         case kNewOpponent: mMenu.opponent = clampi(mMenu.opponent + dir, 0, kGameUiOpponentCount - 1); break;
         case kNewSeed: mMenu.seed = clampi(mMenu.seed + dir, kGameUiSeedMin, kGameUiSeedMax); break;
+        case kNewVision: mMenu.vision = (mMenu.vision + dir + kAoeVisionCount) % kAoeVisionCount; break;
         default: break;
         }
     }
@@ -675,15 +698,12 @@ AoeUi::Result AoeUi::clickHit(const HitState& h, int x, int y, double now) {
         r.action = Action::kMenuOpened;
         return r;
     case Hit::kMinimap: {
-        // S3: Kamera springen – heute nur die Kartenanteile melden (Aufrufer ignoriert sie)
-        const Rect m = minimapRect();
-        const float u = (static_cast<float>(x - m.cx()) / (static_cast<float>(m.w()) * 0.5f) +
-                         static_cast<float>(y - m.cy()) / (static_cast<float>(m.h()) * 0.5f) + 1.0f) * 0.5f;
-        const float v = (static_cast<float>(y - m.cy()) / (static_cast<float>(m.h()) * 0.5f) -
-                         static_cast<float>(x - m.cx()) / (static_cast<float>(m.w()) * 0.5f) + 1.0f) * 0.5f;
+        // S3: Kamera springen – Kartenanteile an den Aufrufer (AoeHooks::minimap_jump)
+        float u = 0.5f, v = 0.5f;
+        minimapFrac(x, y, u, v);
         r.action = Action::kMinimapJump;
-        r.fx = std::clamp(u, 0.0f, 1.0f);
-        r.fy = std::clamp(v, 0.0f, 1.0f);
+        r.fx = u;
+        r.fy = v;
         return r;
     }
     default:
@@ -1298,7 +1318,8 @@ void AoeUi::drawMinimap() {
     const Rect m = minimapRect();
     if (m.empty() || !mCanvas->visible(m.y0 - px(4), m.y1 + px(4))) return;
     const AoeMinimap& mm = mModel.minimap;
-    mSkin->drawMinimap(*mCanvas, m.cx(), m.cy(), m.w(), m.h(), mm.biome, mm.camX, mm.camY, mm.camW, mm.camH, scale());
+    mSkin->drawMinimap(*mCanvas, m.cx(), m.cy(), m.w(), m.h(), mm.biome, mm.camX, mm.camY, mm.camW, mm.camH, scale(),
+                       mm.live);
     const HitState h{Hit::kMinimap, 0};
     if (mFocusMode && mFocus == h) mSkin->drawFocus(*mCanvas, m, scale());
 }

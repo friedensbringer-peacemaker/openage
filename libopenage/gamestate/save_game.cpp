@@ -40,6 +40,7 @@
 #include "gamestate/player.h"
 #include "gamestate/production.h"
 #include "gamestate/production_math.h"
+#include "gamestate/vision/vision_state.h"
 #include "version.h"
 
 
@@ -171,6 +172,10 @@ SaveData capture(const std::shared_ptr<GameState> &state,
 		SavedPlayer p;
 		p.id = id;
 		p.resources = state->get_player(id)->get_resources().get();
+		// vision (XR fork): explored tiles (the sight follows the entities after loading)
+		if (auto vision = state->get_vision(); vision and vision->is_started() and vision->get_mode() != vision_mode_t::ALL) {
+			p.explored = vision->explored_text(id);
+		}
 		d.players.push_back(p);
 	}
 
@@ -346,6 +351,10 @@ RestoreResult restore(const SaveData &data,
 	for (const auto &p : data.players) {
 		if (state->has_player(static_cast<player_id_t>(p.id))) {
 			state->get_player(static_cast<player_id_t>(p.id))->get_resources().set(p.resources);
+			auto vision = state->get_vision();
+			if (not p.explored.empty() and vision and not vision->set_explored_text(static_cast<player_id_t>(p.id), p.explored)) {
+				log::log(WARN << "Load: explored tiles of player " << p.id << " do not fit the map, dropped");
+			}
 		}
 		else {
 			log::log(WARN << "Load: player " << p.id << " does not exist, resources dropped");

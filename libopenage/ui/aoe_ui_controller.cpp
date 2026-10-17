@@ -105,6 +105,9 @@ AoeUiController::AoeUiController(const gamestate::MapSettings &map,
 	menu.seed = std::clamp(static_cast<int>(map.seed), agesxr::kGameUiSeedMin, agesxr::kGameUiSeedMax);
 	const bool ai_on = map.type == gamestate::map_type_t::RANDOM and map.ai.mode != gamestate::ai_mode_t::OFF;
 	menu.opponent = not ai_on ? 0 : map.ai.difficulty == gamestate::ai_difficulty_t::NORMAL ? 2 : 1;
+	menu.vision = map.type == gamestate::map_type_t::RANDOM
+	                  ? std::clamp(static_cast<int>(map.vision), 0, agesxr::kAoeVisionCount - 1)
+	                  : 0;
 	menu.speed = 1;
 	if (this->hooks.clock) {
 		double speed = this->hooks.clock->get_speed().to_double();
@@ -191,6 +194,9 @@ void AoeUiController::poll(double now) {
 		model.minimap.camW = cw;
 		model.minimap.camH = ch;
 	}
+	// real minimap (XR fork, vision): own image under the bar, the diamond of the bar stays transparent
+	model.minimap.live = this->minimap_live;
+	this->update_minimap(now);
 
 	const auto match = this->feed.match();
 	if (match != agesxr::HudMatch::RUNNING and not this->match_over) {
@@ -250,6 +256,11 @@ void AoeUiController::update(double now) {
 		if (not this->right_context) {
 			this->right_held = false;
 		}
+	}
+	// signal ring on the minimap: redraw it more often while it runs
+	if (this->ping_at >= 0.0 and now - this->ping_at < 3.2 and now - this->minimap_at >= 0.1) {
+		this->minimap_force = true;
+		this->update_minimap(now);
 	}
 	this->run_demo(now);
 }
@@ -314,6 +325,16 @@ bool AoeUiController::on_event(const renderer::WindowEvent &ev, double now) {
 	case event_type::MouseMove: {
 		const int x = static_cast<int>(ev.x), y = static_cast<int>(ev.y);
 		ui.onMove(x, y);
+		// dragging on the minimap: the camera follows (at most 10 times a second)
+		if (this->minimap_drag) {
+			float du = 0.0f, dv = 0.0f;
+			ui.minimapFrac(x, y, du, dv);
+			if (now - this->minimap_drag_at >= 0.1 and this->aoe.minimap_jump) {
+				this->minimap_drag_at = now;
+				this->aoe.minimap_jump(du, dv);
+			}
+			return true;
+		}
 		if (ui.wantsMouse()) {
 			return true;
 		}
@@ -325,6 +346,18 @@ bool AoeUiController::on_event(const renderer::WindowEvent &ev, double now) {
 		const int x = static_cast<int>(ev.x);
 		const int y = static_cast<int>(ev.y);
 		if (ev.button == mouse_button::LeftButton) {
+			// Alt + click on the minimap: signal (ping) there (XR fork, vision)
+			float pu = 0.0f, pv = 0.0f;
+			if ((ev.modifiers & modifier::AltModifier) and not ui.wantsMouse() and this->aoe_ui.model().minimap.live
+			    and ui.minimapFrac(x, y, pu, pv)) {
+				this->ping_u = pu;
+				this->ping_v = pv;
+				this->ping_at = now;
+				this->minimap_force = true;
+				log::log(INFO << "UI: minimap signal at (" << pu << ", " << pv << ")");
+				this->ui_click = true;
+				return true;
+			}
 			if (ui.wantsMouse() or ui.overBars(x, y)) {
 				this->handle(ui.onClick(x, y, now), now);
 				this->ui_click = true;
@@ -334,6 +367,16 @@ bool AoeUiController::on_event(const renderer::WindowEvent &ev, double now) {
 			return false;
 		}
 		if (ev.button == mouse_button::RightButton) {
+			// right click on the minimap: the selection moves there (XR fork, vision)
+			float cu = 0.0f, cv = 0.0f;
+			if (not ui.wantsMouse() and this->aoe_ui.model().minimap.live and ui.minimapFrac(x, y, cu, cv)) {
+				log::log(INFO << "UI: minimap command at (" << cu << ", " << cv << ")");
+				if (this->aoe.minimap_command) {
+					this->aoe.minimap_command(cu, cv);
+				}
+				this->right_held = false;
+				return true;
+			}
 			if (ui.context().open) {
 				ui.closeContext();
 				return true;
@@ -363,6 +406,7 @@ bool AoeUiController::on_event(const renderer::WindowEvent &ev, double now) {
 	}
 	case event_type::MouseButtonRelease: {
 		if (ev.button == mouse_button::LeftButton) {
+			this->minimap_drag = false;
 			this->left_held = false;
 			if (this->ui_click) {
 				this->ui_click = false;
@@ -402,6 +446,15 @@ bool AoeUiController::on_event(const renderer::WindowEvent &ev, double now) {
 			return modal;
 		}
 		bool consumed = false;
+		// minimap modes (docs/aoe2-spec 08 §8.4): Alt+N normal, Alt+C combat, Alt+R economy
+		if ((ev.modifiers & modifier::AltModifier) and not modal and (k == 'N' or k == 'C' or k == 'R')) {
+			this->minimap_mode = k == 'C' ? agesxr::kMinimapMilitary : k == 'R' ? agesxr::kMinimapEconomy : agesxr::kMinimapNormal;
+			this->minimap_force = true;
+			this->minimap_base.clear();
+			log::log(INFO << "UI: minimap mode " << (k == 'C' ? "combat" : k == 'R' ? "economy" : "normal"));
+			this->swallowed_keys.push_back(k);
+			return true;
+		}
 		if ((k == key::Key_F5 or k == key::Key_F9) and not modal) {
 			// quick save / quick load (0.6.0-xr.0.11)
 			if (k == key::Key_F5) {
@@ -703,7 +756,13 @@ void AoeUiController::handle(const agesxr::AoeUi::Result &result, double now) {
 		log::log(INFO << "UI: match board closed (game stays paused)");
 		break;
 	case Action::kMinimapJump:
-		log::log(INFO << "UI: minimap click at (" << result.fx << ", " << result.fy << ") (jump follows with S3)");
+		// S3 (XR fork, vision): the camera jumps there; holding the button and dragging follows (10 Hz)
+		log::log(INFO << "UI: minimap jump to (" << result.fx << ", " << result.fy << ")");
+		if (this->aoe.minimap_jump) {
+			this->aoe.minimap_jump(result.fx, result.fy);
+		}
+		this->minimap_drag = true;
+		this->minimap_drag_at = now;
 		break;
 	case Action::kContextClosed:
 	case Action::kNone:
@@ -781,7 +840,141 @@ gamestate::MapSettings AoeUiController::menu_map_settings() const {
 	settings.skirmish = false;
 	settings.ai.mode = menu.opponent == 0 ? gamestate::ai_mode_t::OFF : gamestate::ai_mode_t::ON;
 	settings.ai.difficulty = menu.opponent == 2 ? gamestate::ai_difficulty_t::NORMAL : gamestate::ai_difficulty_t::EASY;
+	settings.vision = static_cast<gamestate::vision_mode_t>(std::clamp(menu.vision, 0, agesxr::kAoeVisionCount - 1));
 	return settings;
+}
+
+// ---- minimap (XR fork, gamestate/vision) ----------------------------------------------------
+
+static_assert(agesxr::kDotUnit == static_cast<int>(gamestate::vision::dot_kind_t::UNIT)
+                  and agesxr::kDotBuilding == static_cast<int>(gamestate::vision::dot_kind_t::BUILDING)
+                  and agesxr::kDotTree == static_cast<int>(gamestate::vision::dot_kind_t::TREE)
+                  and agesxr::kDotGold == static_cast<int>(gamestate::vision::dot_kind_t::GOLD)
+                  and agesxr::kDotStone == static_cast<int>(gamestate::vision::dot_kind_t::STONE)
+                  and agesxr::kDotFood == static_cast<int>(gamestate::vision::dot_kind_t::FOOD)
+                  and agesxr::kDotAnimal == static_cast<int>(gamestate::vision::dot_kind_t::ANIMAL)
+                  and agesxr::kDotOther == static_cast<int>(gamestate::vision::dot_kind_t::OTHER),
+              "minimap dot kinds of the interface and the vision differ");
+
+void AoeUiController::update_minimap(double now) {
+	auto snapshot = this->aoe.minimap ? this->aoe.minimap() : nullptr;
+	const bool live = snapshot and snapshot->ne_size > 0 and snapshot->se_size > 0;
+	if (live != this->minimap_live) {
+		this->minimap_live = live;
+		this->aoe_ui.model().minimap.live = live;
+		this->aoe_ui.invalidate();
+		log::log(INFO << "UI: minimap " << (live ? "live" : "placeholder"));
+	}
+	if (not live) {
+		return;
+	}
+	const auto rect = this->aoe_ui.minimapImageRect();
+	const auto m = this->aoe_ui.minimapRect();
+	const bool same_rect = rect.x0 == this->minimap_x0 and rect.y0 == this->minimap_y0 and rect.w() == this->minimap_w
+	                       and rect.h() == this->minimap_h;
+	if (snapshot->version == this->minimap_snapshot and same_rect and not this->minimap_force) {
+		return;
+	}
+	const auto t0 = std::chrono::steady_clock::now();
+	auto convert = [](const std::vector<gamestate::vision::MinimapDot> &from, std::vector<agesxr::MinimapDot> &to) {
+		to.clear();
+		to.reserve(from.size());
+		for (const auto &d : from) {
+			agesxr::MinimapDot dot;
+			dot.ne = d.ne;
+			dot.se = d.se;
+			dot.radius = d.radius;
+			dot.kind = static_cast<uint8_t>(d.kind);
+			dot.player = d.player;
+			dot.fogged = d.fogged;
+			dot.military = d.military;
+			to.push_back(dot);
+		}
+	};
+	agesxr::MinimapInput in;
+	in.ne = static_cast<int>(snapshot->ne_size);
+	in.se = static_cast<int>(snapshot->se_size);
+	const size_t tiles = snapshot->ne_size * snapshot->se_size;
+	in.terrain = snapshot->terrain and snapshot->terrain->size() == tiles ? snapshot->terrain->data() : nullptr;
+	in.fog = snapshot->tiles and snapshot->tiles->size() == tiles ? snapshot->tiles->data() : nullptr;
+	in.gaia = snapshot->neutral_player;
+	in.mode = this->minimap_mode;
+	const float dot_px = std::max(2.0f, std::round(3.0f * this->aoe_ui.scale()));
+	// ground x fog + static dots (trees, mines, buildings) only when the tile states, the static layer,
+	// the colours or the size changed (partial redraw); moving units every time
+	const void *terrain_key = snapshot->terrain ? static_cast<const void *>(snapshot->terrain.get()) : nullptr;
+	const void *static_key = snapshot->static_dots ? static_cast<const void *>(snapshot->static_dots.get()) : nullptr;
+	if (this->minimap_base.empty() or snapshot->tiles_version != this->minimap_base_tiles
+	    or terrain_key != this->minimap_base_terrain or static_key != this->minimap_base_static
+	    or m.w() != this->minimap_base_w or m.h() != this->minimap_base_h) {
+		agesxr::rasterMinimapBase(in, m.w(), m.h(), this->minimap_base);
+		if (snapshot->static_dots) {
+			convert(*snapshot->static_dots, this->minimap_dots);
+			in.dots = this->minimap_dots.data();
+			in.dotCount = this->minimap_dots.size();
+			agesxr::drawMinimapDots(in, m.w(), m.h(), dot_px, this->minimap_base);
+		}
+		this->minimap_base_tiles = snapshot->tiles_version;
+		this->minimap_base_terrain = terrain_key;
+		this->minimap_base_static = static_key;
+		this->minimap_base_w = m.w();
+		this->minimap_base_h = m.h();
+		this->minimap_base_count += 1;
+	}
+	convert(snapshot->dots, this->minimap_dots);
+	in.dots = this->minimap_dots.data();
+	in.dotCount = this->minimap_dots.size();
+	if (this->ping_at >= 0.0 and now - this->ping_at < 3.0) {
+		in.pingU = this->ping_u;
+		in.pingV = this->ping_v;
+		in.pingAge = static_cast<float>(now - this->ping_at);
+	}
+	this->minimap_image = this->minimap_base;
+	agesxr::drawMinimapDots(in, m.w(), m.h(), dot_px, this->minimap_image);
+	this->minimap_x0 = rect.x0;
+	this->minimap_y0 = rect.y0;
+	this->minimap_w = rect.w();
+	this->minimap_h = rect.h();
+	this->minimap_snapshot = snapshot->version;
+	this->minimap_force = false;
+	this->minimap_at = now;
+	this->minimap_seq += 1;
+
+	// raster time (spec S3: at most 4 ms per update), logged every 10 s
+	const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+	this->minimap_ms_sum += ms;
+	this->minimap_ms_max = std::max(this->minimap_ms_max, ms);
+	this->minimap_count += 1;
+	if (now - this->minimap_log_at >= 10.0) {
+		log::log(INFO << "UI: minimap " << this->minimap_count << " images, avg "
+		              << this->minimap_ms_sum / static_cast<double>(this->minimap_count) << " ms, max "
+		              << this->minimap_ms_max << " ms (" << this->minimap_w << "x" << this->minimap_h << " px, "
+		              << in.ne << "x" << in.se << " tiles, " << in.dotCount << " moving dots, fog "
+		              << (in.fog ? gamestate::vision_mode_name(snapshot->mode) : "off") << ", ground layer "
+		              << this->minimap_base_count << " times)");
+		this->minimap_base_count = 0;
+		this->minimap_log_at = now;
+		this->minimap_ms_sum = 0.0;
+		this->minimap_ms_max = 0.0;
+		this->minimap_count = 0;
+	}
+}
+
+const uint32_t *AoeUiController::minimap_pixels(int &x0, int &y0, int &w, int &h) const {
+	if (not this->minimap_live or this->minimap_image.empty()
+	    or this->minimap_image.size() != static_cast<size_t>(this->minimap_w) * static_cast<size_t>(this->minimap_h)) {
+		x0 = y0 = w = h = 0;
+		return nullptr;
+	}
+	x0 = this->minimap_x0;
+	y0 = this->minimap_y0;
+	w = this->minimap_w;
+	h = this->minimap_h;
+	return this->minimap_image.data();
+}
+
+uint32_t AoeUiController::minimap_version() const {
+	return this->minimap_seq;
 }
 
 // ---- output -------------------------------------------------------------------------------

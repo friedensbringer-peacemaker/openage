@@ -60,6 +60,8 @@ constexpr double AUTOSAVE_SECONDS = 300.0;
 struct SavedPlayer {
 	uint64_t id = 0;
 	resource_amounts_t resources{};
+	/// explored tiles (vision, VisionGrid::explored_text), empty = none stored
+	std::string explored{};
 };
 
 /// one entry of a training queue
@@ -247,10 +249,14 @@ inline std::string serialize(const SaveData &d) {
 		out << "ai_attack_size = " << *m.ai.attack_size << "\n";
 	}
 	out << "ai_seed = " << m.ai.seed << "\n";
+	out << "vision = " << vision_mode_name(m.vision) << "\n";
 	for (const auto &p : d.players) {
 		out << "[player]\n";
 		out << "id = " << p.id << "\n";
 		out << "resources = " << resources_text(p.resources) << "\n";
+		if (not p.explored.empty()) {
+			out << "explored = " << p.explored << "\n";
+		}
 	}
 	for (const auto &e : d.entities) {
 		out << "[entity]\n";
@@ -454,6 +460,11 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 				}
 				m.ai.attack_size = s;
 			}
+			else if (key == "vision") {
+				if (not vision_mode_parse(value, m.vision)) {
+					return fail("Sicht");
+				}
+			}
 			else if (key == "ai_seed") {
 				if (not(v >> m.ai.seed)) {
 					return fail("ai_seed");
@@ -466,6 +477,9 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 				if (not(v >> p.id)) {
 					return fail("Spieler-ID");
 				}
+			}
+			else if (key == "explored") {
+				p.explored = value;
 			}
 			else if (key == "resources") {
 				if (not parse_resources(value, p.resources)) {

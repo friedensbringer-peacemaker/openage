@@ -465,6 +465,11 @@ if(OPENAGE_NATIVE_ENTRY)
 	target_include_directories(openage-save-format-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 	add_test(NAME openage-save-format-check COMMAND openage-save-format-check)
 
+	# host test: fog of war grid, display rules, explored tiles in save games (dependency-free, parameter sweep; XR fork)
+	add_executable(openage-vision-check gamestate/vision/vision_check.cpp gamestate/map_generator.cpp)
+	target_include_directories(openage-vision-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-vision-check COMMAND openage-vision-check)
+
 	# host test: mouse selection rules and presenter frame statistics (dependency-free, parameter sweep; XR fork)
 	add_executable(openage-select-check gamestate/selection_check.cpp)
 	target_include_directories(openage-select-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

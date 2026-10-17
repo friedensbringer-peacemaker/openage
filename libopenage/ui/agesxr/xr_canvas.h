@@ -120,6 +120,8 @@ public:
     void fillRect(int x0, int y0, int x1, int y1, uint32_t color);
     // Abdeckungsmaske (w × h Bytes, 0 … 255) mit Farbe einmischen; Ergebnis wie fillSdf mit derselben Abdeckung.
     void blendMask(int x0, int y0, int w, int h, const uint8_t* coverage, uint32_t color);
+    // Abdeckungsmaske ausstanzen: Deckkraft je Pixel × (1 − Abdeckung) – darunter liegt eine eigene Textur (Minimap).
+    void punchMask(int x0, int y0, int w, int h, const uint8_t* coverage);
     void focusFrame(int x0, int y0, int x1, int y1, int r);
     void text(const char* utf8, int x, int y, float px, uint32_t color, bool bold = false);
     void textShadow(const char* utf8, int x, int y, float px, uint32_t color, bool bold = false);

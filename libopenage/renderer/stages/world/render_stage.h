@@ -7,9 +7,11 @@
 #include "coord/phys.h"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <shared_mutex>
+#include <unordered_map>
 #include <vector>
 
 #include <eigen3/Eigen/Dense>
@@ -159,6 +161,17 @@ public:
 	static constexpr uint32_t GHOST_ID = 0x7ffffff0;
 
 	/**
+	 * Fog of war (XR fork, gamestate/vision): how the game entities are shown.
+	 * The lookup returns 0 (normal), 1 (darkened: last seen, in the fog) or 2
+	 * (hidden: not drawn, not in the id texture, no markers) per entity id. Call in
+	 * the render thread before update(); an empty function shows everything.
+	 */
+	void set_visibility(std::function<uint8_t(uint32_t)> display);
+
+	/// tint of entities in the fog (u_tint of world2d.frag.glsl)
+	static constexpr float FOG_TINT = 0.55f;
+
+	/**
 	 * Objects drawn in the last update() (XR fork, statistics).
 	 */
 	size_t get_drawn_objects() const;
@@ -226,6 +239,12 @@ private:
 	std::shared_ptr<WorldObject> ghost_object;
 	std::string ghost_path;
 	Eigen::Vector4f ghost_tint{1.0f, 1.0f, 1.0f, 1.0f};
+
+	/**
+	 * Fog of war (XR fork): display per entity id and the tint applied per object.
+	 */
+	std::function<uint8_t(uint32_t)> display;
+	std::unordered_map<uint32_t, uint8_t> display_applied;
 
 	/**
 	 * Shader for rendering the world objects.

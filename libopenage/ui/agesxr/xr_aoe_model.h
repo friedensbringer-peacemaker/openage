@@ -119,14 +119,21 @@ struct AoeSelection {
     bool operator!=(const AoeSelection& o) const { return !(*this == o); }
 };
 
-// Minimap-Platzhalter (S3: echte Karte): Grundfarbe je Landschaft, Kameraausschnitt in Kartenanteilen 0 … 1.
+// Sicht einer neuen Karte (Seite „Neue Karte“), Reihenfolge = gamestate::vision_mode_t.
+constexpr int kAoeVisionCount = 3;
+constexpr const char* kAoeVisionLabels[kAoeVisionCount] = {"Normal", "Erkundet", "Alles sichtbar"};
+
+// Minimap: Grundfarbe je Landschaft (Platzhalter), Kameraausschnitt in Kartenanteilen 0 … 1; live = echte Karte
+// als eigene Textur unter der Leiste (xr_minimap.h), die Raute bleibt dann im Leistenbild durchsichtig.
 struct AoeMinimap {
     int biome = 0;                      // kGameUiBiomeLabels-Index
     int tiles = 64;                     // Kantenlänge
     float camX = 0.5f, camY = 0.5f;     // Mitte des Kamerarahmens (0 … 1)
     float camW = 0.25f, camH = 0.15f;   // Breite/Höhe des Rahmens (0 … 1)
+    bool live = false;
     bool operator==(const AoeMinimap& o) const {
-        return biome == o.biome && tiles == o.tiles && camX == o.camX && camY == o.camY && camW == o.camW && camH == o.camH;
+        return biome == o.biome && tiles == o.tiles && camX == o.camX && camY == o.camY && camW == o.camW && camH == o.camH &&
+               live == o.live;
     }
     bool operator!=(const AoeMinimap& o) const { return !(*this == o); }
 };
@@ -156,6 +163,7 @@ struct AoeMenuModel {
     bool messages = true;           // Meldungszeilen
     // Neue Karte
     int biome = 0, size = 1, opponent = 1, seed = 1;
+    int vision = 0;                 // Sicht (kAoeVisionLabels = gamestate::vision_mode_t)
     // Spielstand (0.6.0-xr.0.11, anderer Agent): verfügbar → Knöpfe aktiv, sonst „Speichern (folgt)“
     bool saveAvailable = false;
     bool loadAvailable = false;
@@ -165,7 +173,7 @@ struct AoeMenuModel {
         return open == o.open && page == o.page && confirmSurrender == o.confirmSurrender &&
                confirmSlot == o.confirmSlot && slot_list == o.slot_list && speed == o.speed &&
                labels == o.labels && hotkeys == o.hotkeys && messages == o.messages && biome == o.biome &&
-               size == o.size && opponent == o.opponent && seed == o.seed && saveAvailable == o.saveAvailable &&
+               size == o.size && opponent == o.opponent && seed == o.seed && vision == o.vision && saveAvailable == o.saveAvailable &&
                loadAvailable == o.loadAvailable && quest == o.quest && mapInfo == o.mapInfo;
     }
     bool operator!=(const AoeMenuModel& o) const { return !(*this == o); }

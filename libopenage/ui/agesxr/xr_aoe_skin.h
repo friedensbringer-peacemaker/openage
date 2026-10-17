@@ -114,8 +114,9 @@ public:
     virtual void drawFocus(Canvas& c, const AoeRect& r, float s) = 0;
     virtual void drawHoverFrame(Canvas& c, const AoeRect& r, float s) = 0;
     // Minimap-Raute (Platzhalter): Grundfarbe je Landschaft mit Goldrand, Kamerarahmen weiß.
+    // live: echte Minimap als eigene Textur darunter – Raute im Leistenbild durchsichtig lassen (nur Goldrand + Rahmen).
     virtual void drawMinimap(Canvas& c, int cx, int cy, int w, int h, int biome, float camX, float camY, float camW,
-                             float camH, float s) = 0;
+                             float camH, float s, bool live) = 0;
     // Schriftfarben je Untergrund
     virtual uint32_t inkOn(SkinPanel panel, SkinState st) const = 0;
     virtual bool shadowOn(SkinPanel panel) const = 0;  // Schatten unter der Schrift (Holz/Stein ja, Pergament nein)
@@ -132,7 +133,7 @@ public:
     void drawFocus(Canvas& c, const AoeRect& r, float s) override;
     void drawHoverFrame(Canvas& c, const AoeRect& r, float s) override;
     void drawMinimap(Canvas& c, int cx, int cy, int w, int h, int biome, float camX, float camY, float camW,
-                     float camH, float s) override;
+                     float camH, float s, bool live) override;
     uint32_t inkOn(SkinPanel panel, SkinState st) const override;
     bool shadowOn(SkinPanel panel) const override;
 

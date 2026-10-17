@@ -78,6 +78,19 @@ void Canvas::blendMask(int x0, int y0, int w, int h, const uint8_t* coverage, ui
     }
 }
 
+void Canvas::punchMask(int x0, int y0, int w, int h, const uint8_t* coverage) {
+    for (int y = std::max(y0, mClipY0); y < std::min(y0 + h, mClipY1); ++y) {
+        const uint8_t* row = coverage + static_cast<size_t>(y - y0) * static_cast<size_t>(w);
+        for (int x = std::max(x0, 0); x < std::min(x0 + w, mW); ++x) {
+            const uint32_t cov = row[x - x0];
+            if (cov == 0) continue;
+            uint32_t& dst = mPixels[static_cast<size_t>(y) * static_cast<size_t>(mW) + static_cast<size_t>(x)];
+            const uint32_t a = ((dst >> 24) & 0xFFu) * (255u - cov) / 255u;
+            dst = a == 0 ? 0u : (dst & 0x00FFFFFFu) | (a << 24);
+        }
+    }
+}
+
 // Fokusrahmen (Stick-Bedienung): geglätteter Ring, 4 px breit, direkt außerhalb des abgerundeten Elements.
 void Canvas::focusFrame(int x0, int y0, int x1, int y1, int r) {
     const float w = 4.0f;

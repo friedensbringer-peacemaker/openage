@@ -86,6 +86,24 @@ public:
 	virtual UiFeedbackState feedback() const {
 		return {};
 	}
+
+	// ---- minimap image (XR fork, AoE layout): drawn under the overlay, which keeps the
+	// diamond transparent; own texture, so a new minimap (2-4 Hz) never redraws the bar
+
+	/**
+	 * Minimap pixels (RGBA, row 0 = top), nullptr = none.
+	 *
+	 * @param x0, y0 Window pixel of the top left corner.
+	 * @param w, h Size of the image.
+	 */
+	virtual const uint32_t *minimap_pixels(int &x0, int &y0, int &w, int &h) const {
+		x0 = y0 = w = h = 0;
+		return nullptr;
+	}
+	/// changes with every new minimap image
+	virtual uint32_t minimap_version() const {
+		return 0;
+	}
 };
 
 } // namespace openage::ui

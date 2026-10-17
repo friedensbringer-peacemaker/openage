@@ -154,6 +154,14 @@ private:
 	// ---- end ai (XR fork) ----
 
 	/**
+	 * Start the fog of war (XR fork, gamestate/vision) after the map exists.
+	 *
+	 * @param mode Vision mode (the test map passes ALL).
+	 * @param start_time Simulation time the game starts at.
+	 */
+	void start_vision(vision_mode_t mode, const time::time_t &start_time);
+
+	/**
 	 * Load game data from the filesystem.
 	 *
 	 * @param mod_manager Mod manager.

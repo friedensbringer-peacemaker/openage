@@ -159,6 +159,7 @@
 #include "ui/agesxr/xr_aoe_ui.h"
 #include "ui/agesxr/xr_game_ui.h"
 #include "ui/agesxr/xr_hud_layout.h"
+#include "ui/agesxr/xr_minimap.h"
 #include "ui/game_ui_controller.h"
 #include "util/fslike/directory.h"
 #include "util/path.h"
@@ -202,6 +203,8 @@ struct native_args {
 	bool ui_quest = false;
 	bool replay_aoe = false;
 	bool replay_markers = false;
+	// vision (XR fork): fog of war and minimap replay
+	bool replay_vision = false;
 	// save games (XR fork): slot directory, file to load, headless save/load check
 	std::string save_dir{};
 	std::string load_file{};
@@ -238,7 +241,7 @@ void usage(const char *argv0) {
 	             " [--ai on|off|auto] [--ai-difficulty easy|normal] [--ai-player <n>]"
 	             " [--ai-first-attack <s>] [--ai-attack-size <n>] [--sim-speed <x>] [--capture-at <s1,s2,...>]"
 	             " [--ui | --no-ui] [--ui-demo <what@s,...>] [--replay-ui]"
-	             " [--ui-style aoe|classic] [--ui-quest] [--replay-aoe] [--replay-markers]"
+	             " [--ui-style aoe|classic] [--ui-quest] [--replay-aoe] [--replay-markers] [--replay-vision] [--vision normal|explored|all]"
 	             " [--save-dir <dir>] [--load <file>] [--save-check <dir> [--save-check-seconds <s>]]\n";
 }
 
@@ -444,6 +447,17 @@ bool parse_args(int argc, char **argv, native_args &args) {
 			args.replay_aoe = true;
 			args.ui = true;
 			args.ui_style = "aoe";
+		}
+		else if (arg == "--replay-vision") {
+			args.replay_vision = true;
+			args.ui = true;
+			args.ui_style = "aoe";
+		}
+		else if (arg == "--vision") {
+			auto mode = value();
+			if (not openage::gamestate::vision_mode_parse(mode, args.map.vision)) {
+				throw std::runtime_error("--vision: normal, explored or all, not " + mode);
+			}
 		}
 		else if (arg == "--replay-markers") {
 			args.replay_markers = true;
@@ -1478,6 +1492,181 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> aoe_replay_steps(con
 }
 
 /**
+ * Input replay of the fog of war and the minimap (--replay-vision, XR fork;
+ * with --map random): start view (fog around the start, minimap), a villager
+ * is sent across the map with a right click on the minimap (explores, leaves
+ * explored fog behind), a left click on the minimap jumps the camera to the
+ * destination, Alt + click sets a signal, Alt+C / Alt+N switch the minimap
+ * mode. Captures <png stem>-v1 … -v5.
+ */
+std::vector<openage::renderer::opengl::TestFrameSink::Step> vision_replay_steps(const native_args &args,
+                                                                                 openage::gamestate::MapSettings &map_settings,
+                                                                                 double start,
+                                                                                 const std::string &capture_file) {
+	using namespace openage;
+	using renderer::opengl::TestFrameSink;
+	using gamestate::map_object_t;
+	using E = renderer::SinkInputEvent;
+	constexpr int alt = 0x08000000;  // Qt::AltModifier
+
+	const auto map = gamestate::generate_map(map_settings);
+	const gamestate::Heightmap heights{map.width, map.height, map.corners};
+	const auto tc = map.starts.at(0);
+	if (not map_settings.view) {
+		gamestate::MapView start_view;
+		start_view.ne = tc[0];
+		start_view.se = tc[1];
+		start_view.zoom = 1.5f;
+		map_settings.view = start_view;
+	}
+	const gamestate::MapView view = *map_settings.view;
+	const int width = static_cast<int>(args.width);
+	const int height = static_cast<int>(args.height);
+	auto camera = std::make_shared<renderer::camera::Camera>(nullptr, util::Vector2s{args.width, args.height});
+	camera->look_at_coord(coord::scene3{10.0, 10.0, 0});
+	camera->move_to(Eigen::Vector3f{0.0f, view.height, 0.0f});
+	camera->look_at_coord(coord::scene3{view.ne, view.se, 0});
+	camera->set_zoom(view.zoom);
+	const Eigen::Matrix4f matrix = camera->get_projection_matrix() * camera->get_view_matrix();
+	auto pixel = [&](double ne, double se, double up) {
+		double ground = heights.is_flat() ? 0.0 : heights.at(ne, se);
+		coord::phys3 pos{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{ground + up}};
+		auto w = pos.to_scene3().to_world_space();
+		Eigen::Vector4f clip = matrix * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+		int x = static_cast<int>(std::lround((clip.x() + 1.0) * 0.5 * width));
+		int y = static_cast<int>(std::lround(height - (clip.y() + 1.0) * 0.5 * height));
+		return std::pair{x, y};
+	};
+	agesxr::AoeUi layout;
+	layout.resize(width, height);
+	const int bar_top = layout.barRect().y0;
+	auto on_screen = [&](std::pair<int, int> p) {
+		return p.first >= 60 and p.second >= layout.topBarPx() + 60 and p.first < width - 60 and p.second < bar_top - 60;
+	};
+	// minimap pixel of a tile (same projection as the interface, xr_minimap.h)
+	const auto mm = layout.minimapRect();
+	auto minimap_pixel = [&](double ne, double se) {
+		agesxr::MinimapGeom g;
+		g.cx = static_cast<float>(mm.cx());
+		g.cy = static_cast<float>(mm.cy());
+		g.hw = static_cast<float>(mm.w()) * 0.5f;
+		g.hh = static_cast<float>(mm.h()) * 0.5f;
+		float u, v, x, y;
+		agesxr::minimapTileToFrac(static_cast<float>(ne), static_cast<float>(se), static_cast<int>(map.width),
+		                          static_cast<int>(map.height), u, v);
+		g.toPixel(u, v, x, y);
+		return std::pair{static_cast<int>(std::lround(x - 0.5f)), static_cast<int>(std::lround(y - 0.5f))};
+	};
+	const gamestate::MapObject *villager = nullptr;
+	for (const auto &o : map.objects) {
+		if (o.kind == map_object_t::VILLAGER and o.owner == 0 and on_screen(pixel(o.ne, o.se, 0.0))) {
+			villager = &o;
+			break;
+		}
+	}
+
+	std::vector<TestFrameSink::Step> steps;
+	auto add = [&](double at, int type, int x, int y, int button, int buttons, int key = 0, int modifiers = 0) {
+		TestFrameSink::Step step;
+		step.at = start + at;
+		step.what = TestFrameSink::Step::kind::input;
+		step.event.type = type;
+		step.event.x = x;
+		step.event.y = y;
+		step.event.button = button;
+		step.event.buttons = buttons;
+		step.event.key = key;
+		step.event.modifiers = modifiers;
+		steps.push_back(step);
+	};
+	auto click = [&](double t, std::pair<int, int> p, int button, int modifiers = 0) {
+		add(t, E::kMouseMove, p.first, p.second, 0, 0, 0, modifiers);
+		add(t + 0.1, E::kMouseDown, p.first, p.second, button, button, 0, modifiers);
+		add(t + 0.2, E::kMouseUp, p.first, p.second, button, 0, 0, modifiers);
+	};
+	auto capture = [&](double t, const char *suffix) {
+		const std::filesystem::path png{capture_file};
+		TestFrameSink::Step shot;
+		shot.at = start + t;
+		shot.what = TestFrameSink::Step::kind::capture;
+		shot.file = suffix == nullptr ? capture_file
+		                              : (png.parent_path() / (png.stem().string() + suffix + png.extension().string())).string();
+		steps.push_back(shot);
+	};
+	auto key = [&](double t, int code, int modifiers) {
+		add(t, E::kKeyDown, 0, 0, 0, 0, code, modifiers);
+		add(t + 0.05, E::kKeyUp, 0, 0, 0, 0, code, modifiers);
+	};
+
+	// 1. start: fog around the start position, minimap with the explored start area
+	capture(0.6, "-v1-start");
+	if (villager == nullptr) {
+		log::log(WARN << "vision replay: no villager of player 0 on screen");
+		capture(2.0, nullptr);
+		return steps;
+	}
+	// 2. a villager walks to the middle of the map (right click on the minimap) and explores
+	// land tile 11..15 tiles from the start towards the middle of the map, no object next to it
+	double dest_ne = 0.5 * static_cast<double>(map.width);
+	double dest_se = 0.5 * static_cast<double>(map.height);
+	{
+		using gamestate::map_terrain_t;
+		auto land = [](map_terrain_t t) {
+			return t == map_terrain_t::GRASS or t == map_terrain_t::GRASS2 or t == map_terrain_t::GRASS3
+			       or t == map_terrain_t::DIRT or t == map_terrain_t::DIRT2 or t == map_terrain_t::DIRT3;
+		};
+		double best = 1e9;
+		for (long se = 2; se + 2 < static_cast<long>(map.height); ++se) {
+			for (long ne = 2; ne + 2 < static_cast<long>(map.width); ++ne) {
+				const double d = std::hypot(ne + 0.5 - tc[0], se + 0.5 - tc[1]);
+				const double to_mid = std::hypot(ne - 0.5 * map.width, se - 0.5 * map.height);
+				if (d < 11.0 or d > 15.0 or to_mid >= best
+				    or not land(map.tiles[static_cast<size_t>(ne) + static_cast<size_t>(se) * map.width])) {
+					continue;
+				}
+				bool free = true;
+				for (const auto &o : map.objects) {
+					if (std::abs(o.ne - ne) < 2.0 and std::abs(o.se - se) < 2.0) {
+						free = false;
+						break;
+					}
+				}
+				if (free) {
+					best = to_mid;
+					dest_ne = ne + 0.5;
+					dest_se = se + 0.5;
+				}
+			}
+		}
+	}
+	auto vp = pixel(villager->ne, villager->se, 0.6);
+	auto dest = minimap_pixel(dest_ne, dest_se);
+	log::log(INFO << "vision replay: villager at pixel (" << vp.first << ", " << vp.second << "), destination tile ("
+	              << dest_ne << ", " << dest_se << ") at minimap pixel (" << dest.first << ", " << dest.second
+	              << "), minimap " << mm.x0 << "," << mm.y0 << " " << mm.w() << "x" << mm.h());
+	click(1.0, vp, E::kLeftButton);
+	capture(2.5, "-sync-v1");
+	click(3.0, dest, E::kRightButton);
+	capture(4.0, "-sync-v2");
+	// 3. the camera jumps to the destination (left click on the minimap) once the villager is there
+	// the walk takes real time: the world pass draws at the real time of the clock, so the replay runs at
+	// speed 1 and waits (the slow start of software GL compresses the earlier steps)
+	capture(60.0, "-v2-unterwegs");
+	click(60.5, dest, E::kLeftButton);
+	capture(62.0, "-v3-sprung");
+	// 4. signal (Alt + click) on the minimap next to the destination
+	auto ping = minimap_pixel(dest_ne + 6.0, dest_se - 6.0);
+	click(62.5, ping, E::kLeftButton, alt);
+	capture(63.2, "-v4-signal");
+	// 5. minimap mode combat (Alt+C), back to normal (Alt+N)
+	key(63.5, 'C', alt);
+	capture(65.0, "-v5-kampf");
+	key(65.5, 'N', alt);
+	capture(67.0, nullptr);
+	return steps;
+}
+
+/**
  * Input replay of the ground markers and the placement ghost (--replay-markers,
  * XR fork; with --map random): selects a villager (ellipse + health bar), all
  * villagers (double click), the town centre (footprint diamond), starts a house
@@ -2231,6 +2420,9 @@ bool egl_sink_check(const native_args &args,
 	if (args.replay_aoe and not args.stop_in_resize) {
 		steps = aoe_replay_steps(args, map_settings, start, png.string());
 	}
+	else if (args.replay_vision and not args.stop_in_resize) {
+		steps = vision_replay_steps(args, map_settings, start, png.string());
+	}
 	else if (args.replay_markers and not args.stop_in_resize) {
 		steps = markers_replay_steps(args, map_settings, start, png.string());
 	}
@@ -2312,7 +2504,7 @@ bool egl_sink_check(const native_args &args,
 	// a house on water after the first house was paid (must be rejected)
 	std::atomic<bool> prod_driver_stop{false};
 	std::thread prod_driver;
-	if (args.replay_prod or args.replay_ui or args.replay_aoe or args.replay_markers) {
+	if (args.replay_prod or args.replay_ui or args.replay_aoe or args.replay_markers or args.replay_vision) {
 		// the UI replay only logs the snapshots (no house on water)
 		auto water = args.replay_prod ? prod_targets.water : std::nullopt;
 		prod_driver = std::thread{[&prod_driver_stop, production = engine->get_production(), water]() {
