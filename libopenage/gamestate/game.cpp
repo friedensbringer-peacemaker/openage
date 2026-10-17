@@ -34,6 +34,8 @@
 #include "gamestate/map.h"
 #include "gamestate/map_generator.h"
 #include "gamestate/player.h"
+#include "gamestate/catalog.h"
+#include "gamestate/tech.h"
 #include "gamestate/terrain.h"
 #include "gamestate/terrain_chunk.h"
 #include "gamestate/terrain_factory.h"
@@ -424,6 +426,16 @@ bool Game::generate_random_map(const std::shared_ptr<openage::event::EventLoop> 
 	this->state->get_combat()->set_neutral_players({static_cast<player_id_t>(generated.starts.size())});
 	// ai (XR fork): players and gaia for the computer opponent
 	this->start_count = generated.starts.size();
+
+	// XR fork W1: civilisations of the players, before their entities exist (bonuses, tech tree,
+	// architecture); random choices are resolved from the map seed
+	if (not settings.civs.empty()) {
+		for (size_t p = 0; p < generated.starts.size(); ++p) {
+			const auto chosen = p < settings.civs.size() ? settings.civs[p] : std::string{"random"};
+			const auto civ = prod::pick_civ(chosen, settings.seed, p);
+			this->state->get_tech()->apply_civ(this->state, event_loop, static_cast<player_id_t>(p), civ, start_time);
+		}
+	}
 
 	// objects as entities (villagers gather from trees, mines and bushes, see econ.h)
 	const auto time = start_time;

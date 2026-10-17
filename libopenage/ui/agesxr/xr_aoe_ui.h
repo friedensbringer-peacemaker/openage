@@ -44,7 +44,7 @@ public:
         kMenuClosed,       // „Schließen“ (Menü zu, Nutzerpause bleibt)
         kSpeedChanged,     // menu().speed
         kSettingChanged,   // Beschriftung/Hotkeys/Meldungen
-        kNewMap,           // „Karte starten“ mit biome/size/opponent/seed
+        kNewMap,           // „Karte starten“ mit biome/size/opponent/seed/civ/aiCiv
         kSurrenderArmed,   // erster Klick auf „Partie aufgeben“ (Doppelpuls)
         kSurrender,        // zweiter Klick innerhalb der Frist
         kSlotsShown,       // Seite Speichern/Laden geöffnet: Aufrufer füllt menu().slots
@@ -76,7 +76,8 @@ public:
     // Zeilen des Spielmenüs je Seite (dialogRowRect(index))
     enum MainRow { kMainResume = 0, kMainSave, kMainSettings, kMainNewMap, kMainSurrender, kMainClose, kMainCount };
     enum SettingsRow { kSetSpeed = 0, kSetLabels, kSetHotkeys, kSetMessages, kSetBack, kSetCount };
-    enum NewMapRow { kNewBiome = 0, kNewSize, kNewOpponent, kNewSeed, kNewStart, kNewBack, kNewCount };
+    // W1: Kultur des Spielers und des Gegners (xr_civs.h)
+    enum NewMapRow { kNewBiome = 0, kNewSize, kNewOpponent, kNewSeed, kNewCiv, kNewAiCiv, kNewStart, kNewBack, kNewCount };
     static constexpr int kBoardButtons = 2;  // Neue Karte ›, Schließen
 
     AoeUi();
@@ -212,7 +213,9 @@ private:
                      bool enabled, int maxX);
     void textIn(const char* utf8, const Rect& r, float pxSize, uint32_t color, bool bold, bool shadow, int align);
     SkinState stateOf(const HitState& h, bool enabled) const;
-    std::string blockedOf(const HitState& h) const;  // „Haus: nicht genug Holz (30)“ für gesperrte Rasterknöpfe
+    // Zeile zum angezielten Rasterknopf: „Haus: nicht genug Holz (30)“ (gesperrt) bzw. Kosten/Zeit/Wirkung (W1)
+    std::string blockedOf(const HitState& h) const;
+    bool blockedWarn(const HitState& h) const;  // gesperrt mit Grund (rot)
     Result clickHit(const HitState& h, int x, int y, double now);
     Result dialogClick(const HitState& h, double now);
     Result stepValue(int row, int dir, double now);

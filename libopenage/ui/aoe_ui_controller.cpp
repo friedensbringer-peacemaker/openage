@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <sstream>
 
+#include "gamestate/catalog.h"
 #include "gamestate/production.h"
 #include "input/keys.h"
 #include "log/log.h"
@@ -17,6 +18,26 @@
 namespace openage::ui {
 
 namespace {
+
+/// the civilisation choice of the interface (agesxr/xr_civs.h) follows the catalog of the engine
+constexpr bool civ_choices_match() {
+	if (agesxr::kCivChoiceCount != static_cast<int>(gamestate::prod::CIVS.size()) + 1) {
+		return false;
+	}
+	for (size_t i = 0; i < gamestate::prod::CIVS.size(); ++i) {
+		const char *a = agesxr::kCivChoiceNames[i + 1];
+		const char *b = gamestate::prod::CIVS[i].name;
+		while (*a != 0 and *a == *b) {
+			++a;
+			++b;
+		}
+		if (*a != *b) {
+			return false;
+		}
+	}
+	return true;
+}
+static_assert(civ_choices_match(), "xr_civs.h and gamestate/catalog.h list the civilisations differently");
 
 /// ids of the context menu items (same as the classic interface)
 enum context_item_t : int {
@@ -41,8 +62,25 @@ agesxr::HudProdState prod_to_hud(const gamestate::prod::Snapshot &s) {
 	p.selectionLabel = s.selection_label;
 	p.construction = s.construction ? *s.construction : -1.0;
 	for (const auto &o : s.options) {
-		p.options.push_back({o.code, o.label, o.icon, o.available, o.reason});
+		agesxr::HudProdOption h;
+		h.code = o.code;
+		h.label = o.label;
+		h.icon = o.icon;
+		h.available = o.available;
+		h.reason = o.reason;
+		// XR fork W1: research, costs, time and effect for the tooltip
+		h.research = o.research;
+		for (size_t i = 0; i < h.cost.size() and i < o.cost.size(); ++i) {
+			h.cost[i] = o.cost[i];
+		}
+		h.time = o.time;
+		h.effect = o.effect;
+		p.options.push_back(h);
 	}
+	p.age = s.age;
+	p.ageLabel = s.age_label;
+	p.civLabel = s.civ_label;
+	p.unitLabels = s.unit_labels;
 	if (s.queue) {
 		p.queue = true;
 		for (const auto &item : s.queue->items) {
@@ -105,6 +143,9 @@ AoeUiController::AoeUiController(const gamestate::MapSettings &map,
 	menu.seed = std::clamp(static_cast<int>(map.seed), agesxr::kGameUiSeedMin, agesxr::kGameUiSeedMax);
 	const bool ai_on = map.type == gamestate::map_type_t::RANDOM and map.ai.mode != gamestate::ai_mode_t::OFF;
 	menu.opponent = not ai_on ? 0 : map.ai.difficulty == gamestate::ai_difficulty_t::NORMAL ? 2 : 1;
+	// XR fork W1: civilisations of the last game (random until chosen)
+	menu.civ = map.civs.size() > 0 ? agesxr::civChoiceIndex(map.civs[0]) : agesxr::kCivRandom;
+	menu.aiCiv = map.civs.size() > 1 ? agesxr::civChoiceIndex(map.civs[1]) : agesxr::kCivRandom;
 	menu.speed = 1;
 	if (this->hooks.clock) {
 		double speed = this->hooks.clock->get_speed().to_double();
@@ -566,6 +607,13 @@ void AoeUiController::context_command(int id) {
 }
 
 void AoeUiController::production_command(int code, const std::string &label) {
+	if (code == agesxr::kAoeCmdPageNext) {
+		// XR fork W1: more than 10 commands (buildings and technologies) are shown in pages
+		this->feed.nextPage();
+		log::log(INFO << "UI: command page " << (this->feed.page() + 1) << "/" << this->feed.pages());
+		this->last_poll = -1.0;
+		return;
+	}
 	if (not this->hooks.production) {
 		return;
 	}
@@ -661,7 +709,9 @@ void AoeUiController::handle(const agesxr::AoeUi::Result &result, double now) {
 		auto settings = this->menu_map_settings();
 		log::log(INFO << "UI: new map requested: " << gamestate::map_biome_name(settings.biome) << " " << settings.size
 		              << "x" << settings.size << " seed " << settings.seed << " ai "
-		              << (settings.ai.mode == gamestate::ai_mode_t::OFF ? "off" : "on"));
+		              << (settings.ai.mode == gamestate::ai_mode_t::OFF ? "off" : "on") << " civs "
+		              << (settings.civs.size() > 0 ? settings.civs[0] : std::string{"-"}) << "/"
+		              << (settings.civs.size() > 1 ? settings.civs[1] : std::string{"-"}));
 		this->menu_pause = false;
 		if (this->hooks.restart) {
 			this->hooks.restart(settings);
@@ -781,6 +831,8 @@ gamestate::MapSettings AoeUiController::menu_map_settings() const {
 	settings.skirmish = false;
 	settings.ai.mode = menu.opponent == 0 ? gamestate::ai_mode_t::OFF : gamestate::ai_mode_t::ON;
 	settings.ai.difficulty = menu.opponent == 2 ? gamestate::ai_difficulty_t::NORMAL : gamestate::ai_difficulty_t::EASY;
+	// XR fork W1: civilisation of the player and of the opponent ("random": from the map seed)
+	settings.civs = {agesxr::civChoiceName(menu.civ), agesxr::civChoiceName(menu.aiCiv)};
 	return settings;
 }
 

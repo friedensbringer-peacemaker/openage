@@ -130,6 +130,28 @@ public:
 		return it != entities.end() and prod::is_finished(it->second);
 	}
 
+	std::vector<std::string> offered_research(const std::shared_ptr<GameState> &state,
+	                                          player_id_t player,
+	                                          entity_id_t building,
+	                                          const time::time_t &time) override {
+		const auto &entities = state->get_game_entities();
+		auto it = entities.find(building);
+		return it == entities.end() ? std::vector<std::string>{} : prod::available_research(state, player, it->second, time);
+	}
+
+	bool researching(const std::shared_ptr<GameState> &state, player_id_t player, const time::time_t &time) override {
+		return prod::research_queued(state, player, time);
+	}
+
+	bool research(const std::shared_ptr<GameState> & /* state */,
+	              player_id_t player,
+	              entity_id_t building,
+	              const std::string &tech,
+	              const time::time_t & /* time */) override {
+		this->production->research_for(player, building, tech);
+		return true;
+	}
+
 private:
 	std::shared_ptr<prod::Production> production;
 };

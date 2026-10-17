@@ -244,10 +244,11 @@ AoeUi::Rect AoeUi::dialogRowRect(int row) const {
     if (d.empty() || row < 0 || row >= dialogRowCount()) return {};
     const bool slot_list = slotPage(mMenu.page);
     const int w = px(kDlgBtnW) + (mMenu.page == AoeMenuModel::kNewMap || slot_list ? px(kDlgWWide - kDlgW) : 0);
-    // slot pages: 8 rows in the same dialog (pitch 64, rows 56 – still ≥ 48 px)
-    const int pitch = slot_list ? px(64) : px(kDlgPitch);
+    // slot pages and the new-map page (W1: 8 rows with the civilisations): pitch 64, rows 56 – still ≥ 48 px
+    const bool tight = slot_list || mMenu.page == AoeMenuModel::kNewMap;
+    const int pitch = tight ? px(64) : px(kDlgPitch);
     const int y0 = d.y0 + px(kDlgRowsY + 8) + row * pitch;
-    Rect r = r4(d.cx() - w / 2, y0, d.cx() + w / 2, y0 + (slot_list ? px(56) : px(kDlgBtnH)));
+    Rect r = r4(d.cx() - w / 2, y0, d.cx() + w / 2, y0 + (tight ? px(56) : px(kDlgBtnH)));
     if (mMenu.page == AoeMenuModel::kMain && row == kMainSave && mMenu.loadAvailable) r.x1 = r.cx() - px(4);
     return r;
 }
@@ -261,7 +262,7 @@ AoeUi::Rect AoeUi::dialogLoadRect() const {
 
 bool AoeUi::dialogRowIsValue(int row) const {
     if (mMenu.page == AoeMenuModel::kSettings) return row != kSetBack;
-    if (mMenu.page == AoeMenuModel::kNewMap) return row <= kNewSeed;
+    if (mMenu.page == AoeMenuModel::kNewMap) return row <= kNewAiCiv;
     return false;
 }
 
@@ -309,6 +310,8 @@ std::string AoeUi::dialogRowLabel(int row) const {
         case kNewSize: return "Kartengröße";
         case kNewOpponent: return "Gegner";
         case kNewSeed: return "Kartennummer";
+        case kNewCiv: return "Deine Kultur";
+        case kNewAiCiv: return "Kultur Gegner";
         case kNewStart: return "Karte starten";
         case kNewBack: return "‹ Zurück";
         default: return "";
@@ -349,6 +352,8 @@ std::string AoeUi::dialogRowValue(int row) const {
         case kNewSeed:
             std::snprintf(buf, sizeof(buf), "%d", mMenu.seed);
             return buf;
+        case kNewCiv: return civChoiceLabel(mMenu.civ);
+        case kNewAiCiv: return civChoiceLabel(mMenu.aiCiv);
         default: return "";
         }
     }
@@ -487,6 +492,8 @@ AoeUi::Result AoeUi::stepValue(int row, int dir, double now) {
         case kNewSize: mMenu.size = clampi(mMenu.size + dir, 0, kGameUiSizeCount - 1); break;
         case kNewOpponent: mMenu.opponent = clampi(mMenu.opponent + dir, 0, kGameUiOpponentCount - 1); break;
         case kNewSeed: mMenu.seed = clampi(mMenu.seed + dir, kGameUiSeedMin, kGameUiSeedMax); break;
+        case kNewCiv: mMenu.civ = (civChoiceClamp(mMenu.civ) + dir + kCivChoiceCount) % kCivChoiceCount; break;
+        case kNewAiCiv: mMenu.aiCiv = (civChoiceClamp(mMenu.aiCiv) + dir + kCivChoiceCount) % kCivChoiceCount; break;
         default: break;
         }
     }
@@ -1162,8 +1169,15 @@ void AoeUi::drawSlotRow(const std::vector<AoeSlot>& slot_list, int shown, int x0
 std::string AoeUi::blockedOf(const HitState& h) const {
     if (h.kind != Hit::kGrid) return {};
     const AoeCommand& c = mModel.cell(h.index);
-    if (c.id == 0 || c.enabled || c.reason.empty()) return {};
-    return c.label + ": " + c.reason;
+    if (c.id == 0) return {};
+    if (!c.enabled && !c.reason.empty()) return c.label + ": " + c.reason;
+    return mModel.tip(h.index);  // W1: Kosten, Zeit, Wirkung des angezielten Knopfs
+}
+
+bool AoeUi::blockedWarn(const HitState& h) const {
+    if (h.kind != Hit::kGrid) return false;
+    const AoeCommand& c = mModel.cell(h.index);
+    return c.id != 0 && !c.enabled && !c.reason.empty();
 }
 
 void AoeUi::drawSelection() {
@@ -1171,8 +1185,13 @@ void AoeUi::drawSelection() {
     const Rect field = selectionRect();
     AoeSelection sel = mModel.selection;
     const std::string hoverBlocked = blockedOf(mHover);
-    if (!hoverBlocked.empty()) sel.blocked = hoverBlocked;
     const uint32_t ink = mSkin->inkOn(SkinPanel::kSelection, SkinState::kNormal);
+    // Zeile zum angezielten Knopf: Sperrgrund rot, sonst Kosten/Zeit/Wirkung in Tinte (W1)
+    uint32_t blockedInk = kDanger;
+    if (!hoverBlocked.empty()) {
+        sel.blocked = hoverBlocked;
+        blockedInk = blockedWarn(mHover) ? kDanger : ink;
+    }
     if (sel.count <= 0 && !mModel.orders.empty()) {
         // Bestellungen (0.6.0-xr.0.11) wie Porträts der Mehrfachauswahl: Symbol, Fortschritt, Anzahl; Klick = Gebäude
         const int n = std::min(static_cast<int>(mModel.orders.size()), kAoeOrdersShown);
@@ -1224,7 +1243,7 @@ void AoeUi::drawSelection() {
         if (!sel.blocked.empty()) {
             float bpx = kPxStats * s;
             const std::string b = fitText(sel.blocked, bpx, kPxMin * s, field.w() - px(32), false);
-            textIn(b.c_str(), r4(field.x0, field.y1 - px(40), field.x1, field.y1 - px(12)), bpx, kDanger, false, false, kAlignCenter);
+            textIn(b.c_str(), r4(field.x0, field.y1 - px(40), field.x1, field.y1 - px(12)), bpx, blockedInk, false, false, kAlignCenter);
         }
         return;
     }
@@ -1238,7 +1257,7 @@ void AoeUi::drawSelection() {
         if (!sel.blocked.empty()) {
             float bpx = kPxStats * s;
             const std::string b = fitText(sel.blocked, bpx, kPxMin * s, field.x1 - px(16) - hx, false);
-            textIn(b.c_str(), r4(hx, barY0 + px(kMultiY0 + kMultiPitch - kBarY), field.x1 - px(16), barY0 + px(kMultiY0 + kMultiPitch + kSlot - kBarY)), bpx, kDanger, false, false, kAlignLeft);
+            textIn(b.c_str(), r4(hx, barY0 + px(kMultiY0 + kMultiPitch - kBarY), field.x1 - px(16), barY0 + px(kMultiY0 + kMultiPitch + kSlot - kBarY)), bpx, blockedInk, false, false, kAlignLeft);
         }
         return;
     }
@@ -1276,7 +1295,7 @@ void AoeUi::drawSelection() {
         const Rect br = r4(statsR.x0, statsR.y0 + px(26), statsR.x1, statsR.y1 + px(26));
         float bpx = kPxStats * s;
         const std::string t = fitText(sel.blocked, bpx, kPxMin * s, br.w(), false);
-        textIn(t.c_str(), br, bpx, kDanger, false, false, kAlignLeft);
+        textIn(t.c_str(), br, bpx, blockedInk, false, false, kAlignLeft);
     }
     // Warteschlange
     const int labelY = barY0 + px(kQueueLabelY - kBarY);

@@ -6,13 +6,13 @@
  *   openage-prod-check
  *
  * Parameter sweeps over the dependency-free parts of production and construction:
- * - offered units and buildings: codes unique, lookup by name and code, German labels
+ * - catalog of units, buildings and technologies: codes unique, lookup by name and code, German labels
  * - footprints: side per hitbox radius, snapped anchors, tile count = side^2 for every
  *   click position, footprint contains the clicked tile's neighbourhood
  * - placement check: priority outside > water > blocked > occupied, sweep over a
  *   footprint with one bad tile at every position
  * - costs: missing resource and message
- * - training queue: max 5, start/finish times for chains, population slots (waits at
+ * - training queue: max 15 (AoE II), cancel takes the hindmost entry of the type, start/finish times for chains, population slots (waits at
  *   the limit, continues when housing is free), cancel/refund, progress
  * - population limit and construction progress (one and several builders)
  * - scenario of the desktop check: town centre trains 2 villagers (food -100,
@@ -52,25 +52,35 @@ bool near(double a, double b, double eps = 1e-9) {
 }
 
 void check_known() {
+	// XR fork W1: the catalog (gamestate/catalog.h) replaces the fixed list; tech_check.cpp sweeps it fully
 	std::set<int> codes;
-	std::set<std::string> names;
-	for (const auto &entry : KNOWN) {
+	std::set<std::pair<std::string, bool>> names;
+	for (const auto &entry : CATALOG) {
+		const bool tech = entry.kind == entry_t::TECH;
 		check(codes.insert(entry.code).second, std::string{"unique code "} + entry.name);
-		check(names.insert(entry.name).second, std::string{"unique name "} + entry.name);
-		check(known(entry.name) == &entry, std::string{"lookup by name "} + entry.name);
+		check(names.insert({entry.name, tech}).second, std::string{"unique name "} + entry.name);
+		check(known(entry.name, tech) == &entry, std::string{"lookup by name "} + entry.name);
 		check(known(entry.code) == &entry, std::string{"lookup by code "} + entry.name);
-		check(entry.building == (entry.code >= 200), std::string{"code range "} + entry.name);
+		check(entry.building == (entry.code >= 200 and entry.code < 300), std::string{"code range "} + entry.name);
 		check(std::string{entry.label}.size() > 2, std::string{"label "} + entry.name);
 	}
-	check(known("EagleWarrior") == nullptr, "eagle warrior not offered");
+	check(known("EagleWarrior") != nullptr and has_mechanic("EagleWarrior"), "eagle warrior in the catalog");
+	check(not has_mechanic("Monk") and not has_mechanic("Farm") and not has_mechanic("Dock"), "hidden entries");
+	check(has_mechanic("SomethingNew"), "unknown entries are offered");
 	check(known(999) == nullptr, "unknown code");
 	check(label_of("Villager") == "Dorfbewohner", "label villager");
 	check(label_of("TownCenter") == "Dorfzentrum", "label town centre");
-	check(label_of("SiegeWorkshop") == "Siege Workshop", "camel case split");
+	check(label_of("SiegeWorkshop") == "Belagerungswerkstatt", "label siege workshop");
+	check(label_of("BigOceanFish") == "Big Ocean Fish", "camel case split");
+	check(label_of("Loom", true) == "Webstuhl", "label loom");
+	check(label_of("BombardTower", true) == "Bombardenturm" and known("BombardTower", true)->kind == entry_t::TECH
+	          and known("BombardTower")->kind == entry_t::BUILDING,
+	      "same name as entity and technology");
 	check(short_name("hd_base.data.game_entity.generic.house.house.House") == "House", "short name");
 	check(display_order("Villager") < display_order("Militia"), "order units");
 	check(display_order("House") < display_order("Barracks"), "order buildings");
-	check(display_order("Wonder") == KNOWN.size(), "unknown last");
+	check(display_order("FeudalAge", true) < display_order("Loom", true), "ages first");
+	check(display_order("Unknown") == CATALOG_SIZE, "unknown last");
 }
 
 void check_footprints() {
@@ -181,8 +191,8 @@ void check_queue() {
 	for (size_t i = 0; i < MAX_QUEUE; ++i) {
 		check(queue.push(villager()), "push " + std::to_string(i));
 	}
-	check(not queue.push(villager()), "queue full at 5");
-	check(queue.size() == MAX_QUEUE, "size 5");
+	check(not queue.push(villager()), "queue full at 15");
+	check(queue.size() == MAX_QUEUE and MAX_QUEUE == 15, "size 15");
 
 	// chain: one item every 25 s, sweep over the update interval
 	for (double dt : {0.001, 0.1, 0.25, 1.0, 7.0, 30.0}) {

@@ -122,6 +122,12 @@ public:
 	void render_update(const time::time_t &time,
 	                   const std::string &animation_path);
 
+	/**
+	 * Animation of the last render update (XR fork W1: a technology that changes
+	 * the animation of an ability replaces it, e.g. buildings of a new age).
+	 */
+	const std::string &get_animation_path() const;
+
 protected:
 	/**
 	 * A game entity cannot be default copied because of their unique ID.

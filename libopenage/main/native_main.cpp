@@ -202,6 +202,8 @@ struct native_args {
 	bool ui_quest = false;
 	bool replay_aoe = false;
 	bool replay_markers = false;
+	// XR fork W1: input replay of the technologies (research buttons, tooltip, queue, age, civilisation choice)
+	bool replay_tech = false;
 	// save games (XR fork): slot directory, file to load, headless save/load check
 	std::string save_dir{};
 	std::string load_file{};
@@ -238,7 +240,8 @@ void usage(const char *argv0) {
 	             " [--ai on|off|auto] [--ai-difficulty easy|normal] [--ai-player <n>]"
 	             " [--ai-first-attack <s>] [--ai-attack-size <n>] [--sim-speed <x>] [--capture-at <s1,s2,...>]"
 	             " [--ui | --no-ui] [--ui-demo <what@s,...>] [--replay-ui]"
-	             " [--ui-style aoe|classic] [--ui-quest] [--replay-aoe] [--replay-markers]"
+	             " [--ui-style aoe|classic] [--ui-quest] [--replay-aoe] [--replay-markers] [--replay-tech]"
+	             " [--civ <name|random>] [--ai-civ <name|random>]"
 	             " [--save-dir <dir>] [--load <file>] [--save-check <dir> [--save-check-seconds <s>]]\n";
 }
 
@@ -444,6 +447,18 @@ bool parse_args(int argc, char **argv, native_args &args) {
 			args.replay_aoe = true;
 			args.ui = true;
 			args.ui_style = "aoe";
+		}
+		else if (arg == "--replay-tech") {
+			args.replay_tech = true;
+			args.ui = true;
+			args.ui_style = "aoe";
+		}
+		// XR fork W1: civilisation of player 0 / of the opponent (short name of the data or "random")
+		else if (arg == "--civ" or arg == "--ai-civ") {
+			if (args.map.civs.size() < 2) {
+				args.map.civs.resize(2, "random");
+			}
+			args.map.civs[arg == "--civ" ? 0 : 1] = value();
 		}
 		else if (arg == "--replay-markers") {
 			args.replay_markers = true;
@@ -1478,6 +1493,163 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> aoe_replay_steps(con
 }
 
 /**
+ * Input replay of the technologies (--replay-tech, XR fork W1; with --map random and fixed
+ * civilisations): selects the own town centre (research buttons: Feudal Age locked with the
+ * reason of the data, Loom with costs/time/effect as tooltip), researches Loom (queue),
+ * the driver grants the Feudal Age (age badge, message) and then the Castle Age (test option
+ * Production::grant_research), all villagers (double click) show the buildings of the
+ * Castle Age in two pages, G turns the page, Esc opens the game menu, "Neue Karte" shows the
+ * civilisation choice. Each state is captured as <png stem>-<n>-<name>.png.
+ */
+std::vector<openage::renderer::opengl::TestFrameSink::Step> tech_replay_steps(const native_args &args,
+                                                                               openage::gamestate::MapSettings &map_settings,
+                                                                               double start,
+                                                                               const std::string &capture_file) {
+	using namespace openage;
+	using renderer::opengl::TestFrameSink;
+	using gamestate::map_object_t;
+	using E = renderer::SinkInputEvent;
+
+	const auto map = gamestate::generate_map(map_settings);
+	const gamestate::Heightmap heights{map.width, map.height, map.corners};
+	const auto tc = map.starts.at(0);
+	if (not map_settings.view) {
+		gamestate::MapView start_view;
+		start_view.ne = tc[0];
+		start_view.se = tc[1];
+		start_view.zoom = 1.5f;
+		map_settings.view = start_view;
+	}
+	const gamestate::MapView view = *map_settings.view;
+
+	const int width = static_cast<int>(args.width);
+	const int height = static_cast<int>(args.height);
+	auto camera = std::make_shared<renderer::camera::Camera>(nullptr, util::Vector2s{args.width, args.height});
+	camera->look_at_coord(coord::scene3{10.0, 10.0, 0});
+	camera->move_to(Eigen::Vector3f{0.0f, view.height, 0.0f});
+	camera->look_at_coord(coord::scene3{view.ne, view.se, 0});
+	camera->set_zoom(view.zoom);
+	const Eigen::Matrix4f matrix = camera->get_projection_matrix() * camera->get_view_matrix();
+	auto pixel = [&](double ne, double se, double up) {
+		double ground = heights.is_flat() ? 0.0 : heights.at(ne, se);
+		coord::phys3 pos{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{ground + up}};
+		auto w = pos.to_scene3().to_world_space();
+		Eigen::Vector4f clip = matrix * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+		int x = static_cast<int>(std::lround((clip.x() + 1.0) * 0.5 * width));
+		int y = static_cast<int>(std::lround(height - (clip.y() + 1.0) * 0.5 * height));
+		return std::pair{x, y};
+	};
+
+	agesxr::AoeUi layout;
+	layout.resize(width, height);
+	const int bar_top = layout.barRect().y0;
+	auto on_screen = [&](std::pair<int, int> p) {
+		return p.first >= 40 and p.second >= layout.topBarPx() + 40 and p.first < width - 40 and p.second < bar_top - 40;
+	};
+	const gamestate::MapObject *villager = nullptr;
+	for (const auto &o : map.objects) {
+		if (o.kind == map_object_t::VILLAGER and o.owner == 0 and on_screen(pixel(o.ne, o.se, 0.0))) {
+			villager = &o;
+			break;
+		}
+	}
+
+	std::vector<TestFrameSink::Step> steps;
+	auto add = [&](double at, int type, int x, int y, int button, int buttons, int key = 0, int modifiers = 0) {
+		TestFrameSink::Step step;
+		step.at = start + at;
+		step.what = TestFrameSink::Step::kind::input;
+		step.event.type = type;
+		step.event.x = x;
+		step.event.y = y;
+		step.event.button = button;
+		step.event.buttons = buttons;
+		step.event.key = key;
+		step.event.modifiers = modifiers;
+		steps.push_back(step);
+	};
+	auto click = [&](double t, std::pair<int, int> p, int button) {
+		add(t, E::kMouseMove, p.first, p.second, 0, 0);
+		add(t + 0.1, E::kMouseDown, p.first, p.second, button, button);
+		add(t + 0.2, E::kMouseUp, p.first, p.second, button, 0);
+	};
+	auto centre = [](const agesxr::AoeUi::Rect &r) {
+		return std::pair{(r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2};
+	};
+	auto capture = [&](double t, const char *suffix) {
+		const std::filesystem::path png{capture_file};
+		TestFrameSink::Step shot;
+		shot.at = start + t;
+		shot.what = TestFrameSink::Step::kind::capture;
+		shot.file = suffix == nullptr ? capture_file
+		                              : (png.parent_path() / (png.stem().string() + suffix + png.extension().string())).string();
+		steps.push_back(shot);
+	};
+	auto key = [&](double t, int code) {
+		add(t, E::kKeyDown, 0, 0, 0, 0, code);
+		add(t + 0.05, E::kKeyUp, 0, 0, 0, 0, code);
+	};
+
+	// 1. town centre: research buttons (cell 0 Dorfbewohner, 1 Feudalzeit, 2 Webstuhl)
+	auto tp = pixel(tc[0], tc[1], 1.2);
+	log::log(INFO << "tech replay: town centre at pixel (" << tp.first << ", " << tp.second << ")");
+	click(0.9, tp, E::kLeftButton);
+	capture(2.0, "-sync-1");
+	add(2.5, E::kMouseMove, tp.first, tp.second, 0, 0);
+	capture(3.0, "-sync-2");
+	auto feudal_cell = centre(layout.gridRect(1));
+	auto loom_cell = centre(layout.gridRect(2));
+	add(5.0, E::kMouseMove, feudal_cell.first, feudal_cell.second, 0, 0);
+	capture(6.0, "-1-forschung");
+	// 2. tooltip of Loom (costs, time, effect)
+	add(6.5, E::kMouseMove, loom_cell.first, loom_cell.second, 0, 0);
+	capture(7.5, "-2-tooltip");
+	// 3. Loom researched: in the queue of the town centre
+	click(8.0, loom_cell, E::kLeftButton);
+	capture(10.0, "-3-warteschlange");
+	// 4. the driver grants the Feudal Age once -3 is taken: badge "Feudalzeit", message
+	// (two captures in between: the sink may lag behind its schedule, the grant needs a few frames)
+	capture(11.5, "-sync-3a");
+	capture(13.0, "-sync-3b");
+	capture(15.0, "-4-zeitalter");
+	// 5. the driver grants the Castle Age: all villagers show the buildings in two pages
+	if (villager != nullptr) {
+		auto vp = pixel(villager->ne, villager->se, 0.6);
+		log::log(INFO << "tech replay: villager at pixel (" << vp.first << ", " << vp.second << ")");
+		add(19.0, E::kMouseMove, vp.first, vp.second, 0, 0);
+		add(19.05, E::kMouseDown, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
+		add(19.1, E::kMouseUp, vp.first, vp.second, E::kLeftButton, 0);
+		add(19.2, E::kMouseDown, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
+		add(19.2, E::kMouseDoubleClick, vp.first, vp.second, E::kLeftButton, E::kLeftButton);
+		add(19.3, E::kMouseUp, vp.first, vp.second, E::kLeftButton, 0);
+		capture(20.5, "-sync-5");
+		auto page_cell = centre(layout.gridRect(agesxr::kAoeOptionCells - 1));
+		add(21.0, E::kMouseMove, page_cell.first, page_cell.second, 0, 0);
+		capture(23.0, "-5-seiten");
+		key(23.5, 'G');
+		capture(25.0, "-6-seite2");
+	}
+	else {
+		log::log(WARN << "tech replay: no villager of player 0 on screen");
+	}
+	// 6. game menu -> "Neue Karte": civilisation choice (Deine Kultur, Kultur Gegner)
+	key(25.5, 0x01000000);
+	capture(26.3, "-sync-7");
+	layout.openMenu(true, 0.0);
+	auto new_map_row = centre(layout.dialogRowRect(agesxr::AoeUi::kMainNewMap));
+	layout.menu().page = agesxr::AoeMenuModel::kNewMap;
+	auto civ_right = centre(layout.dialogArrowRect(agesxr::AoeUi::kNewAiCiv, true));
+	click(26.5, new_map_row, E::kLeftButton);
+	capture(27.5, "-sync-8");
+	click(27.8, civ_right, E::kLeftButton);
+	capture(29.0, "-7-kulturwahl");
+	key(29.5, 0x01000000);
+	key(30.0, 0x01000000);
+	capture(31.0, nullptr);
+	return steps;
+}
+
+/**
  * Input replay of the ground markers and the placement ghost (--replay-markers,
  * XR fork; with --map random): selects a villager (ellipse + health bar), all
  * villagers (double click), the town centre (footprint diamond), starts a house
@@ -2231,6 +2403,9 @@ bool egl_sink_check(const native_args &args,
 	if (args.replay_aoe and not args.stop_in_resize) {
 		steps = aoe_replay_steps(args, map_settings, start, png.string());
 	}
+	else if (args.replay_tech and not args.stop_in_resize) {
+		steps = tech_replay_steps(args, map_settings, start, png.string());
+	}
 	else if (args.replay_markers and not args.stop_in_resize) {
 		steps = markers_replay_steps(args, map_settings, start, png.string());
 	}
@@ -2312,7 +2487,7 @@ bool egl_sink_check(const native_args &args,
 	// a house on water after the first house was paid (must be rejected)
 	std::atomic<bool> prod_driver_stop{false};
 	std::thread prod_driver;
-	if (args.replay_prod or args.replay_ui or args.replay_aoe or args.replay_markers) {
+	if (args.replay_prod or args.replay_ui or args.replay_aoe or args.replay_markers or args.replay_tech) {
 		// the UI replay only logs the snapshots (no house on water)
 		auto water = args.replay_prod ? prod_targets.water : std::nullopt;
 		prod_driver = std::thread{[&prod_driver_stop, production = engine->get_production(), water]() {
@@ -2337,6 +2512,33 @@ bool egl_sink_check(const native_args &args,
 				}
 			}
 			log_prod_snapshot(production->snapshot());
+		}};
+	}
+
+	// technology replay (XR fork W1): test grants of the ages once the captures before them exist
+	// (the sink takes captures when it gets to them; a grant before a later capture shows in it)
+	std::atomic<bool> tech_driver_stop{false};
+	std::thread tech_driver;
+	if (args.replay_tech) {
+		const auto dir = png.parent_path();
+		const auto stem = png.stem().string();
+		const auto ext = png.extension().string();
+		tech_driver = std::thread{[&tech_driver_stop, production = engine->get_production(), dir, stem, ext]() {
+			const std::vector<std::pair<std::string, std::string>> grants{
+				{"-3-warteschlange", "FeudalAge"},
+				{"-4-zeitalter", "CastleAge"},
+			};
+			size_t next = 0;
+			while (not tech_driver_stop and next < grants.size()) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+				const auto file = dir / (stem + grants[next].first + ext);
+				if (std::filesystem::exists(file)) {
+					log::log(INFO << "tech replay: " << file.filename().string() << " taken, granting "
+					              << grants[next].second << " to player 0");
+					production->grant_research(0, grants[next].second);
+					next += 1;
+				}
+			}
 		}};
 	}
 
@@ -2427,6 +2629,10 @@ bool egl_sink_check(const native_args &args,
 	if (prod_driver.joinable()) {
 		prod_driver_stop = true;
 		prod_driver.join();
+	}
+	if (tech_driver.joinable()) {
+		tech_driver_stop = true;
+		tech_driver.join();
 	}
 	{
 		// the watcher calls engine->stop() once more: destroy the engine only after that
@@ -2525,7 +2731,7 @@ int main(int argc, char **argv) {
 
 	// ai (XR fork): the input replays check the human side; keep the computer opponent out
 	if ((args.replay or args.replay_econ or args.replay_combat or args.replay_prod or args.replay_select or args.replay_ui
-	     or args.replay_aoe or args.replay_markers)
+	     or args.replay_aoe or args.replay_markers or args.replay_tech)
 	    and not args.ai_explicit) {
 		args.map.ai.mode = gamestate::ai_mode_t::OFF;
 	}

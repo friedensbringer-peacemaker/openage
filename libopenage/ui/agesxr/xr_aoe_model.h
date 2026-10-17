@@ -10,12 +10,14 @@
 #include <string>
 #include <vector>
 
+#include "xr_civs.h"
 #include "xr_game_ui.h"
 #include "xr_hud_model.h"
 
 namespace agesxr {
 
-// Feste Befehle des Rasters neben den Produktions-Codes der Engine (101–106 Ausbilden, 201–207 Bauen).
+// Feste Befehle des Rasters neben den Produktions-Codes der Engine (101–199 Ausbilden, 201–299 Bauen, 301–499
+// Forschen; Katalog libopenage/gamestate/catalog.h).
 constexpr int kAoeCmdCancelTraining = 900;   // = kHudCmdCancelTraining (hud_feed.h): letzten Auftrag abbrechen
 constexpr int kAoeCmdCancelPlacement = 901;  // = kHudCmdCancelPlacement: Bauplatz-Modus verlassen
 // Warteschlange: Klick auf Feld i = Auftrag i abbrechen (= kHudCmdCancelQueue0 + i aus hud_feed.h, 0.6.0-xr.0.11)
@@ -26,10 +28,12 @@ constexpr int kAoeCmdHalt = 931;             // Halt (S3)
 constexpr int kAoeCmdGarrison = 932;         // Garnison (S3)
 constexpr int kAoeCmdUnload = 933;           // Alle ausladen (S3)
 constexpr int kAoeCmdBack = 940;             // Zurück aus einem Untermenü (Feld 4,2)
+constexpr int kAoeCmdPageNext = 941;         // W1: nächste Seite der Befehle (mehr als 10 Einträge)
 // Rückkanal-IDs (UiFeedback) der Warteschlangenfelder
 constexpr int kAoeCmdQueueBase = 1000;
 
 constexpr int kAoeGridCells = 15;
+constexpr int kAoeOptionCells = 10;  // Zeilen 1–2: Angebot der Engine (mehr: Seiten, W1)
 constexpr int kAoeQueueShown = 5;
 constexpr int kAoeGarrisonMax = 10;
 constexpr int kAoeMultiShown = 12;
@@ -156,6 +160,7 @@ struct AoeMenuModel {
     bool messages = true;           // Meldungszeilen
     // Neue Karte
     int biome = 0, size = 1, opponent = 1, seed = 1;
+    int civ = kCivRandom, aiCiv = kCivRandom;  // W1: Kultur des Spielers und des Gegners (xr_civs.h, 0 = Zufall)
     // Spielstand (0.6.0-xr.0.11, anderer Agent): verfügbar → Knöpfe aktiv, sonst „Speichern (folgt)“
     bool saveAvailable = false;
     bool loadAvailable = false;
@@ -165,7 +170,8 @@ struct AoeMenuModel {
         return open == o.open && page == o.page && confirmSurrender == o.confirmSurrender &&
                confirmSlot == o.confirmSlot && slot_list == o.slot_list && speed == o.speed &&
                labels == o.labels && hotkeys == o.hotkeys && messages == o.messages && biome == o.biome &&
-               size == o.size && opponent == o.opponent && seed == o.seed && saveAvailable == o.saveAvailable &&
+               size == o.size && opponent == o.opponent && seed == o.seed && civ == o.civ && aiCiv == o.aiCiv &&
+               saveAvailable == o.saveAvailable &&
                loadAvailable == o.loadAvailable && quest == o.quest && mapInfo == o.mapInfo;
     }
     bool operator!=(const AoeMenuModel& o) const { return !(*this == o); }
@@ -178,13 +184,15 @@ struct AoeModel {
     bool housingAlert = false;              // „Mehr Häuser nötig“: Einwohner rot blinkend
     double gameSeconds = 0.0;
     bool paused = false;                    // Uhr zeigt „⏸“
-    std::string age = "Dunkles Zeitalter";  // fest bis Zeitalter (S3)
+    std::string age = "Dunkles Zeitalter";  // W1: Zeitalter des Spielers aus der Engine (HudProdState::ageLabel)
     int ageIndex = 1;                       // Plakette „I“ … „IV“
     std::string plakette;                   // Meldungsplakette (letzte Meldung, kPlaketteSeconds)
     HudStatus plaketteKind = HudStatus::kInfo;
     double plaketteAt = 0.0;
     // untere Leiste
     std::vector<AoeCommand> grid;           // kAoeGridCells (kürzer = Rest leer)
+    // W1: Zeile beim Zielen je Feld (Kosten · Zeit · Wirkung, „Webstuhl – 50 Gold · 25 s · …“), leer = keine
+    std::vector<std::string> tips;
     AoeSelection selection;
     AoeMinimap minimap;
     std::vector<AoeMessage> messages;       // älteste zuerst, höchstens kAoeMessagesMax
@@ -195,6 +203,10 @@ struct AoeModel {
         static const AoeCommand kEmpty;
         return i >= 0 && i < static_cast<int>(grid.size()) ? grid[static_cast<size_t>(i)] : kEmpty;
     }
+    const std::string& tip(int i) const {
+        static const std::string kNone;
+        return i >= 0 && i < static_cast<int>(tips.size()) ? tips[static_cast<size_t>(i)] : kNone;
+    }
     bool sameTop(const AoeModel& o) const {
         return food == o.food && wood == o.wood && gold == o.gold && stone == o.stone && population == o.population &&
                populationMax == o.populationMax && housingAlert == o.housingAlert && shownSecond() == o.shownSecond() &&
@@ -202,7 +214,7 @@ struct AoeModel {
                plaketteKind == o.plaketteKind && plaketteAt == o.plaketteAt;
     }
     bool sameBar(const AoeModel& o) const {
-        return grid == o.grid && selection == o.selection && minimap == o.minimap && orders == o.orders;
+        return grid == o.grid && tips == o.tips && selection == o.selection && minimap == o.minimap && orders == o.orders;
     }
     bool sameMessages(const AoeModel& o) const { return messages == o.messages; }
 };
@@ -241,14 +253,26 @@ inline HudIcon aoeIconFor(int code, const std::string& hint) {
     case kAoeCmdUnload: return HudIcon::Unload;
     case kAoeCmdCancelTraining: case kAoeCmdCancelPlacement: return HudIcon::Cancel;
     case kAoeCmdBack: return HudIcon::Back;
+    case kAoeCmdPageNext: return HudIcon::Next;
     default: break;
     }
+    if (code >= 301 && code <= 303) return HudIcon::AgeUp;  // Feudal-/Ritter-/Imperialzeit
     if (hint == "villager") return HudIcon::Villager;
     if (hint == "house") return HudIcon::House;
     if (hint == "sword") return HudIcon::Sword;
     if (hint == "bow") return HudIcon::Bow;
     if (hint == "horse") return HudIcon::Horse;
     if (hint == "tower") return HudIcon::Tower;
+    // W1: Hinweise des Katalogs (libopenage/gamestate/catalog.h)
+    if (hint == "mill") return HudIcon::Mill;
+    if (hint == "lumber") return HudIcon::LumberCamp;
+    if (hint == "mining") return HudIcon::MiningCamp;
+    if (hint == "barracks") return HudIcon::Barracks;
+    if (hint == "range") return HudIcon::Range;
+    if (hint == "stable") return HudIcon::Stable;
+    if (hint == "wall") return HudIcon::Wall;
+    if (hint == "tech") return HudIcon::Tech;
+    if (hint == "age") return HudIcon::AgeUp;
     return HudIcon::Hammer;
 }
 

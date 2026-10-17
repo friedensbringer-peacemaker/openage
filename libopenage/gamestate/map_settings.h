@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 
 namespace openage::gamestate {
@@ -195,6 +196,10 @@ struct MapSettings {
 	bool skirmish = false;
 	// ai (XR fork): computer opponent
 	AiSettings ai{};
+	/// XR fork W1: civilisation per player (short name of the PlayerSetup, e.g. "Britons",
+	/// or "random"); missing entries are random. Empty: no civilisation (generic data, as
+	/// before W1 – checks and the test map).
+	std::vector<std::string> civs{};
 	/// XR fork (save games): restore this save file after the map was generated
 	/// (gamestate/save_game.h); the other fields must be the map settings of the
 	/// file. Empty: a new game.

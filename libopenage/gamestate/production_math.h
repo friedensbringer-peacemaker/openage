@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "gamestate/catalog.h"
 #include "gamestate/econ_math.h"
 #include "gamestate/resources.h"
 
@@ -28,8 +29,8 @@ namespace openage::gamestate::prod {
  * (gamestate/production_check.cpp).
  */
 
-/// maximum length of a training queue (AoE II: 5 per click, 15 per building; we keep it short)
-constexpr size_t MAX_QUEUE = 5;
+/// maximum length of a training queue (AoE II: 15 per building, docs/aoe2-spec 03 §3.1; units and research)
+constexpr size_t MAX_QUEUE = 15;
 
 /// population limit of a player
 constexpr size_t POPULATION_LIMIT = 200;
@@ -41,48 +42,11 @@ constexpr double DEFAULT_BUILD_TIME = 25.0;
 constexpr double DEFAULT_TRAIN_TIME = 25.0;
 
 /**
- * Units and buildings offered in the HUD.
- *
- * The data of the converted HD edition has more (eagle warriors, castles, wonders, ...),
- * most of them behind ages and technologies that do not exist yet. Until then the
- * Dark/Feudal age basics are offered, independent of their unlock conditions.
+ * Units, buildings and technologies offered in the HUD: what the data offers
+ * (Create/Research of the selected entity), named and ordered by the catalog
+ * (gamestate/catalog.h, XR fork W1). Entries without mechanic stay hidden.
  */
-struct KnownEntry {
-	/// last part of the game entity name in nyan ("Villager" for ...villager.Villager)
-	const char *name;
-	/// German label for the HUD
-	const char *label;
-	/// HUD command code (stable; 1xx = train, 2xx = build)
-	int code;
-	/// true: built by villagers, false: trained in a building
-	bool building;
-	/// icon hint for the HUD ("villager", "house", "sword", "bow", "horse", "hammer")
-	const char *icon;
-};
-
-constexpr std::array<KnownEntry, 13> KNOWN{{
-	{"Villager", "Dorfbewohner", 101, false, "villager"},
-	{"Militia", "Milizsoldat", 102, false, "sword"},
-	{"Spearman", "Speerkämpfer", 103, false, "sword"},
-	{"Archer", "Bogenschütze", 104, false, "bow"},
-	{"Skirmisher", "Plänkler", 105, false, "bow"},
-	{"ScoutCavalry", "Späher", 106, false, "horse"},
-	{"House", "Haus", 201, true, "house"},
-	{"Mill", "Mühle", 202, true, "hammer"},
-	{"LumberCamp", "Holzfällerlager", 203, true, "hammer"},
-	{"MiningCamp", "Bergbaulager", 204, true, "hammer"},
-	{"Barracks", "Kaserne", 205, true, "sword"},
-	{"ArcheryRange", "Bogenschießstand", 206, true, "bow"},
-	{"Stable", "Stall", 207, true, "horse"},
-}};
-
-/// labels of other game entities that show up in the selection
-constexpr std::array<std::pair<const char *, const char *>, 4> OTHER_LABELS{{
-	{"TownCenter", "Dorfzentrum"},
-	{"Knight", "Ritter"},
-	{"Monk", "Mönch"},
-	{"Castle", "Burg"},
-}};
+using KnownEntry = CatalogEntry;
 
 /// short name of a nyan game entity ("hd_base...house.House" -> "House")
 inline std::string short_name(const std::string &fqon) {
@@ -90,24 +54,14 @@ inline std::string short_name(const std::string &fqon) {
 	return dot == std::string::npos ? fqon : fqon.substr(dot + 1);
 }
 
-/// entry of a known unit or building (nullptr if not offered)
-inline const KnownEntry *known(const std::string &name) {
-	for (const auto &entry : KNOWN) {
-		if (name == entry.name) {
-			return &entry;
-		}
-	}
-	return nullptr;
+/// catalog entry of a unit or building (p tech: technology), nullptr if not in the catalog
+inline const KnownEntry *known(const std::string &name, bool tech = false) {
+	return catalog_entry(name, tech);
 }
 
 /// entry by HUD code (nullptr if unknown)
 inline const KnownEntry *known(int code) {
-	for (const auto &entry : KNOWN) {
-		if (code == entry.code) {
-			return &entry;
-		}
-	}
-	return nullptr;
+	return catalog_entry(code);
 }
 
 /// "ArcheryRange" -> "Archery Range"
@@ -123,9 +77,9 @@ inline std::string split_camel(const std::string &name) {
 	return out;
 }
 
-/// HUD label of a game entity short name (German if known)
-inline std::string label_of(const std::string &name) {
-	if (const auto *entry = known(name)) {
+/// HUD label of a game entity (p tech: technology) short name (German if known)
+inline std::string label_of(const std::string &name, bool tech = false) {
+	if (const auto *entry = known(name, tech)) {
 		return entry->label;
 	}
 	for (const auto &[n, label] : OTHER_LABELS) {
@@ -136,14 +90,14 @@ inline std::string label_of(const std::string &name) {
 	return split_camel(name);
 }
 
-/// order of the offered entries (position in KNOWN), unknown entries last
-inline size_t display_order(const std::string &name) {
-	for (size_t i = 0; i < KNOWN.size(); ++i) {
-		if (name == KNOWN[i].name) {
+/// order of the offered entries (position in the catalog), unknown entries last
+inline size_t display_order(const std::string &name, bool tech = false) {
+	for (size_t i = 0; i < CATALOG_SIZE; ++i) {
+		if (name == CATALOG[i].name and (CATALOG[i].kind == entry_t::TECH) == tech) {
 			return i;
 		}
 	}
-	return KNOWN.size();
+	return CATALOG_SIZE;
 }
 
 /// tiles per side of a building footprint (hitbox radius 1.0 -> 2 tiles, 2.0 -> 4)
@@ -342,6 +296,8 @@ public:
 		double time = DEFAULT_TRAIN_TIME;
 		/// start time (seconds), negative while waiting
 		double started = -1.0;
+		/// XR fork W1: a technology (fqon = tech), needs no population slot, done = researched
+		bool research = false;
 	};
 
 	/// add an item, false if the queue is full
@@ -361,11 +317,18 @@ public:
 		}
 	}
 
-	/// remove the item at an index (its cost is refunded by the caller); the next
-	/// item starts from now if the first one is removed
+	/// remove an item of the type at an index (its cost is refunded by the caller): like AoE II
+	/// (docs/aoe2-spec 03 §3.1) the hindmost entry of that type goes; the next item starts from
+	/// now if the first one is removed
 	std::optional<Item> cancel_at(size_t index) {
 		if (index >= this->items.size()) {
 			return std::nullopt;
+		}
+		for (size_t i = this->items.size(); i-- > index;) {
+			if (this->items[i].fqon == this->items[index].fqon) {
+				index = i;
+				break;
+			}
 		}
 		auto item = this->items[index];
 		this->items.erase(this->items.begin() + static_cast<std::ptrdiff_t>(index));
@@ -414,11 +377,13 @@ public:
 		while (not this->items.empty()) {
 			auto &head = this->items.front();
 			if (head.started < 0.0) {
-				if (free_slots == 0) {
+				if (not head.research and free_slots == 0) {
 					this->waiting = true;
 					break;
 				}
-				free_slots -= 1;
+				if (not head.research) {
+					free_slots -= 1;
+				}
 				head.started = start_at;
 				this->waiting = false;
 			}
@@ -453,7 +418,12 @@ public:
 
 	/// 1 if the first item reserves a population slot
 	size_t reserved() const {
-		return (not this->items.empty() and this->items.front().started >= 0.0) ? 1 : 0;
+		return (not this->items.empty() and this->items.front().started >= 0.0 and not this->items.front().research) ? 1 : 0;
+	}
+
+	/// an item with this nyan object is queued (XR fork W1: a technology is researched once)
+	bool contains(const std::string &fqon) const {
+		return std::any_of(this->items.begin(), this->items.end(), [&](const Item &i) { return i.fqon == fqon; });
 	}
 
 	const std::deque<Item> &get_items() const {

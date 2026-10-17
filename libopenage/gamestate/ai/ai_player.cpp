@@ -14,6 +14,8 @@
 #include "coord/tile.h"
 #include "gamestate/ai/events.h"
 #include "gamestate/ai/production_port.h"
+#include "gamestate/tech.h"
+#include "gamestate/tech_math.h"
 #include "gamestate/combat/combat_state.h"
 #include "gamestate/component/api/builder.h"
 #include "gamestate/component/api/gather.h"
@@ -907,6 +909,22 @@ void AiPlayer::produce(const std::shared_ptr<GameState> &state, const World &wor
 		view.stock[i] = stock[i];
 	}
 
+	// XR fork W1: the AI saves its food for the Feudal Age and then the Wheelbarrow (no farms or hunting yet,
+	// W3): no villagers or militia until the research is queued
+	const auto *age_state = state->get_tech() ? state->get_tech()->find(this->player) : nullptr;
+	const int own_age = age_state ? age_state->age : tech::DARK_AGE;
+	bool wheelbarrow_done = false;
+	if (age_state) {
+		for (const auto &t : age_state->facts.researched) {
+			wheelbarrow_done = wheelbarrow_done or tech::short_of(t) == "WheelBarrow";
+		}
+	}
+	const tech::AiResearchParams research_params{};
+	const bool saving_food = this->production->enabled() and not town_centers.empty()
+	                         and not this->production->researching(state, this->player, time)
+	                         and ((own_age == tech::DARK_AGE and view.villagers >= research_params.feudal_villagers)
+	                              or (own_age >= 2 and not wheelbarrow_done
+	                                  and view.villagers >= research_params.wheelbarrow_villagers));
 	auto plan = plan_production(view, this->params);
 	std::ostringstream text;
 	for (auto wish : plan) {
@@ -915,6 +933,10 @@ void AiPlayer::produce(const std::shared_ptr<GameState> &state, const World &wor
 		switch (wish) {
 		case plan_t::TRAIN_VILLAGER:
 		case plan_t::TRAIN_MILITIA: {
+			if (saving_food) {
+				detail = " (saving food for research)";
+				break;
+			}
 			bool villager = wish == plan_t::TRAIN_VILLAGER;
 			const auto &where = villager ? town_centers : barracks;
 			if (where.empty()) {
@@ -971,6 +993,52 @@ void AiPlayer::produce(const std::shared_ptr<GameState> &state, const World &wor
 			this->status.production_done += done ? 1 : 0;
 		}
 		text << (text.tellp() > 0 ? "; " : "") << to_string(wish) << detail << (done ? "" : " [not done]");
+	}
+
+	// XR fork W1: research in the first town centre (Loom, Feudal Age, Wheelbarrow line; tech_math.h)
+	if (not town_centers.empty() and this->production->enabled() and now - this->last_research >= 10.0) {
+		tech::AiResearchView rv;
+		rv.villagers = view.villagers;
+		rv.stock = stock;
+		const auto *own_tech = state->get_tech() ? state->get_tech()->find(this->player) : nullptr;
+		rv.age = own_tech ? own_tech->age : tech::DARK_AGE;
+		rv.researching = this->production->researching(state, this->player, time);
+		rv.offered = this->production->offered_research(state, this->player, town_centers.front()->id, time);
+		auto choice = tech::ai_research_choice(rv);
+		// the Feudal Age needs two buildings of the Dark Age (data: 2 of mill, lumber camp, dock, barracks,
+		// mining camp); besides its barracks the AI builds a lumber camp
+		const bool feudal_locked = rv.age == tech::DARK_AGE
+		                           and rv.villagers >= tech::AiResearchParams{}.feudal_villagers
+		                           and std::find(rv.offered.begin(), rv.offered.end(), "FeudalAge") == rv.offered.end();
+		bool has_camp = false;
+		for (const auto &b : world.buildings) {
+			has_camp = has_camp or b.name == "LumberCamp" or b.name == "Mill" or b.name == "MiningCamp";
+		}
+		auto last_camp = this->last_build.find("LumberCamp");
+		if (feudal_locked and not has_camp and stock[static_cast<size_t>(resource_t::WOOD)] >= 100.0
+		    and (last_camp == this->last_build.end() or now - last_camp->second >= 15.0)) {
+			this->last_build["LumberCamp"] = now;
+			auto spot = this->building_spot(state, world, 2.0, time);
+			std::vector<const Seen *> by_distance;
+			if (spot) {
+				by_distance = this->free_builders(state, world, spot->first, spot->second, time);
+			}
+			if (spot and not by_distance.empty()) {
+				coord::phys3 where{coord::phys_t{spot->first}, coord::phys_t{spot->second}, coord::phys_t{0}};
+				const bool placed = this->production->build(state, this->player, "LumberCamp", {by_distance.front()->id},
+				                                            where, time);
+				this->last_order[by_distance.front()->id] = now;
+				log::log(INFO << "AI P" << this->player << " builds a lumber camp for the Feudal Age at ("
+				              << fmt1(spot->first) << ", " << fmt1(spot->second) << ")" << (placed ? "" : " [not done]"));
+			}
+		}
+		if (not choice.empty()) {
+			this->last_research = now;
+			const bool done = this->production->research(state, this->player, town_centers.front()->id, choice, time);
+			log::log(INFO << "AI P" << this->player << " research " << choice << " in town centre "
+			              << town_centers.front()->id << (done ? "" : " [not done]") << ", villagers "
+			              << view.villagers << ", age " << rv.age << ", t=" << fmt1(now) << " s");
+		}
 	}
 
 	// log when the wishes change, else once per report period

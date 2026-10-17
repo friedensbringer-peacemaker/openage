@@ -40,8 +40,25 @@ agesxr::HudProdState to_hud(const gamestate::prod::Snapshot &s) {
 	p.selectionLabel = s.selection_label;
 	p.construction = s.construction ? *s.construction : -1.0;
 	for (const auto &o : s.options) {
-		p.options.push_back({o.code, o.label, o.icon, o.available, o.reason});
+		agesxr::HudProdOption h;
+		h.code = o.code;
+		h.label = o.label;
+		h.icon = o.icon;
+		h.available = o.available;
+		h.reason = o.reason;
+		// XR fork W1: research, costs, time and effect for the tooltip
+		h.research = o.research;
+		for (size_t i = 0; i < h.cost.size() and i < o.cost.size(); ++i) {
+			h.cost[i] = o.cost[i];
+		}
+		h.time = o.time;
+		h.effect = o.effect;
+		p.options.push_back(h);
 	}
+	p.age = s.age;
+	p.ageLabel = s.age_label;
+	p.civLabel = s.civ_label;
+	p.unitLabels = s.unit_labels;
 	if (s.queue) {
 		p.queue = true;
 		for (const auto &item : s.queue->items) {

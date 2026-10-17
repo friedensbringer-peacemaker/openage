@@ -12,6 +12,7 @@
 #include "gamestate/component/types.h"
 #include "gamestate/production_math.h"
 #include "gamestate/resources.h"
+#include "gamestate/tech_math.h"
 #include "gamestate/types.h"
 #include "time/time.h"
 
@@ -39,6 +40,8 @@ public:
 		double time = prod::DEFAULT_BUILD_TIME;
 		/// hitbox radius of the building (tiles)
 		double radius = 1.0;
+		/// unlock condition (XR fork W1, CreatableGameEntity.condition)
+		tech::Condition condition{};
 	};
 
 	enum class phase_t {
@@ -66,6 +69,9 @@ public:
 	component_t get_type() const override;
 
 	const std::vector<Buildable> &get_buildables() const;
+
+	/// replace the buildables (XR fork W1: a technology changed the data of the owner)
+	void set_buildables(std::vector<Buildable> &&buildables);
 
 	/// buildable by short name (nullptr if the unit cannot build it)
 	const Buildable *find(const std::string &name) const;

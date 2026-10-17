@@ -66,6 +66,10 @@ bool GameEntity::has_component(component::component_t type) {
 	return this->components.contains(type);
 }
 
+const std::string &GameEntity::get_animation_path() const {
+	return this->last_animation_path;
+}
+
 void GameEntity::render_update(const time::time_t &time,
                                const std::string &animation_path) {
 	this->last_animation_path = animation_path;

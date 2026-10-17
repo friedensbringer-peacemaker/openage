@@ -10,6 +10,7 @@ add_sources(libopenage
     map_generator.cpp
     production.cpp
     save_game.cpp
+    tech.cpp
     pick.cpp
 	player.cpp
     simulation.cpp

@@ -215,6 +215,8 @@ private:
 	std::string last_plan;
 	/// last build request per building name (simulation seconds)
 	std::unordered_map<std::string, double> last_build;
+	/// XR fork W1: time of the last research request (simulation seconds)
+	double last_research = -100.0;
 	/// villagers that fell idle again shortly after a gather order (no path): longer cooldown
 	std::unordered_map<entity_id_t, size_t> quick_idle;
 	/// last builder assignment per foundation (simulation seconds) and the assignments so far
