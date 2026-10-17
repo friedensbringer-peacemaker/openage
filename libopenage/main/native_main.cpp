@@ -1608,9 +1608,12 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> tech_replay_steps(co
 	click(8.0, loom_cell, E::kLeftButton);
 	capture(10.0, "-3-warteschlange");
 	// 4. the driver grants the Feudal Age once -3 is taken: badge "Feudalzeit", message
-	// (two captures in between: the sink may lag behind its schedule, the grant needs a few frames)
+	// (captures wait for a frame after the last input: small moves in between give the grant a few frames)
+	add(11.0, E::kMouseMove, loom_cell.first + 4, loom_cell.second, 0, 0);
 	capture(11.5, "-sync-3a");
+	add(12.5, E::kMouseMove, loom_cell.first, loom_cell.second + 4, 0, 0);
 	capture(13.0, "-sync-3b");
+	add(14.0, E::kMouseMove, loom_cell.first, loom_cell.second, 0, 0);
 	capture(15.0, "-4-zeitalter");
 	// 5. the driver grants the Castle Age: all villagers show the buildings in two pages
 	if (villager != nullptr) {
