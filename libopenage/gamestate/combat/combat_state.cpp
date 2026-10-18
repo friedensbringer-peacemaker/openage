@@ -249,6 +249,74 @@ void CombatState::health_changed(entity_id_t id, int64_t health) {
 	this->set_health_snapshot(id, health, combatant->stats->max_health, health > 0);
 }
 
+// XR fork W1: technologies patch the view of a player
+void CombatState::invalidate_stats(const std::shared_ptr<nyan::View> &db_view) {
+	std::ostringstream suffix;
+	suffix << "@" << db_view.get();
+	const auto tail = suffix.str();
+	for (auto it = this->stats_cache.begin(); it != this->stats_cache.end();) {
+		const auto &key = it->first;
+		if (key.size() >= tail.size() and key.compare(key.size() - tail.size(), tail.size(), tail) == 0) {
+			it = this->stats_cache.erase(it);
+		}
+		else {
+			++it;
+		}
+	}
+}
+
+bool CombatState::refresh_entity(const std::shared_ptr<GameEntity> &entity,
+                                 const std::shared_ptr<nyan::View> &db_view,
+                                 const nyan::fqon_t &nyan_entity,
+                                 bool under_construction,
+                                 bool proportional,
+                                 const time::time_t &time) {
+	auto *combatant = this->find(entity->get_id());
+	if (combatant == nullptr or combatant->dead) {
+		return false;
+	}
+	std::ostringstream key;
+	key << nyan_entity << "@" << db_view.get();
+	std::shared_ptr<const CombatStats> stats;
+	auto cached = this->stats_cache.find(key.str());
+	if (cached == this->stats_cache.end()) {
+		stats = read_combat_stats(db_view, nyan_entity);
+		this->stats_cache.emplace(key.str(), stats);
+	}
+	else {
+		stats = cached->second;
+	}
+	const auto old = combatant->stats;
+	combatant->stats = stats;
+	{
+		std::lock_guard<std::mutex> lock{this->shared_mutex};
+		this->stats_snapshot[entity->get_id()] = stats;
+	}
+	auto live = std::dynamic_pointer_cast<component::Live>(entity->get_component(component::component_t::LIVE));
+	if (live == nullptr or stats->health_attribute.empty()) {
+		return false;
+	}
+	auto current = live->get_attribute(time, stats->health_attribute);
+	int64_t health = current ? *current : stats->max_health;
+	const bool changed = old == nullptr or old->max_health != stats->max_health;
+	if (changed and not under_construction) {
+		const int64_t old_max = old ? old->max_health : stats->max_health;
+		if (proportional and old_max > 0) {
+			// replacement of the type (AoE II): health scaled with the maximum
+			health = static_cast<int64_t>(std::llround(static_cast<double>(health) * static_cast<double>(stats->max_health)
+			                                           / static_cast<double>(old_max)));
+		}
+		else {
+			// attribute change (AoE II, e.g. Loom): the current health rises with the maximum
+			health += std::max<int64_t>(0, stats->max_health - old_max);
+		}
+		health = std::clamp<int64_t>(health, 1, std::max<int64_t>(1, stats->max_health));
+		live->set_attribute(time, stats->health_attribute, health);
+	}
+	this->set_health_snapshot(entity->get_id(), health, stats->max_health, health > 0);
+	return changed;
+}
+
 // ---------------------------------------------------------------- orders
 
 bool CombatState::order_attack(const std::shared_ptr<GameState> &state,

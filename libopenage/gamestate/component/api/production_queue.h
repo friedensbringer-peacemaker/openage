@@ -13,6 +13,7 @@
 #include "gamestate/component/types.h"
 #include "gamestate/production_math.h"
 #include "gamestate/resources.h"
+#include "gamestate/tech_math.h"
 #include "gamestate/types.h"
 
 
@@ -35,6 +36,8 @@ public:
 		resource_amounts_t cost{};
 		/// training time (seconds)
 		double time = prod::DEFAULT_TRAIN_TIME;
+		/// unlock condition (XR fork W1, CreatableGameEntity.condition)
+		tech::Condition condition{};
 	};
 
 	ProductionQueue(const std::shared_ptr<openage::event::EventLoop> &loop,
@@ -44,6 +47,9 @@ public:
 	component_t get_type() const override;
 
 	const std::vector<Creatable> &get_creatables() const;
+
+	/// replace the creatables (XR fork W1: a technology changed the data of the owner)
+	void set_creatables(std::vector<Creatable> &&creatables);
 
 	/// creatable by short name (nullptr if the building cannot train it)
 	const Creatable *find(const std::string &name) const;

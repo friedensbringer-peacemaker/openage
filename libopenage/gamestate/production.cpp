@@ -32,6 +32,7 @@
 #include "gamestate/component/api/move.h"
 #include "gamestate/component/api/production_queue.h"
 #include "gamestate/component/api/selectable.h"
+#include "gamestate/component/api_component.h"
 #include "gamestate/component/internal/activity.h"
 #include "gamestate/component/internal/command_queue.h"
 #include "gamestate/component/internal/commands/build.h"
@@ -49,6 +50,8 @@
 #include "gamestate/map.h"
 #include "gamestate/player.h"
 #include "gamestate/production_math.h"
+#include "gamestate/tech.h"
+#include "gamestate/tech_math.h"
 #include "renderer/camera/definitions.h"
 
 
@@ -472,8 +475,66 @@ std::shared_ptr<GameEntity> spawn_unit(const std::shared_ptr<GameState> &state,
 	return entity;
 }
 
+/// nyan game entity of an entity ("...town_center.TownCenter"), from the names of its abilities
+std::string fqon_of_entity(const std::shared_ptr<GameEntity> &entity) {
+	for (auto type : {component::component_t::IDLE,
+	                  component::component_t::SELECTABLE,
+	                  component::component_t::MOVE,
+	                  component::component_t::LIVE,
+	                  component::component_t::CONSTRUCTABLE}) {
+		if (not entity->has_component(type)) {
+			continue;
+		}
+		auto api = std::dynamic_pointer_cast<component::APIComponent>(entity->get_component(type));
+		if (api == nullptr) {
+			continue;
+		}
+		const auto &ability = api->get_ability().get_name();
+		auto dot = ability.rfind('.');
+		if (dot != std::string::npos) {
+			return ability.substr(0, dot);
+		}
+	}
+	return {};
+}
+
+/// technologies queued in the buildings of every player (XR fork W1: researched once)
+std::unordered_map<player_id_t, std::set<std::string>> queued_research_all(const std::shared_ptr<GameState> &state,
+                                                                           const time::time_t &time) {
+	std::unordered_map<player_id_t, std::set<std::string>> out;
+	const auto &combat = state->get_combat();
+	for (const auto &[id, entity] : state->get_game_entities()) {
+		auto production = component_of<ProductionComp>(entity, component::component_t::PRODUCTION_QUEUE);
+		if (production == nullptr or production->get_queue().size() == 0
+		    or (combat != nullptr and combat->is_dead(id))) {
+			continue;
+		}
+		for (const auto &item : production->get_queue().get_items()) {
+			if (item.research) {
+				out[owner_of(entity, time)].insert(item.fqon);
+			}
+		}
+	}
+	return out;
+}
+
+/// "Spieler 2 (Franken)" for messages about other players
+std::string player_text(const std::shared_ptr<tech::TechState> &techs, player_id_t player) {
+	std::string out = "Spieler " + std::to_string(player + 1);
+	if (techs) {
+		if (const auto *s = techs->find(player); s != nullptr and not s->civ.empty()) {
+			out += " (" + civ_label(s->civ) + ")";
+		}
+	}
+	return out;
+}
+
 } // namespace
 
+
+std::string sprite_path(const std::string &path) {
+	return fix_shared_path(path);
+}
 
 void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
                      const std::shared_ptr<nyan::View> &owner_db_view,
@@ -483,6 +544,7 @@ void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
 	nyan::set_t abilities = nyan_obj.get_set("GameEntity.abilities");
 
 	std::optional<nyan::Object> create_ability;
+	std::optional<nyan::Object> research_ability;
 	std::optional<nyan::Object> constructable_ability;
 	std::vector<ProductionComp::Creatable> units;
 	std::vector<BuilderComp::Buildable> buildings;
@@ -506,27 +568,36 @@ void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
 					auto creatable = owner_db_view->get_object(object_name(creatable_val));
 					auto fqon = creatable.get_object("CreatableGameEntity.game_entity").get_name();
 					auto name = short_name(fqon);
-					const auto *entry = known(name);
-					if (entry == nullptr) {
-						// not offered yet (ages, technologies, unique units)
+					if (not has_mechanic(name)) {
+						// XR fork W1: hidden until the engine has its mechanic (catalog.h)
 						continue;
 					}
 					auto cost = cost_of(owner_db_view, creatable.get_object("CreatableGameEntity.cost"));
-					if (entry->building and is_placed(owner_db_view, creatable)) {
+					tech::Condition condition;
+					try {
+						condition = tech::read_condition_set(owner_db_view,
+						                                     creatable.get_set("CreatableGameEntity.condition"));
+					}
+					catch (std::exception &err) {
+						log::log(WARN << "Production: condition of " << name << " not readable: " << err.what());
+					}
+					if (is_placed(owner_db_view, creatable)) {
 						BuilderComp::Buildable buildable;
 						buildable.name = name;
 						buildable.fqon = fqon;
 						buildable.cost = cost;
 						buildable.radius = hitbox_radius(owner_db_view, fqon, 1.0);
+						buildable.condition = condition;
 						buildings.push_back(buildable);
 					}
-					else if (not entry->building) {
+					else {
 						ProductionComp::Creatable unit;
 						unit.name = name;
 						unit.fqon = fqon;
 						unit.cost = cost;
 						auto time = creatable.get_float("CreatableGameEntity.creation_time");
 						unit.time = time > 0.0 ? time : DEFAULT_TRAIN_TIME;
+						unit.condition = condition;
 						units.push_back(unit);
 					}
 				}
@@ -552,6 +623,10 @@ void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
 				if (constructs) {
 					build_animation = animation_of(ability_obj);
 				}
+			}
+			else if (ability_parent == "engine.ability.type.Research") {
+				// XR fork W1: what it researches is read per player (tech.h)
+				research_ability = ability_obj;
 			}
 			else if (ability_parent == "engine.ability.type.Constructable") {
 				constructable_ability = ability_obj;
@@ -582,6 +657,11 @@ void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
 	if (create_ability and not units.empty()) {
 		sort_by_display(units);
 		entity->add_component(std::make_shared<ProductionComp>(loop, *create_ability, std::move(units)));
+	}
+	else if (research_ability) {
+		// XR fork W1: buildings that only research (blacksmith, university, mill, camps)
+		entity->add_component(std::make_shared<ProductionComp>(loop, *research_ability,
+		                                                       std::vector<ProductionComp::Creatable>{}));
 	}
 	if (create_ability and not buildings.empty()) {
 		for (auto &building : buildings) {
@@ -750,7 +830,10 @@ void Production::command(int code) {
 		this->set_status("Unbekannter Befehl", status_t::warn);
 		return;
 	}
-	if (entry->building) {
+	if (entry->kind == entry_t::TECH) {
+		this->research(entry->name);
+	}
+	else if (entry->building) {
 		this->start_placement(entry->name);
 	}
 	else {
@@ -770,6 +853,13 @@ void Production::train_in(entity_id_t building, const std::string &id) {
 	request.kind = Request::kind_t::TRAIN_IN;
 	request.id = id;
 	request.building = building;
+	this->push(std::move(request));
+}
+
+void Production::research(const std::string &id) {
+	Request request;
+	request.kind = Request::kind_t::RESEARCH;
+	request.id = id;
 	this->push(std::move(request));
 }
 
@@ -901,6 +991,23 @@ void Production::place_for(player_id_t player,
 	this->push(std::move(request));
 }
 
+void Production::grant_research(player_id_t player, const std::string &id) {
+	Request request;
+	request.kind = Request::kind_t::GRANT_RESEARCH;
+	request.id = id;
+	request.for_player = player;
+	this->push(std::move(request));
+}
+
+void Production::research_for(player_id_t player, entity_id_t building, const std::string &id) {
+	Request request;
+	request.kind = Request::kind_t::RESEARCH;
+	request.id = id;
+	request.building = building;
+	request.for_player = player;
+	this->push(std::move(request));
+}
+
 PlayerPopulation population_of(const std::shared_ptr<GameState> &state,
                                player_id_t player,
                                const time::time_t &time) {
@@ -921,13 +1028,45 @@ bool is_finished(const std::shared_ptr<GameEntity> &building) {
 	return is_complete(building);
 }
 
+std::vector<std::string> available_research(const std::shared_ptr<GameState> &state,
+                                            player_id_t player,
+                                            const std::shared_ptr<GameEntity> &building,
+                                            const time::time_t &time) {
+	std::vector<std::string> out;
+	auto techs = state->get_tech();
+	if (techs == nullptr or building == nullptr or not is_complete(building)
+	    or not building->has_component(component::component_t::PRODUCTION_QUEUE)
+	    or owner_of(building, time) != player) {
+		return out;
+	}
+	auto queued = queued_research_all(state, time)[player];
+	const auto *s = techs->find(player);
+	const tech::Facts facts = s ? s->facts : tech::Facts{};
+	const int age = s ? s->age : tech::DARK_AGE;
+	for (const auto &r : techs->researchables(state, player, fqon_of_entity(building))) {
+		auto offer = tech::offer_state(r.condition, facts, age, facts.researched.contains(r.fqon),
+		                               queued.contains(r.fqon), has_mechanic(r.name, true));
+		if (offer == tech::offer_t::AVAILABLE) {
+			out.push_back(r.name);
+		}
+	}
+	return out;
+}
+
+bool research_queued(const std::shared_ptr<GameState> &state, player_id_t player, const time::time_t &time) {
+	auto all = queued_research_all(state, time);
+	auto it = all.find(player);
+	return it != all.end() and not it->second.empty();
+}
+
 bool set_rally_point(const std::shared_ptr<GameState> &state,
                      const std::shared_ptr<GameEntity> &building,
                      const coord::phys3 &ground,
                      const std::shared_ptr<GameEntity> &target_entity,
                      const time::time_t &time) {
 	auto production = component_of<ProductionComp>(building, component::component_t::PRODUCTION_QUEUE);
-	if (production == nullptr) {
+	if (production == nullptr or production->get_creatables().empty()) {
+		// XR fork W1: buildings that only research have no rally point
 		return false;
 	}
 	using rally_t = ProductionComp::rally_t;
@@ -1044,6 +1183,32 @@ void Production::update(const std::shared_ptr<GameState> &state,
 
 	auto population = count_population(state, now);
 
+	// XR fork W1: technologies, ages, civilisations of the players
+	auto techs = state->get_tech();
+	if (tick and techs) {
+		// completed buildings count for the unlock conditions (once built stays built)
+		for (const auto &[id, entity] : entities) {
+			auto constructable = component_of<ConstructableComp>(entity, component::component_t::CONSTRUCTABLE);
+			if (constructable != nullptr and constructable->is_complete()
+			    and entity->has_component(component::component_t::OWNERSHIP)
+			    and not(state->get_combat() != nullptr and state->get_combat()->is_dead(id))) {
+				techs->building_done(owner_of(entity, now), fqon_of_entity(entity));
+			}
+		}
+	}
+	auto facts_of = [&](player_id_t owner) {
+		const tech::PlayerTech *s = techs ? techs->find(owner) : nullptr;
+		return s ? s->facts : tech::Facts{};
+	};
+	auto age_of_player = [&](player_id_t owner) {
+		const tech::PlayerTech *s = techs ? techs->find(owner) : nullptr;
+		return s ? s->age : tech::DARK_AGE;
+	};
+	auto unit_label = [&](player_id_t owner, const std::string &fqon) {
+		return techs ? techs->unit_label(owner, fqon) : label_of(short_name(fqon));
+	};
+	auto queued_research = queued_research_all(state, now);
+
 	// --- requests ---
 	for (const auto &request : todo) {
 		// ai (XR fork): requests of a computer opponent leave the HUD status alone
@@ -1071,14 +1236,24 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			std::shared_ptr<GameEntity> best;
 			const ProductionComp::Creatable *creatable = nullptr;
 			size_t best_size = std::numeric_limits<size_t>::max();
+			std::string locked_reason;
 			for (const auto &entity : candidates) {
 				auto production = component_of<ProductionComp>(entity, component::component_t::PRODUCTION_QUEUE);
 				if (production == nullptr or not is_complete(entity)) {
 					continue;
 				}
+				if (production->get_creatables().empty()) {
+					continue;
+				}
 				const auto *c = request.id.empty() ? &production->get_creatables().front()
 				                                   : production->find(request.id);
 				if (c == nullptr) {
+					continue;
+				}
+				// XR fork W1: unlock condition of the data (age, buildings, technologies)
+				const auto facts = facts_of(owner_of(entity, now));
+				if (not tech::evaluate(c->condition, facts)) {
+					locked_reason = tech::missing_text(c->condition, facts);
 					continue;
 				}
 				if (production->get_queue().size() < best_size) {
@@ -1088,9 +1263,10 @@ void Production::update(const std::shared_ptr<GameState> &state,
 				}
 			}
 			if (best == nullptr) {
-				status(request.id.empty() ? "Die Auswahl kann nichts ausbilden"
-				                                    : "Die Auswahl kann " + label_of(request.id) + " nicht ausbilden",
-				                 status_t::warn);
+				status(not locked_reason.empty() ? locked_reason
+				       : request.id.empty()     ? std::string{"Die Auswahl kann nichts ausbilden"}
+				                                : "Die Auswahl kann " + label_of(request.id) + " nicht ausbilden",
+				       status_t::warn);
 				break;
 			}
 			auto production = component_of<ProductionComp>(best, component::component_t::PRODUCTION_QUEUE);
@@ -1116,7 +1292,117 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			              << entity_name(best) << " (entity " << best->get_id() << ", queue "
 			              << production->get_queue().size() << "/" << MAX_QUEUE << ", "
 			              << creatable->time << " s), " << cost_str(creatable->cost));
-			status(label_of(creatable->name) + " wird ausgebildet", status_t::info);
+			status(unit_label(owner, creatable->fqon) + " wird ausgebildet", status_t::info);
+		} break;
+
+		case Request::kind_t::RESEARCH: {
+			// XR fork W1: a technology in the first own building that offers it now
+			std::vector<std::shared_ptr<GameEntity>> candidates;
+			if (request.for_player or request.building != 0) {
+				auto building = find_entity(state, request.building);
+				if (building != nullptr and building->has_component(component::component_t::OWNERSHIP)
+				    and (not request.for_player or owner_of(building, now) == *request.for_player)) {
+					candidates.push_back(building);
+				}
+			}
+			else {
+				candidates = own;
+			}
+			std::shared_ptr<GameEntity> best;
+			std::optional<tech::Researchable> what;
+			std::string reason;
+			for (const auto &entity : candidates) {
+				auto production = component_of<ProductionComp>(entity, component::component_t::PRODUCTION_QUEUE);
+				if (production == nullptr or not is_complete(entity) or techs == nullptr) {
+					continue;
+				}
+				const auto owner = owner_of(entity, now);
+				for (const auto &r : techs->researchables(state, owner, fqon_of_entity(entity))) {
+					if (r.name != request.id) {
+						continue;
+					}
+					const auto facts = facts_of(owner);
+					const bool researched = facts.researched.contains(r.fqon);
+					const bool queued = queued_research[owner].contains(r.fqon);
+					if (researched) {
+						reason = label_of(r.name, true) + " ist schon erforscht";
+					}
+					else if (queued) {
+						reason = label_of(r.name, true) + " wird schon erforscht";
+					}
+					else if (not has_mechanic(r.name, true)) {
+						reason = label_of(r.name, true) + ": " + known(r.name, true)->missing;
+					}
+					else if (not tech::evaluate(r.condition, facts)) {
+						reason = label_of(r.name, true) + ": " + tech::missing_text(r.condition, facts);
+					}
+					else if (production->get_queue().size() >= MAX_QUEUE) {
+						reason = "Warteschlange voll";
+					}
+					else {
+						best = entity;
+						what = r;
+					}
+					break;
+				}
+				if (best) {
+					break;
+				}
+			}
+			if (best == nullptr or not what) {
+				status(reason.empty() ? "Die Auswahl kann " + label_of(request.id, true) + " nicht erforschen" : reason,
+				       status_t::warn);
+				break;
+			}
+			auto production = component_of<ProductionComp>(best, component::component_t::PRODUCTION_QUEUE);
+			auto owner = owner_of(best, now);
+			auto &stock = state->get_player(owner)->get_resources();
+			if (not stock.spend(what->cost)) {
+				auto missing = missing_resource(stock.get(), what->cost);
+				status(missing ? missing_message(*missing) : "Nicht genug Rohstoffe", status_t::warn);
+				log::log(INFO << "Production: player " << owner << " cannot afford research " << what->name);
+				break;
+			}
+			TrainQueue::Item item;
+			item.name = what->name;
+			item.fqon = what->fqon;
+			item.cost = what->cost;
+			item.time = what->time > 0.0 ? what->time : DEFAULT_TRAIN_TIME;
+			item.research = true;
+			production->get_queue().push(item);
+			queued_research[owner].insert(what->fqon);
+			log::log(INFO << "Production: player " << owner << " queues research " << what->name << " in "
+			              << entity_name(best) << " (entity " << best->get_id() << ", queue "
+			              << production->get_queue().size() << "/" << MAX_QUEUE << ", " << item.time << " s), "
+			              << cost_str(what->cost));
+			status(label_of(what->name, true) + " wird erforscht", status_t::info);
+		} break;
+
+		case Request::kind_t::GRANT_RESEARCH: {
+			// XR fork W1, test option: the technology as researched, found in any building of the player
+			const auto player = request.for_player.value_or(player_id);
+			std::optional<std::string> fqon;
+			for (const auto &[id, entity] : entities) {
+				if (not techs or not entity->has_component(component::component_t::PRODUCTION_QUEUE)
+				    or not entity->has_component(component::component_t::OWNERSHIP) or owner_of(entity, now) != player) {
+					continue;
+				}
+				for (const auto &r : techs->researchables(state, player, fqon_of_entity(entity))) {
+					if (r.name == request.id) {
+						fqon = r.fqon;
+					}
+				}
+				if (fqon) {
+					break;
+				}
+			}
+			if (not fqon) {
+				log::log(WARN << "Production: test grant of " << request.id << " for player " << player
+				              << ": no building offers it");
+				break;
+			}
+			log::log(INFO << "Production: test grant of research " << request.id << " for player " << player);
+			techs->research_done(state, loop, player, *fqon, now);
 		} break;
 
 		case Request::kind_t::CANCEL:
@@ -1140,7 +1426,10 @@ void Production::update(const std::shared_ptr<GameState> &state,
 				}
 				log::log(INFO << "Production: player " << owner << " cancels " << item->name << " in entity "
 				              << entity->get_id() << ", refunded");
-				status(label_of(item->name) + " abgebrochen", status_t::info);
+				status(label_of(item->name, item->research) + " abgebrochen", status_t::info);
+				if (item->research) {
+					queued_research[owner].erase(item->fqon);
+				}
 				done = true;
 				break;
 			}
@@ -1180,6 +1469,12 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			}
 			if (buildable == nullptr) {
 				status("Keine Dorfbewohner ausgewählt", status_t::warn);
+				break;
+			}
+			// XR fork W1: unlock condition of the data (age, buildings)
+			if (const auto facts = facts_of(owner_of(builders.front(), now));
+			    not tech::evaluate(buildable->condition, facts)) {
+				status(label_of(buildable->name) + ": " + tech::missing_text(buildable->condition, facts), status_t::warn);
 				break;
 			}
 			auto map = state->get_map();
@@ -1314,13 +1609,23 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			auto &slot_list = free[owner];
 			auto done = production->get_queue().advance(t, slot_list);
 			for (const auto &item : done) {
+				if (item.research) {
+					// XR fork W1: the technology takes effect (patches, refresh, messages)
+					log::log(INFO << "Production: research " << item.name << " done in " << entity_name(entity)
+					              << " (entity " << entity->get_id() << ") at t=" << t << " s, queue left "
+					              << production->get_queue().size());
+					if (techs) {
+						techs->research_done(state, loop, owner, item.fqon, now);
+					}
+					continue;
+				}
 				auto unit = spawn_unit(state, loop, factory, entity, *production, item.fqon, now);
 				log::log(INFO << "Production: " << item.name << " (entity " << unit->get_id() << ") trained in "
 				              << entity_name(entity) << " (entity " << entity->get_id() << ") at t=" << t
 				              << " s, spawned at tile " << tile_str(position_of(unit, now)) << ", queue left "
 				              << production->get_queue().size());
 				if (owner == player_id) {
-					this->set_status(label_of(item.name) + " bereit", status_t::good);
+					this->set_status(unit_label(owner, item.fqon) + " bereit", status_t::good);
 				}
 			}
 			bool waits = production->get_queue().is_waiting();
@@ -1352,6 +1657,18 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			}
 			++it;
 		}
+		// XR fork W1: researched technologies and ages (the age of every player is announced)
+		if (techs) {
+			for (const auto &m : techs->take_messages()) {
+				if (m.age > 0) {
+					this->set_status(tech::age_reached_text(player_text(techs, m.player), m.age),
+					                 m.player == player_id ? status_t::good : status_t::info);
+				}
+				else if (m.player == player_id) {
+					this->set_status(label_of(m.tech, true) + " erforscht", status_t::good);
+				}
+			}
+		}
 		population = count_population(state, now);
 	}
 
@@ -1368,7 +1685,8 @@ void Production::update(const std::shared_ptr<GameState> &state,
 	snap.selection_count = own.size();
 	if (not own.empty()) {
 		snap.selection_id = entity_name(own.front());
-		snap.selection_label = label_of(snap.selection_id);
+		snap.selection_label = is_unit(own.front()) ? unit_label(player_id, fqon_of_entity(own.front()))
+		                                           : label_of(snap.selection_id);
 		auto constructable = component_of<ConstructableComp>(own.front(), component::component_t::CONSTRUCTABLE);
 		if (constructable != nullptr and not constructable->is_complete()) {
 			snap.construction = constructable->get_progress();
@@ -1398,6 +1716,17 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			option.reason = "Warteschlange voll";
 		}
 	};
+	// XR fork W1: unlock state of an entry for the HUD player (hidden: later age, no mechanic)
+	const auto hud_facts = facts_of(player_id);
+	const int hud_age = age_of_player(player_id);
+	auto offer = [&](Option &option, const tech::Condition &condition, bool researched, bool queued, bool mechanic) {
+		auto o = tech::offer_state(condition, hud_facts, hud_age, researched, queued, mechanic);
+		if (o == tech::offer_t::LOCKED) {
+			option.available = false;
+			option.reason = queued ? std::string{"wird schon erforscht"} : tech::missing_text(condition, hud_facts);
+		}
+		return o != tech::offer_t::HIDDEN;
+	};
 	if (builder != nullptr) {
 		for (const auto &b : builder->get_buildables()) {
 			Option option;
@@ -1409,7 +1738,12 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			option.building = true;
 			option.cost = b.cost;
 			option.time = b.time;
-			availability(option, 0);
+			if (not offer(option, b.condition, false, false, true)) {
+				continue;
+			}
+			if (option.available) {
+				availability(option, 0);
+			}
 			snap.options.push_back(option);
 		}
 	}
@@ -1420,20 +1754,52 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			const auto *entry = known(c.name);
 			option.code = entry ? entry->code : 0;
 			option.id = c.name;
-			option.label = label_of(c.name);
+			option.label = unit_label(player_id, c.fqon);
 			option.icon = entry ? entry->icon : "sword";
 			option.building = false;
 			option.cost = c.cost;
 			option.time = c.time;
-			availability(option, production->get_queue().size());
+			if (not offer(option, c.condition, false, false, true)) {
+				continue;
+			}
+			if (option.available) {
+				availability(option, production->get_queue().size());
+			}
 			snap.options.push_back(option);
+		}
+		// XR fork W1: technologies of the building (Research ability of the player's data)
+		if (techs) {
+			for (const auto &r : techs->researchables(state, player_id, fqon_of_entity(producer))) {
+				Option option;
+				const auto *entry = known(r.name, true);
+				option.code = entry ? entry->code : 0;
+				option.id = r.name;
+				option.label = label_of(r.name, true);
+				option.icon = entry ? entry->icon : "tech";
+				option.building = false;
+				option.research = true;
+				option.effect = entry ? entry->effect : "";
+				option.cost = r.cost;
+				option.time = r.time;
+				if (not offer(option, r.condition, hud_facts.researched.contains(r.fqon),
+				              queued_research[player_id].contains(r.fqon), has_mechanic(r.name, true))) {
+					continue;
+				}
+				if (option.available) {
+					availability(option, production->get_queue().size());
+				}
+				snap.options.push_back(option);
+			}
 		}
 		QueueState queue;
 		queue.building = producer->get_id();
 		queue.label = label_of_entity(producer);
 		for (const auto &item : production->get_queue().get_items()) {
-			const auto *entry = known(item.name);
-			queue.items.push_back({item.name, label_of(item.name), entry ? entry->icon : "sword"});
+			const auto *entry = known(item.name, item.research);
+			queue.items.push_back({item.name,
+			                       item.research ? label_of(item.name, true) : unit_label(player_id, item.fqon),
+			                       entry ? entry->icon : (item.research ? "tech" : "sword"),
+			                       item.research});
 		}
 		queue.progress = production->get_queue().progress(t);
 		queue.waiting_for_housing = production->get_queue().is_waiting();
@@ -1464,12 +1830,12 @@ void Production::update(const std::shared_ptr<GameState> &state,
 		auto pos = position_of(entity, now);
 		if (production != nullptr and production->get_queue().size() > 0 and is_complete(entity)) {
 			const auto &head = production->get_queue().get_items().front();
-			const auto *entry = known(head.name);
+			const auto *entry = known(head.name, head.research);
 			Order order;
 			order.building = id;
 			order.building_label = label_of_entity(entity);
-			order.label = label_of(head.name);
-			order.icon = entry ? entry->icon : "sword";
+			order.label = head.research ? label_of(head.name, true) : unit_label(player_id, head.fqon);
+			order.icon = entry ? entry->icon : (head.research ? "tech" : "sword");
 			order.construction = false;
 			order.count = production->get_queue().size();
 			order.remaining = production->get_queue().remaining(t);
@@ -1505,6 +1871,30 @@ void Production::update(const std::shared_ptr<GameState> &state,
 		}
 		return a.remaining < b.remaining;
 	});
+
+	// XR fork W1: age, civilisation and the names of upgraded unit lines of the HUD player
+	snap.age = hud_age;
+	snap.age_label = tech::age_label(hud_age);
+	if (const tech::PlayerTech *s = techs ? techs->find(player_id) : nullptr) {
+		snap.civ = s->civ;
+		snap.civ_label = s->civ.empty() ? std::string{} : civ_label(s->civ);
+		std::set<std::string> seen;
+		for (const auto &[id, entity] : entities) {
+			if (not is_unit(entity) or not entity->has_component(component::component_t::OWNERSHIP)
+			    or owner_of(entity, now) != player_id) {
+				continue;
+			}
+			auto fqon = fqon_of_entity(entity);
+			if (fqon.empty() or not seen.insert(fqon).second) {
+				continue;
+			}
+			auto label = techs->unit_label(player_id, fqon);
+			if (label != label_of(short_name(fqon))) {
+				snap.unit_labels.emplace_back(short_name(fqon), label);
+			}
+		}
+		std::sort(snap.unit_labels.begin(), snap.unit_labels.end());
+	}
 
 	std::lock_guard<std::mutex> lock{this->mutex};
 	// the placement mode ends if the selection cannot build the building any more

@@ -31,6 +31,9 @@ enum class HudIcon : uint8_t {
     // AoE-Layout (xr_aoe_ui): weitere Gebäude, feste Aktionen, Schmuck (hudIconShape in xr_hud.cpp)
     Mill, LumberCamp, MiningCamp, Barracks, Range, Stable, Wall,
     Halt, Garrison, Unload, Cancel, Back, Emblem, Age, Sheep, Tree,
+    // W1: Forschung (aufgeschlagenes Buch), Zeitalter-Aufstieg (Pfeil nach oben über einem Sockel),
+    // nächste Befehlsseite (Pfeil nach rechts)
+    Tech, AgeUp, Next,
     Count,
 };
 

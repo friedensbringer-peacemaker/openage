@@ -51,6 +51,11 @@ struct HudProdOption {
     std::string icon;       // „villager“, „house“, „sword“, „bow“, „horse“, „hammer“, „tower“
     bool available = true;  // false = ausgegraut (reason sagt warum)
     std::string reason;
+    // W1: Forschung, Kosten (Nahrung, Holz, Gold, Stein), Zeit in s, Wirkung (Tooltip)
+    bool research = false;
+    std::array<double, 4> cost{};
+    double time = 0.0;
+    std::string effect;
 };
 
 // Laufende Ausbildung/Bau eines eigenen Gebäudes (prod::Order ohne Engine-Typen).
@@ -83,6 +88,11 @@ struct HudProdState {
     std::string status;                     // letzte Meldung der Produktion
     HudStatus statusKind = HudStatus::kInfo;
     uint64_t statusSeq = 0;                 // zählt hoch; neue Nummer = neue Meldung
+    // W1: Zeitalter (1 Dunkel … 4 Imperial) und Kultur des Spielers, Namen aufgewerteter Einheitenlinien
+    int age = 1;
+    std::string ageLabel = "Dunkles Zeitalter";
+    std::string civLabel;
+    std::vector<std::pair<std::string, std::string>> unitLabels;  // nyan-Kurzname → „Schwertkämpfer“
 };
 
 // Ein Abfrageergebnis (EngineHost::hudSample).

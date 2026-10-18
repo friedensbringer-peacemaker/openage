@@ -90,6 +90,12 @@ void update_building_health(const std::shared_ptr<GameState> &state,
  */
 std::string entity_name(const std::shared_ptr<GameEntity> &entity);
 
+/**
+ * Sprite path of an animation as the systems use it (the converter writes shared
+ * sprites as "../shared/..." relative to the unit directory; XR fork).
+ */
+std::string sprite_path(const std::string &path);
+
 // ---- ai (XR fork): queries for the computer opponent (simulation thread) ----
 
 /// population (units + units in training) and limit of a player
@@ -123,6 +129,19 @@ bool set_rally_point(const std::shared_ptr<GameState> &state,
 /// the building is finished (no foundation)
 bool is_finished(const std::shared_ptr<GameEntity> &building);
 
+/**
+ * Technologies a building of p player offers now (XR fork W1, computer opponent):
+ * short names of the researchables that are available (age, conditions, not
+ * researched, not queued anywhere).
+ */
+std::vector<std::string> available_research(const std::shared_ptr<GameState> &state,
+                                            player_id_t player,
+                                            const std::shared_ptr<GameEntity> &building,
+                                            const time::time_t &time);
+
+/// a technology is queued in a building of the player (XR fork W1)
+bool research_queued(const std::shared_ptr<GameState> &state, player_id_t player, const time::time_t &time);
+
 // ---- end ai (XR fork) ----
 
 
@@ -151,6 +170,10 @@ struct Option {
 	/// false: greyed out, reason says why
 	bool available = true;
 	std::string reason;
+	/// XR fork W1: a technology (research in the selected building)
+	bool research = false;
+	/// short German effect for the tooltip (technologies), may be empty
+	std::string effect;
 };
 
 /// one entry of a training queue
@@ -159,6 +182,8 @@ struct QueueEntry {
 	std::string label;
 	/// icon hint ("villager", "sword", ...)
 	std::string icon;
+	/// XR fork W1: a technology
+	bool research = false;
 };
 
 /// a running training or construction of the player (XR fork, "Bestellungen")
@@ -221,6 +246,15 @@ struct Snapshot {
 
 	/// all trainings and constructions of the player (sorted by remaining time)
 	std::vector<Order> orders;
+
+	/// XR fork W1: age of the player (1 Dark … 4 Imperial), its German name, the civilisation
+	int age = 1;
+	std::string age_label = "Dunkles Zeitalter";
+	std::string civ;
+	std::string civ_label;
+	/// German names of the player's unit types that differ from the catalog (line upgrades),
+	/// short nyan name -> label ("Militia" -> "Schwertkämpfer")
+	std::vector<std::pair<std::string, std::string>> unit_labels;
 
 	/// building being placed (empty: no placement mode)
 	std::string placement;
@@ -286,6 +320,13 @@ public:
 	/// train a unit in a building
 	void train_in(entity_id_t building, const std::string &id);
 
+	/**
+	 * Research a technology in the selected buildings (XR fork W1; short name, e.g.
+	 * "Loom"): queued like a unit in the first building that offers it, costs are
+	 * paid now and refunded when it is cancelled.
+	 */
+	void research(const std::string &id);
+
 	/// cancel the last queued unit of the selected building (costs are refunded)
 	void cancel_training();
 
@@ -328,6 +369,15 @@ public:
 
 	/// train a unit in a building of \p player
 	void train_for(player_id_t player, entity_id_t building, const std::string &id);
+
+	/// research a technology in a building of player (XR fork W1)
+	void research_for(player_id_t player, entity_id_t building, const std::string &id);
+
+	/**
+	 * Test option (XR fork W1, openage-native --replay-tech): p player gets the technology at once,
+	 * without costs and conditions, as if it had been researched (patches, refresh, message).
+	 */
+	void grant_research(player_id_t player, const std::string &id);
 
 	/// place a building of \p player and let \p builders (villagers of that player) build it
 	void place_for(player_id_t player,
@@ -372,6 +422,8 @@ private:
 			CANCEL,
 			CANCEL_AT,
 			PLACE,
+			RESEARCH,
+			GRANT_RESEARCH,
 		};
 		kind_t kind = kind_t::TRAIN;
 		std::string id;

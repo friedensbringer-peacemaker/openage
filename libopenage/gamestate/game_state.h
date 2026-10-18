@@ -32,6 +32,9 @@ class Player;
 namespace combat {
 class CombatState;
 }
+namespace tech {
+class TechState;
+}
 
 /**
  * State of the game.
@@ -77,6 +80,11 @@ public:
 	 * Combat of the game (XR fork): attacks, deaths, victory condition.
 	 */
 	const std::shared_ptr<combat::CombatState> &get_combat() const;
+
+	/**
+	 * Technologies, ages and civilisations of the players (XR fork W1).
+	 */
+	const std::shared_ptr<tech::TechState> &get_tech() const;
 
 	/**
 	 * Add a new player to the index.
@@ -169,6 +177,8 @@ private:
 	 * Combat state (XR fork).
 	 */
 	std::shared_ptr<combat::CombatState> combat;
+	// XR fork W1: technologies
+	std::shared_ptr<tech::TechState> tech;
 };
 } // namespace gamestate
 } // namespace openage

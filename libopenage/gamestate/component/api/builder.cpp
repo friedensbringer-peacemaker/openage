@@ -2,6 +2,8 @@
 
 #include "builder.h"
 
+#include <utility>
+
 
 namespace openage::gamestate::component {
 
@@ -14,6 +16,10 @@ Builder::Builder(const std::shared_ptr<openage::event::EventLoop> &loop,
 
 component_t Builder::get_type() const {
 	return component_t::BUILDER;
+}
+
+void Builder::set_buildables(std::vector<Buildable> &&buildables) {
+	this->buildables = std::move(buildables);
 }
 
 const std::vector<Builder::Buildable> &Builder::get_buildables() const {

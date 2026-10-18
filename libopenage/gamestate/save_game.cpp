@@ -40,6 +40,7 @@
 #include "gamestate/player.h"
 #include "gamestate/production.h"
 #include "gamestate/production_math.h"
+#include "gamestate/tech.h"
 #include "version.h"
 
 
@@ -171,7 +172,24 @@ SaveData capture(const std::shared_ptr<GameState> &state,
 		SavedPlayer p;
 		p.id = id;
 		p.resources = state->get_player(id)->get_resources().get();
+		// XR fork W1: civilisation, researched technologies, completed building types
+		if (const auto *t = state->get_tech() ? state->get_tech()->find(id) : nullptr) {
+			p.civ = t->civ;
+			p.techs = t->order;
+			p.built.assign(t->facts.built.begin(), t->facts.built.end());
+		}
 		d.players.push_back(p);
+	}
+	// the map is generated again with the civilisations that were played (random ones resolved)
+	if (not d.map.civs.empty()) {
+		for (const auto &p : d.players) {
+			if (not p.civ.empty()) {
+				if (p.id >= d.map.civs.size()) {
+					d.map.civs.resize(p.id + 1, "random");
+				}
+				d.map.civs[p.id] = p.civ;
+			}
+		}
 	}
 
 	// entities, sorted by id (deterministic file)
@@ -278,6 +296,7 @@ SaveData capture(const std::shared_ptr<GameState> &state,
 				q.cost = item.cost;
 				q.time = item.time;
 				q.remaining = first and item.started >= 0.0 ? std::max(0.0, item.started + item.time - now) : -1.0;
+				q.research = item.research;
 				first = false;
 				e.queue.push_back(q);
 			}
@@ -349,6 +368,33 @@ RestoreResult restore(const SaveData &data,
 		}
 		else {
 			log::log(WARN << "Load: player " << p.id << " does not exist, resources dropped");
+		}
+	}
+
+	// XR fork W1: the civilisation came with the map (MapSettings::civs); researched technologies are
+	// applied again in their order (patches + refresh of the generated entities), before the saved
+	// health of the entities is restored
+	if (auto techs = state->get_tech()) {
+		size_t applied = 0;
+		for (const auto &p : data.players) {
+			const auto id = static_cast<player_id_t>(p.id);
+			if (not state->has_player(id)) {
+				continue;
+			}
+			const auto *current = techs->find(id);
+			if (not p.civ.empty() and (current == nullptr or current->civ != p.civ)) {
+				log::log(WARN << "Load: player " << p.id << " played " << p.civ << ", the map gave "
+				              << (current == nullptr or current->civ.empty() ? std::string{"none"} : current->civ));
+			}
+			for (const auto &b : p.built) {
+				techs->building_done(id, b);
+			}
+			for (const auto &t : p.techs) {
+				applied += techs->research_done(state, loop, id, t, time, false) ? 1 : 0;
+			}
+		}
+		if (applied > 0) {
+			log::log(INFO << "Load: " << applied << " researched technologies applied");
 		}
 	}
 
@@ -462,6 +508,7 @@ RestoreResult restore(const SaveData &data,
 				item.cost = q.cost;
 				item.time = q.time;
 				item.started = q.remaining >= 0.0 ? now - (q.time - q.remaining) : -1.0;
+				item.research = q.research;
 				queue->get_queue().restore(item);
 			}
 			if (e->rally) {

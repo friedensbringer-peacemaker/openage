@@ -2,6 +2,8 @@
 
 #include "production_queue.h"
 
+#include <utility>
+
 
 namespace openage::gamestate::component {
 
@@ -14,6 +16,10 @@ ProductionQueue::ProductionQueue(const std::shared_ptr<openage::event::EventLoop
 
 component_t ProductionQueue::get_type() const {
 	return component_t::PRODUCTION_QUEUE;
+}
+
+void ProductionQueue::set_creatables(std::vector<Creatable> &&creatables) {
+	this->creatables = std::move(creatables);
 }
 
 const std::vector<ProductionQueue::Creatable> &ProductionQueue::get_creatables() const {

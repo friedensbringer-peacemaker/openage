@@ -149,6 +149,29 @@ public:
 	 */
 	void health_changed(entity_id_t id, int64_t health);
 
+	/**
+	 * Forget the cached combat values read from a nyan view (XR fork W1: a
+	 * technology patched the view of a player). Call before refresh_entity().
+	 */
+	void invalidate_stats(const std::shared_ptr<nyan::View> &db_view);
+
+	/**
+	 * Read the combat values of a living entity again from the (patched) view of
+	 * its owner (XR fork W1). Like in AoE II, a higher maximum health raises the
+	 * current health by the same amount (lower: capped); a replacement of the type
+	 * (p proportional: line upgrades, buildings of a new age; docs/aoe2-spec 03 §3.3)
+	 * scales the health with the maximum. Buildings under construction keep their
+	 * health (the construction raises it).
+	 *
+	 * @return true if the maximum health changed.
+	 */
+	bool refresh_entity(const std::shared_ptr<GameEntity> &entity,
+	                    const std::shared_ptr<nyan::View> &db_view,
+	                    const nyan::fqon_t &nyan_entity,
+	                    bool under_construction,
+	                    bool proportional,
+	                    const time::time_t &time);
+
 	// ---- queries, simulation thread
 	bool is_dead(entity_id_t id) const;
 	std::shared_ptr<const CombatStats> get_stats(entity_id_t id) const;

@@ -3,8 +3,8 @@
 // Fork-Header engine/hud_info.h); host-getestet in tests/test_app_logic.cpp (testAoeFeed). Der Fork-Controller
 // (libopenage/ui/aoe_ui_controller.cpp) ruft fill() alle 250 ms im Presenter-Thread auf – am Desktop und auf der Quest.
 //
-// Belegung des Befehlsrasters (Spec §1.2): Zeile 1–2 = Angebot der Engine (Ausbilden 101–106, Bauen 201–207) in
-// der Reihenfolge der Engine, Zeile 3 = feste Aktionen (aoeFixedRow: Angriff · Halt · Garnison · Alle raus ·
+// Belegung des Befehlsrasters (Spec §1.2): Zeile 1–2 = Angebot der Engine (Ausbilden 101–199, Bauen 201–299, Forschen
+// 301–499, W1) in der Reihenfolge der Engine, bei mehr als 10 Einträgen Seiten zu 9 + „Seite n/m“; Zeile 3 = feste Aktionen (aoeFixedRow: Angriff · Halt · Garnison · Alle raus ·
 // Abbrechen; die ersten vier bis S3 gesperrt mit Grund).
 #pragma once
 
@@ -26,6 +26,9 @@ public:
     // Neue Engine: Meldungsnummern von vorn.
     void reset() {
         mLastSeq = 0;
+        mPage = 0;
+        mPages = 1;
+        mPageKey.clear();
         mModel = AoeModel{};
         mMatch = HudMatch::RUNNING;
     }
@@ -48,21 +51,47 @@ public:
             m.populationMax = -1;
         }
         m.housingAlert = game && p.valid && p.queue && p.waitingForHousing;
+        // W1: Zeitalter des Spielers (Plakette I … IV und Text)
+        m.ageIndex = game && p.valid ? std::clamp(p.age, 1, 4) : 1;
+        m.age = game && p.valid && !p.ageLabel.empty() ? p.ageLabel : std::string{"Dunkles Zeitalter"};
         aoeExpireMessages(m, now, aoelayout::kMsgSeconds, aoelayout::kFadeSeconds);
 
-        // Befehlsraster
+        // Befehlsraster: Zeilen 1–2 = Angebot der Engine; mehr als 10 Einträge (W1: Gebäude + Forschung) → Seiten
+        // zu 9 Einträgen, Feld 10 (G) = „Seite n/m“ (blättert weiter)
         m.grid.assign(static_cast<size_t>(kAoeGridCells), AoeCommand{});
+        m.tips.assign(static_cast<size_t>(kAoeGridCells), std::string{});
+        mPages = 1;
         if (game && p.valid) {
+            const int n = static_cast<int>(p.options.size());
+            const bool paged = n > kAoeOptionCells;
+            const int per = paged ? kAoeOptionCells - 1 : kAoeOptionCells;
+            mPages = paged ? (n + per - 1) / per : 1;
+            const std::string key = p.selectionLabel + "|" + std::to_string(p.selectionCount);
+            if (key != mPageKey) {
+                mPageKey = key;
+                mPage = 0;
+            }
+            if (mPage >= mPages) mPage = 0;
             int cell = 0;
-            for (const HudProdOption& o : p.options) {
-                if (cell >= 10) break;  // Zeilen 1–2
+            for (int i = mPage * per; i < n && cell < per; ++i) {
+                const HudProdOption& o = p.options[static_cast<size_t>(i)];
                 AoeCommand c;
                 c.id = o.code;
                 c.icon = aoeIconFor(o.code, o.icon);
                 c.label = o.label;
                 c.enabled = o.available;
                 c.reason = o.reason;
+                m.tips[static_cast<size_t>(cell)] = tipOf(o);
                 m.grid[static_cast<size_t>(cell++)] = c;
+            }
+            if (paged) {
+                AoeCommand c;
+                c.id = kAoeCmdPageNext;
+                c.icon = HudIcon::Next;
+                c.label = "Seite " + std::to_string(mPage + 1) + "/" + std::to_string(mPages);
+                m.tips[static_cast<size_t>(kAoeOptionCells - 1)] =
+                    "Weitere Befehle: weiter zu Seite " + std::to_string((mPage + 1) % mPages + 1) + " von " + std::to_string(mPages);
+                m.grid[static_cast<size_t>(kAoeOptionCells - 1)] = c;
             }
         }
         aoeFixedRow(m, game && p.valid && p.queue && !p.queueItems.empty(), game && p.valid && !p.placement.empty());
@@ -126,6 +155,27 @@ public:
         return 0;
     }
 
+    // W1: nächste Seite des Befehlsrasters (Knopf kAoeCmdPageNext); wirkt beim nächsten fill().
+    void nextPage() { mPage = mPages > 1 ? (mPage + 1) % mPages : 0; }
+    int page() const { return mPage; }
+    int pages() const { return mPages; }
+
+    // W1: Zeile beim Zielen: „Webstuhl – 50 Gold · 25 s · Dorfbewohner: mehr LP und Rüstung“.
+    static std::string tipOf(const HudProdOption& o) {
+        static const char* kNames[4] = {"Nahrung", "Holz", "Gold", "Stein"};
+        std::string costs;
+        for (size_t i = 0; i < o.cost.size(); ++i) {
+            if (!(o.cost[i] > 0.0)) continue;
+            if (!costs.empty()) costs += ", ";
+            costs += std::to_string(static_cast<long>(std::lround(o.cost[i]))) + " " + kNames[i];
+        }
+        std::string out = o.label;
+        if (!costs.empty()) out += " – " + costs;
+        if (o.time > 0.0) out += (costs.empty() ? " – " : " · ") + std::to_string(static_cast<long>(std::lround(o.time))) + " s";
+        if (!o.effect.empty()) out += " · " + o.effect;
+        return out;
+    }
+
     const AoeModel& model() const { return mModel; }
     AoeModel& model() { return mModel; }
     HudMatch match() const { return mMatch; }
@@ -173,6 +223,9 @@ private:
                 const auto named = HudFeed::unitName(e);
                 std::string label = named.first;
                 if (label == "Dorfbewohnerin") label = "Dorfbewohner";
+                // W1: aufgewertete Linien heißen nach ihrer Stufe („Militia“ → „Schwertkämpfer“)
+                for (const auto& [nyanName, upgraded] : p.unitLabels)
+                    if (nyanName == e.name) label = upgraded;
                 if (i == 0) firstName = label;
                 same = same && label == firstName;
                 const auto has = [&](const char* part) { return e.name.find(part) != std::string::npos; };
@@ -205,6 +258,8 @@ private:
 
     AoeModel mModel;
     uint64_t mLastSeq = 0;
+    int mPage = 0, mPages = 1;   // W1: Seite des Befehlsrasters
+    std::string mPageKey;        // Auswahl, für die die Seite gilt (neue Auswahl = Seite 1)
     HudMatch mMatch = HudMatch::RUNNING;
 };
 

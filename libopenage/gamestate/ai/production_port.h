@@ -98,6 +98,32 @@ public:
 	virtual bool is_complete(const std::shared_ptr<GameState> &state,
 	                         entity_id_t building,
 	                         const time::time_t &time) = 0;
+
+	// ---- XR fork W1: research (defaults: no research, e.g. the stub)
+
+	/// short names of the technologies a building of the player offers now
+	virtual std::vector<std::string> offered_research(const std::shared_ptr<GameState> & /* state */,
+	                                                  player_id_t /* player */,
+	                                                  entity_id_t /* building */,
+	                                                  const time::time_t & /* time */) {
+		return {};
+	}
+
+	/// a technology of the player is queued somewhere
+	virtual bool researching(const std::shared_ptr<GameState> & /* state */,
+	                         player_id_t /* player */,
+	                         const time::time_t & /* time */) {
+		return false;
+	}
+
+	/// research a technology in a building of the player
+	virtual bool research(const std::shared_ptr<GameState> & /* state */,
+	                      player_id_t /* player */,
+	                      entity_id_t /* building */,
+	                      const std::string & /* tech */,
+	                      const time::time_t & /* time */) {
+		return false;
+	}
 };
 
 /**

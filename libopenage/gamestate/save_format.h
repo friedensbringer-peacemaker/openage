@@ -45,7 +45,9 @@ namespace openage::gamestate::save {
  * round trip without the engine.
  */
 
-constexpr int FORMAT_VERSION = 1;
+/// 1: 0.6.0-xr.0.11; 2: XR fork W1 (civilisations, researched technologies, research in queues).
+/// Older versions still load (missing fields: no civilisation, nothing researched).
+constexpr int FORMAT_VERSION = 2;
 
 /// slots 1..SLOT_COUNT are chosen by the player, slot 0 is the autosave,
 /// QUICK_SLOT the quick save (F5/F9)
@@ -60,6 +62,11 @@ constexpr double AUTOSAVE_SECONDS = 300.0;
 struct SavedPlayer {
 	uint64_t id = 0;
 	resource_amounts_t resources{};
+	/// XR fork W1 (version 2): civilisation short name, researched technologies in order (fqons),
+	/// completed building types (fqons, unlock conditions)
+	std::string civ{};
+	std::vector<std::string> techs{};
+	std::vector<std::string> built{};
 };
 
 /// one entry of a training queue
@@ -71,6 +78,8 @@ struct SavedQueueItem {
 	double time = 0.0;
 	/// seconds left for the first item, negative while waiting for a population slot
 	double remaining = -1.0;
+	/// XR fork W1 (version 2): a technology
+	bool research = false;
 };
 
 /// one game entity
@@ -247,10 +256,26 @@ inline std::string serialize(const SaveData &d) {
 		out << "ai_attack_size = " << *m.ai.attack_size << "\n";
 	}
 	out << "ai_seed = " << m.ai.seed << "\n";
+	if (not m.civs.empty()) {
+		out << "civs =";
+		for (const auto &c : m.civs) {
+			out << " " << (c.empty() ? std::string{"random"} : c);
+		}
+		out << "\n";
+	}
 	for (const auto &p : d.players) {
 		out << "[player]\n";
 		out << "id = " << p.id << "\n";
 		out << "resources = " << resources_text(p.resources) << "\n";
+		if (not p.civ.empty()) {
+			out << "civ = " << p.civ << "\n";
+		}
+		for (const auto &t : p.techs) {
+			out << "tech = " << t << "\n";
+		}
+		for (const auto &b : p.built) {
+			out << "built = " << b << "\n";
+		}
 	}
 	for (const auto &e : d.entities) {
 		out << "[entity]\n";
@@ -274,7 +299,8 @@ inline std::string serialize(const SaveData &d) {
 		}
 		for (const auto &q : e.queue) {
 			out << "queue = " << q.name << " " << q.fqon << " " << fmt_double(q.time) << " "
-			    << fmt_double(q.remaining) << " " << resources_text(q.cost) << "\n";
+			    << fmt_double(q.remaining) << " " << resources_text(q.cost) << (q.research ? " research" : "")
+			    << "\n";
 		}
 		if (e.rally) {
 			out << "rally = " << fmt_double((*e.rally)[0]) << " " << fmt_double((*e.rally)[1]) << "\n";
@@ -459,6 +485,13 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 					return fail("ai_seed");
 				}
 			}
+			else if (key == "civs") {
+				m.civs.clear();
+				std::string c;
+				while (v >> c) {
+					m.civs.push_back(c);
+				}
+			}
 		}
 		else if (section == "player") {
 			SavedPlayer &p = d.players.back();
@@ -470,6 +503,20 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 			else if (key == "resources") {
 				if (not parse_resources(value, p.resources)) {
 					return fail("Rohstoffe");
+				}
+			}
+			else if (key == "civ") {
+				p.civ = value;
+			}
+			else if (key == "tech") {
+				if (value.empty()) {
+					return fail("Technologie");
+				}
+				p.techs.push_back(value);
+			}
+			else if (key == "built") {
+				if (not value.empty()) {
+					p.built.push_back(value);
 				}
 			}
 		}
@@ -542,6 +589,14 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 				if (not parse_resources(trim(rest), q.cost)) {
 					return fail("Warteschlange (Kosten)");
 				}
+				// version 2: "research" after the costs marks a technology
+				std::istringstream tail{trim(rest)};
+				double skip = 0.0;
+				for (size_t i = 0; i < RESOURCE_COUNT; ++i) {
+					tail >> skip;
+				}
+				std::string marker;
+				q.research = (tail >> marker) and marker == "research";
 				e.queue.push_back(q);
 			}
 			else if (key == "rally") {
@@ -614,6 +669,9 @@ inline SaveData canonical(const SaveData &d, bool with_orders = false) {
 	auto round6 = [](double v) { return std::round(v * 1e6) / 1e6; };
 	c.game_time = round6(c.game_time);
 	std::sort(c.players.begin(), c.players.end(), [](const SavedPlayer &a, const SavedPlayer &b) { return a.id < b.id; });
+	for (auto &p : c.players) {
+		std::sort(p.built.begin(), p.built.end());
+	}
 	std::sort(c.removed.begin(), c.removed.end());
 	auto key = [](const SavedEntity &e) {
 		return std::make_tuple(e.generated ? 0 : 1, e.generated ? e.id : 0, e.fqon, e.owner, e.ne, e.se, e.up, e.angle);

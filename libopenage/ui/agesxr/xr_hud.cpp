@@ -150,6 +150,21 @@ float hudIconShape(HudIcon icon, float px, float py) {
         static const float crown[6] = {-13.0f, 6.0f, 13.0f, 6.0f, 0.0f, -16.0f};
         return std::min(triangle(px, py, crown), box(px, py + 11.0f, 2.5f, 5.0f, 0.5f));
     }
+    case HudIcon::Tech: {  // aufgeschlagenes Buch: zwei Seiten mit Falz, Lesezeichen
+        const float left = box(px + 7.0f, py + 1.0f, 6.5f, 10.0f, 1.0f);
+        const float right = box(px - 7.0f, py + 1.0f, 6.5f, 10.0f, 1.0f);
+        const float fold = -box(px, py + 1.0f, 0.8f, 11.0f, 0.2f);
+        return std::min(std::max(std::min(left, right), fold), segment(px, py, 3, -12, 3, -4, 1.4f));
+    }
+    case HudIcon::AgeUp: {  // Pfeil nach oben über einem Sockel
+        static const float head[6] = {-12.0f, -2.0f, 12.0f, -2.0f, 0.0f, -16.0f};
+        return std::min({triangle(px, py, head), box(px, py + 4.0f, 4.0f, 7.0f, 0.5f),
+                         box(px, py + 13.0f, 13.0f, 2.5f, 1.0f)});
+    }
+    case HudIcon::Next: {  // Pfeil nach rechts (Spiegelbild von Back)
+        static const float head[6] = {14.0f, 0.0f, 2.0f, -10.0f, 2.0f, 10.0f};
+        return std::min(triangle(px, py, head), box(px - 6.0f, py, 8.0f, 3.5f, 1.0f));
+    }
     case HudIcon::None:
     case HudIcon::Count: break;
     }
