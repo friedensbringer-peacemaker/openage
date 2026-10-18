@@ -36,6 +36,10 @@ namespace gamestate {
 class GameEntity;
 class GameState;
 
+namespace vision {
+class VisionState;
+} // namespace vision
+
 namespace combat {
 
 /**
@@ -106,6 +110,13 @@ public:
 	 * Players that never count for the victory condition (Gaia).
 	 */
 	void set_neutral_players(const std::unordered_set<player_id_t> &players);
+
+	/**
+	 * Fog of war (XR fork, gamestate/vision): auto attacks only pick enemies in
+	 * sight, a right click only picks enemies the player sees (or remembered
+	 * buildings in the fog). Without a vision everything counts as visible.
+	 */
+	void set_vision(const std::shared_ptr<vision::VisionState> &vision);
 
 	/**
 	 * Order an attack (explicit command): walk into range, attack until the
@@ -243,6 +254,8 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<const CombatStats>> stats_cache;
 
 	std::unordered_set<player_id_t> neutral;
+	/// fog of war (XR fork), may be nullptr
+	std::shared_ptr<vision::VisionState> vision;
 	/// players that ever had units or buildings
 	std::set<player_id_t> participants;
 	bool started = false;

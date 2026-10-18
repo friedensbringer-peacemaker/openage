@@ -11,6 +11,7 @@
 #include "gamestate/game_entity.h"
 #include "gamestate/player.h"
 #include "gamestate/tech.h"
+#include "gamestate/vision/vision_state.h"
 
 
 namespace openage::gamestate {
@@ -20,7 +21,10 @@ GameState::GameState(const std::shared_ptr<nyan::Database> &db,
 	event::State{event_loop},
 	db_view{db->new_view()},
 	combat{std::make_shared<combat::CombatState>(event_loop)},
-	tech{std::make_shared<tech::TechState>()} {
+	tech{std::make_shared<tech::TechState>()},
+	vision{std::make_shared<vision::VisionState>(event_loop)} {
+	// XR fork: auto attacks and picks respect the fog of war
+	this->combat->set_vision(this->vision);
 }
 
 const std::shared_ptr<nyan::View> &GameState::get_db_view() {
@@ -36,6 +40,10 @@ void GameState::add_game_entity(const std::shared_ptr<GameEntity> &entity) {
 
 void GameState::remove_game_entity(entity_id_t id) {
 	this->game_entities.erase(id);
+}
+
+const std::shared_ptr<vision::VisionState> &GameState::get_vision() const {
+	return this->vision;
 }
 
 const std::shared_ptr<combat::CombatState> &GameState::get_combat() const {

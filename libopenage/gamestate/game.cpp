@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <optional>
 #include <unordered_set>
@@ -42,6 +43,8 @@
 #include "gamestate/terrain_tile.h"
 #include "gamestate/types.h"
 #include "gamestate/universe.h"
+#include "gamestate/vision/vision_snapshot.h"
+#include "gamestate/vision/vision_state.h"
 #include "time/time.h"
 #include "util/path.h"
 #include "util/strings.h"
@@ -78,11 +81,15 @@ Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 
 	if (map_settings.type == map_type_t::RANDOM
 	    and this->generate_random_map(event_loop, entity_factory, terrain_factory, map_settings, start_time)) {
+		// vision (XR fork): fog of war of the random map
+		this->start_vision(map_settings.vision, start_time);
 		// ai (XR fork): computer opponent
 		this->start_ai(event_loop, map_settings, start_time);
 		return;
 	}
 	this->generate_terrain(terrain_factory);
+	// XR fork: the fixed test map is always fully visible (render checks compare it byte for byte)
+	this->start_vision(vision_mode_t::ALL, start_time);
 }
 
 const std::shared_ptr<GameState> &Game::get_state() const {
@@ -147,10 +154,68 @@ void Game::start_ai(const std::shared_ptr<openage::event::EventLoop> &event_loop
 	                                         params,
 	                                         seed,
 	                                         ai::make_production_port());
+	// vision (XR fork): the computer knows the start buildings (town centres) of its enemies
+	if (auto vision = this->state->get_vision()) {
+		auto combat = this->state->get_combat();
+		size_t known = 0;
+		for (const auto &[id, entity] : this->state->get_game_entities()) {
+			auto stats = combat->get_stats(id);
+			if (not stats or not stats->building or not entity->has_component(component::component_t::OWNERSHIP)
+			    or not entity->has_component(component::component_t::POSITION)) {
+				continue;
+			}
+			auto owner = std::dynamic_pointer_cast<component::Ownership>(
+				entity->get_component(component::component_t::OWNERSHIP));
+			const auto o = owner->get_owners().get(start_time);
+			if (o == player or o >= gaia) {
+				continue;
+			}
+			auto pos = std::dynamic_pointer_cast<component::Position>(
+				entity->get_component(component::component_t::POSITION));
+			const auto p = pos->get_positions().get(start_time);
+			vision->remember(player, id, p.ne.to_double(), p.se.to_double(), stats->radius);
+			known += 1;
+		}
+		log::log(INFO << "AI: player " << player << " knows " << known << " enemy start buildings (vision "
+		              << vision_mode_name(vision->get_mode()) << ")");
+	}
 	ai->start(this->state, start_time);
 	this->ai_players.push_back(ai);
 }
 // ---- end ai (XR fork) ----
+
+// ---- vision (XR fork) ----
+void Game::start_vision(vision_mode_t mode, const time::time_t &start_time) {
+	auto vision = this->state->get_vision();
+	auto map = this->state->get_map();
+	if (not vision or not map) {
+		return;
+	}
+	if (this->start_count == 0) {
+		// ground colours for maps without generator data (test map): water blue, land green
+		const auto &size = map->get_size();
+		std::vector<uint32_t> colors(size[0] * size[1], vision::terrain_color(map_terrain_t::GRASS));
+		for (size_t se = 0; se < size[1]; ++se) {
+			for (size_t ne = 0; ne < size[0]; ++ne) {
+				auto name = map->terrain_name(coord::tile{static_cast<coord::tile_t>(ne), static_cast<coord::tile_t>(se)});
+				std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
+				if (name.find("water") != std::string::npos) {
+					colors[ne + se * size[0]] = vision::terrain_color(map_terrain_t::WATER);
+				}
+				else if (name.find("dirt") != std::string::npos or name.find("road") != std::string::npos) {
+					colors[ne + se * size[0]] = vision::terrain_color(map_terrain_t::DIRT);
+				}
+			}
+		}
+		vision->set_terrain_colors(std::move(colors));
+	}
+	std::unordered_set<player_id_t> neutral;
+	if (this->start_count > 0) {
+		neutral.insert(static_cast<player_id_t>(this->start_count));
+	}
+	vision->start(this->state, mode, neutral, start_time);
+}
+// ---- end vision (XR fork) ----
 
 void Game::attach_renderer(const std::shared_ptr<renderer::RenderFactory> &render_factory) {
 	this->universe->attach_renderer(render_factory);
@@ -349,6 +414,8 @@ bool Game::generate_random_map(const std::shared_ptr<openage::event::EventLoop> 
 	}
 
 	auto generated = generate_map(settings);
+	// vision (XR fork): minimap ground colours of the generated terrain
+	this->state->get_vision()->set_terrain_colors(vision::terrain_colors(generated));
 	auto t1 = std::chrono::steady_clock::now();
 
 	// terrain objects and texture paths per kind

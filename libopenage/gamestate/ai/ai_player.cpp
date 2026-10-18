@@ -31,6 +31,7 @@
 #include "gamestate/map.h"
 #include "gamestate/player.h"
 #include "gamestate/production_math.h"
+#include "gamestate/vision/vision_state.h"
 
 
 namespace openage::gamestate::ai {
@@ -196,6 +197,7 @@ void AiPlayer::think(const std::shared_ptr<GameState> &state, const time::time_t
 AiPlayer::World AiPlayer::observe(const std::shared_ptr<GameState> &state, const time::time_t &time) {
 	World world;
 	auto combat = state->get_combat();
+	auto vision = state->get_vision();
 	for (const auto &[id, entity] : state->get_game_entities()) {
 		auto stats = combat->get_stats(id);
 		if (not stats or combat->is_dead(id) or not stats->attackable()
@@ -227,6 +229,10 @@ AiPlayer::World AiPlayer::observe(const std::shared_ptr<GameState> &state, const
 		seen.town_center = stats->building and stats->name == "TownCenter";
 
 		if (owner != this->player) {
+			// vision (XR fork): enemies in sight and remembered buildings (start town centres) only
+			if (vision and not vision->knows(this->player, id, seen.ne, seen.se, seen.building ? seen.radius : 0.0, seen.building)) {
+				continue;
+			}
 			world.enemies.push_back(std::move(seen));
 		}
 		else if (seen.building) {

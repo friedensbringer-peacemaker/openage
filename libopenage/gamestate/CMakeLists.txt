@@ -32,3 +32,5 @@ add_subdirectory(component/)
 add_subdirectory(demo/)
 add_subdirectory(event/)
 add_subdirectory(system/)
+# vision (XR fork): fog of war, minimap view
+add_subdirectory(vision/)

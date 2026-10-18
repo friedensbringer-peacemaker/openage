@@ -4,14 +4,17 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "engine/hud_info.h"
 #include "gamestate/map_settings.h"
 #include "gamestate/save_format.h"
+#include "gamestate/vision/vision_snapshot.h"
 #include "ui/agesxr/aoe_feed.h"
 #include "ui/agesxr/xr_aoe_ui.h"
+#include "ui/agesxr/xr_minimap.h"
 #include "ui/game_ui_controller.h"
 #include "ui/ui_controller.h"
 
@@ -27,6 +30,12 @@ struct AoeHooks {
 	std::function<bool(float &cx, float &cy, float &w, float &h)> camera_view{};
 	/// select exactly these entities (portrait of a multiple selection)
 	std::function<void(const std::vector<uint64_t> &ids)> select{};
+	/// minimap (XR fork, gamestate/vision): what the controlled player sees, nullptr before the first tick
+	std::function<std::shared_ptr<const gamestate::vision::Snapshot>()> minimap{};
+	/// jump the camera to a point given as map fractions (u along se, v = 1 - ne fraction, as camera_view)
+	std::function<void(float u, float v)> minimap_jump{};
+	/// right click on the minimap: the selection moves there (attacks an enemy, gathers a resource there)
+	std::function<void(float u, float v)> minimap_command{};
 	// save games and the orders use UiHooks (save_slot, load_slot, list_slots, focus_entity)
 };
 
@@ -103,6 +112,11 @@ public:
 	bool user_paused() const override;
 	int camera_bottom_px() const override;
 	UiFeedbackState feedback() const override;
+	const uint32_t *minimap_pixels(int &x0, int &y0, int &w, int &h) const override;
+	uint32_t minimap_version() const override;
+
+	/// minimap image refresh (s): with the engine poll, 4 times a second
+	static constexpr double MINIMAP_SECONDS = POLL_SECONDS;
 
 	/// the interface (layout for replays and tests)
 	const agesxr::AoeUi &ui() const {
@@ -124,6 +138,7 @@ private:
 	void save_slot(int slot, const char *why);
 	void load_slot(int slot, const char *why);
 	void run_demo(double now);
+	void update_minimap(double now);
 
 	gamestate::MapSettings map;
 	UiHooks hooks;
@@ -167,6 +182,37 @@ private:
 		bool done = false;
 	};
 	std::vector<DemoStep> demo{};
+	// minimap (XR fork, gamestate/vision): image under the bar, drag, signal
+	bool minimap_live = false;
+	bool minimap_drag = false;
+	double minimap_drag_at = 0.0;
+	bool minimap_force = false;
+	int minimap_mode = agesxr::kMinimapNormal;
+	double minimap_at = -1.0;
+	uint64_t minimap_snapshot = 0;
+	std::vector<uint32_t> minimap_image{};
+	std::vector<agesxr::MinimapDot> minimap_dots{};
+	// ground x fog layer, kept while the tile states do not change
+	std::vector<uint32_t> minimap_base{};
+	uint64_t minimap_base_tiles = 0;
+	const void *minimap_base_terrain = nullptr;
+	const void *minimap_base_static = nullptr;
+	int minimap_base_w = 0;
+	int minimap_base_h = 0;
+	long minimap_base_count = 0;
+	int minimap_x0 = 0;
+	int minimap_y0 = 0;
+	int minimap_w = 0;
+	int minimap_h = 0;
+	uint32_t minimap_seq = 0;
+	float ping_u = 0.0f;
+	float ping_v = 0.0f;
+	double ping_at = -1.0;
+	// raster statistics (log every 10 s)
+	double minimap_ms_sum = 0.0;
+	double minimap_ms_max = 0.0;
+	long minimap_count = 0;
+	double minimap_log_at = 0.0;
 };
 
 } // namespace openage::ui

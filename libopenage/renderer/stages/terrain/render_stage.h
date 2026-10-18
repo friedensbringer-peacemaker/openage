@@ -2,8 +2,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <shared_mutex>
+#include <vector>
+
+#include <eigen3/Eigen/Dense>
 
 #include "coord/scene.h"
 #include "util/path.h"
@@ -91,6 +95,19 @@ public:
 	 */
 	void resize(size_t width, size_t height);
 
+	/**
+	 * Fog of war (XR fork, gamestate/vision): darken explored tiles, black for
+	 * unexplored ones, soft edges (the shader blends the tile states). Call in
+	 * the render thread; only a new version uploads the texture.
+	 *
+	 * @param tiles Tile states (0 unexplored, 1 explored, 2 visible), index
+	 *              ne + se * ne_size; nullptr = everything visible (no fog pass).
+	 * @param ne_size Tiles along ne.
+	 * @param se_size Tiles along se.
+	 * @param version Changes whenever the tile states change.
+	 */
+	void set_fog(const std::vector<uint8_t> *tiles, size_t ne_size, size_t se_size, uint64_t version);
+
 private:
 	/**
 	 * Create the render pass for terrains.
@@ -150,6 +167,17 @@ private:
 	 * Depth texture.
 	 */
 	std::shared_ptr<renderer::Texture2d> depth_texture;
+
+	/**
+	 * Fog of war (XR fork): one texel per tile, parameters (1 / ne_size, 1 / se_size, on).
+	 */
+	std::shared_ptr<renderer::Texture2d> fog_texture;
+	Eigen::Vector3f fog_params{1.0f, 1.0f, 0.0f};
+	size_t fog_ne = 0;
+	size_t fog_se = 0;
+	uint64_t fog_version = 0;
+	/// fog uniforms of all meshes must be set again (new texture or parameters)
+	bool fog_dirty = true;
 
 	/**
 	 * Mutex for protecting threaded access.

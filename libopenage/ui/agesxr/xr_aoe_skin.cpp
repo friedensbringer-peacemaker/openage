@@ -254,7 +254,7 @@ void VectorSkin::drawHoverFrame(Canvas& c, const AoeRect& r, float s) {
 }
 
 void VectorSkin::drawMinimap(Canvas& c, int cx, int cy, int w, int h, int biome, float camX, float camY, float camW,
-                             float camH, float s) {
+                             float camH, float s, bool live) {
     const float hw = static_cast<float>(w) * 0.5f, hh = static_cast<float>(h) * 0.5f;
     const float fcx = static_cast<float>(cx), fcy = static_cast<float>(cy);
     // Raute (|dx|/hw + |dy|/hh ≤ 1) als zwischengespeicherte Maske: Goldrand, dann Landschaftsfarbe
@@ -262,8 +262,11 @@ void VectorSkin::drawMinimap(Canvas& c, int cx, int cy, int w, int h, int biome,
     const Mask& outer = diamondMask(w, h, -gold);
     c.blendMask(cx + outer.x0, cy + outer.y0, outer.w, outer.h, outer.cov.data(), kGold);
     const Mask& inner = diamondMask(w, h, 0);
-    c.blendMask(cx + inner.x0, cy + inner.y0, inner.w, inner.h, inner.cov.data(), biomeColor(biome));
-    // Kameratrapez: Kartenanteile (u entlang NE-Achse, v entlang SE-Achse) auf die Raute abgebildet
+    if (live)
+        c.punchMask(cx + inner.x0, cy + inner.y0, inner.w, inner.h, inner.cov.data());  // Minimap-Textur darunter
+    else
+        c.blendMask(cx + inner.x0, cy + inner.y0, inner.w, inner.h, inner.cov.data(), biomeColor(biome));
+    // Kameratrapez: Kartenanteile (u entlang SE, v = 1 − NE-Anteil, xr_minimap.h) auf die Raute abgebildet
     auto toPixel = [&](float u, float v, float& x, float& y) {
         x = fcx + (u - v) * hw;
         y = fcy + (u + v - 1.0f) * hh;

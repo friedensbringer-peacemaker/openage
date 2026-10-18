@@ -171,6 +171,54 @@ struct AiSettings {
 
 // ---- end ai (XR fork) ----
 
+// ---- vision (XR fork) ----
+
+/**
+ * What the players see of a random map at the start (option "Sicht" of a new
+ * map, gamestate/vision/vision_state.h).
+ */
+enum class vision_mode_t : uint8_t {
+	/// everything unexplored (black) except what the start units and buildings see
+	NORMAL,
+	/// the whole terrain explored (fog), foreign units only in sight
+	EXPLORED,
+	/// everything visible, no fog (the fixed test map always uses this)
+	ALL,
+	COUNT,
+};
+
+/**
+ * Short name of a vision mode ("normal", "explored", "all").
+ */
+inline const char *vision_mode_name(vision_mode_t mode) {
+	switch (mode) {
+	case vision_mode_t::EXPLORED:
+		return "explored";
+	case vision_mode_t::ALL:
+		return "all";
+	case vision_mode_t::NORMAL:
+	default:
+		return "normal";
+	}
+}
+
+/**
+ * Vision mode from its short name (vision_mode_name).
+ *
+ * @return false for an unknown name (mode unchanged).
+ */
+inline bool vision_mode_parse(std::string_view name, vision_mode_t &mode) {
+	for (auto candidate : {vision_mode_t::NORMAL, vision_mode_t::EXPLORED, vision_mode_t::ALL}) {
+		if (name == vision_mode_name(candidate)) {
+			mode = candidate;
+			return true;
+		}
+	}
+	return false;
+}
+
+// ---- end vision (XR fork) ----
+
 /**
  * Settings for the map of a new game.
  */
@@ -200,6 +248,8 @@ struct MapSettings {
 	/// or "random"); missing entries are random. Empty: no civilisation (generic data, as
 	/// before W1 – checks and the test map).
 	std::vector<std::string> civs{};
+	/// XR fork (vision): fog of war of a random map; the test map is always ALL
+	vision_mode_t vision = vision_mode_t::NORMAL;
 	/// XR fork (save games): restore this save file after the map was generated
 	/// (gamestate/save_game.h); the other fields must be the map settings of the
 	/// file. Empty: a new game.

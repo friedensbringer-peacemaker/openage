@@ -73,6 +73,11 @@ void WorldRenderStage::update() {
 		if (not obj->is_removed()) {
 			return false;
 		}
+		// XR fork (vision): a gone building/resource stays as the last seen stand-in in the fog
+		if (this->display and this->display(obj->get_id()) == 1) {
+			return false;
+		}
+		this->display_applied.erase(obj->get_id());
 		const auto &uniforms = obj->get_uniforms();
 		this->render_pass->remove_renderables([&uniforms](const Renderable &renderable) {
 			return std::find(uniforms.begin(), uniforms.end(), renderable.uniform) != uniforms.end();
@@ -97,13 +102,22 @@ void WorldRenderStage::update() {
 		    and not obj->is_visible(camera_frustum, current_time)) {
 			continue;
 		}
+		// XR fork (vision): entities hidden by the fog of war are not drawn either
+		const bool hidden = this->display and this->display(obj->get_id()) == 2;
 		if (WorldRenderStage::ENABLE_SCREEN_CULLING) {
 			auto bounds = obj->get_screen_bounds(current_time, view_proj, inv_zoom, inv_viewport);
 			bool on_screen = not bounds
 			                 or (bounds->x() < 1.1f and bounds->z() > -1.1f and bounds->y() < 1.1f and bounds->w() > -1.1f);
+			on_screen = on_screen and not hidden;
 			*obj->get_visible_flag() = on_screen;
 			if (not on_screen and not obj->requires_renderable()) {
 				// renderables exist and are skipped; their uniforms are updated when visible again
+				continue;
+			}
+		}
+		else {
+			*obj->get_visible_flag() = not hidden;
+			if (hidden and not obj->requires_renderable()) {
 				continue;
 			}
 		}
@@ -153,6 +167,23 @@ void WorldRenderStage::update() {
 			}
 		}
 		obj->update_uniforms(current_time);
+		// XR fork (vision): darkened in the fog (last seen buildings, resources on explored land)
+		const uint8_t shown = this->display ? this->display(obj->get_id()) : 0;
+		const uint8_t tint = shown == 1 ? 1 : 0;
+		auto applied = this->display_applied.find(obj->get_id());
+		const uint8_t before = applied == this->display_applied.end() ? 0 : applied->second;
+		if (tint != before and not obj->get_uniforms().empty()) {
+			const float f = tint == 1 ? FOG_TINT : 1.0f;
+			for (const auto &unif : obj->get_uniforms()) {
+				unif->update("u_tint", Eigen::Vector4f{f, f, f, 1.0f});
+			}
+			if (tint == 0) {
+				this->display_applied.erase(obj->get_id());
+			}
+			else {
+				this->display_applied[obj->get_id()] = tint;
+			}
+		}
 	}
 	this->drawn_objects = drawn;
 
@@ -162,6 +193,11 @@ void WorldRenderStage::update() {
 			unif->update("u_tint", this->ghost_tint);
 		}
 	}
+}
+
+void WorldRenderStage::set_visibility(std::function<uint8_t(uint32_t)> display) {
+	std::unique_lock lock{this->mutex};
+	this->display = std::move(display);
 }
 
 void WorldRenderStage::set_ghost(const std::string &animation_path,
@@ -207,7 +243,8 @@ WorldRenderStage::get_ground_positions(const std::vector<uint32_t> &ids) {
 	std::unique_lock lock{this->mutex};
 	auto current_time = this->clock->get_real_time();
 	for (auto &obj : this->render_objects) {
-		if (obj->is_removed() or std::find(ids.begin(), ids.end(), obj->get_id()) == ids.end()) {
+		if (obj->is_removed() or std::find(ids.begin(), ids.end(), obj->get_id()) == ids.end()
+		    or (this->display and this->display(obj->get_id()) == 2)) {
 			continue;
 		}
 		if (auto pos = obj->get_world_position(current_time)) {
@@ -258,7 +295,8 @@ std::vector<ScreenBox> WorldRenderStage::get_screen_boxes(const std::vector<uint
 	Eigen::Vector2f inv_viewport{1.0f / static_cast<float>(viewport[0]), 1.0f / static_cast<float>(viewport[1])};
 
 	for (auto &obj : this->render_objects) {
-		if (obj->is_removed() or std::find(ids.begin(), ids.end(), obj->get_id()) == ids.end()) {
+		if (obj->is_removed() or std::find(ids.begin(), ids.end(), obj->get_id()) == ids.end()
+		    or (this->display and this->display(obj->get_id()) == 2)) {
 			continue;
 		}
 		auto bounds = obj->get_screen_bounds(current_time, view_proj, inv_zoom, inv_viewport);

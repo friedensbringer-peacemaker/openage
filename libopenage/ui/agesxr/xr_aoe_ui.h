@@ -44,7 +44,7 @@ public:
         kMenuClosed,       // „Schließen“ (Menü zu, Nutzerpause bleibt)
         kSpeedChanged,     // menu().speed
         kSettingChanged,   // Beschriftung/Hotkeys/Meldungen
-        kNewMap,           // „Karte starten“ mit biome/size/opponent/seed/civ/aiCiv
+        kNewMap,           // „Karte starten“ mit biome/size/opponent/seed/civ/aiCiv/vision
         kSurrenderArmed,   // erster Klick auf „Partie aufgeben“ (Doppelpuls)
         kSurrender,        // zweiter Klick innerhalb der Frist
         kSlotsShown,       // Seite Speichern/Laden geöffnet: Aufrufer füllt menu().slots
@@ -76,8 +76,10 @@ public:
     // Zeilen des Spielmenüs je Seite (dialogRowRect(index))
     enum MainRow { kMainResume = 0, kMainSave, kMainSettings, kMainNewMap, kMainSurrender, kMainClose, kMainCount };
     enum SettingsRow { kSetSpeed = 0, kSetLabels, kSetHotkeys, kSetMessages, kSetBack, kSetCount };
-    // W1: Kultur des Spielers und des Gegners (xr_civs.h)
-    enum NewMapRow { kNewBiome = 0, kNewSize, kNewOpponent, kNewSeed, kNewCiv, kNewAiCiv, kNewStart, kNewBack, kNewCount };
+    // W1: Kultur des Spielers und des Gegners (xr_civs.h), W2: Sicht
+    enum NewMapRow {
+        kNewBiome = 0, kNewSize, kNewOpponent, kNewSeed, kNewCiv, kNewAiCiv, kNewVision, kNewStart, kNewBack, kNewCount
+    };
     static constexpr int kBoardButtons = 2;  // Neue Karte ›, Schließen
 
     AoeUi();
@@ -152,6 +154,10 @@ public:
     Rect selectionRect() const;
     Rect minimapFieldRect() const;
     Rect minimapRect() const;           // Hülle der Raute
+    // Bild der echten Minimap (xr_minimap.h rasterMinimap): Ursprung und Größe (w + 1) × (h + 1) der Raute
+    Rect minimapImageRect() const;
+    // Kartenanteile (u, v) eines Pixels in der Raute (Klick, Ziehen, Rechtsklick); false = außerhalb
+    bool minimapFrac(int x, int y, float& u, float& v) const;
     Rect gridRect(int cell) const;      // Knopf 76 × 76
     Rect gridHitRect(int cell) const;   // Trefferzone 82 × 82 (lückenlos)
     Rect portraitRect() const;

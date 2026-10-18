@@ -28,6 +28,7 @@
 #include "gamestate/map.h"
 #include "gamestate/map_settings.h"
 #include "gamestate/simulation.h"
+#include "gamestate/vision/vision_state.h"
 #include "input/controller/camera/binding_context.h"
 #include "input/controller/camera/controller.h"
 #include "input/controller/game/binding_context.h"
@@ -238,6 +239,19 @@ void Presenter::init_ui(const renderer::window_settings &window_settings) {
 				production->set_selection(sel);
 			}
 		};
+		// minimap (XR fork, gamestate/vision): view of the controlled player, camera jump, commands
+		aoe.minimap = [this]() -> std::shared_ptr<const gamestate::vision::Snapshot> {
+			if (not this->simulation) {
+				return nullptr;
+			}
+			auto game = this->simulation->get_game();
+			if (not game or not game->get_state() or not game->get_state()->get_vision()) {
+				return nullptr;
+			}
+			return game->get_state()->get_vision()->snapshot();
+		};
+		aoe.minimap_jump = [this](float u, float v) { this->minimap_jump(u, v); };
+		aoe.minimap_command = [this](float u, float v) { this->minimap_command(u, v); };
 		this->ui_controller = std::make_shared<ui::AoeUiController>(map, std::move(hooks), std::move(aoe),
 		                                                            window_settings.ui_demo, window_settings.ui_quest);
 	}
@@ -304,6 +318,97 @@ void Presenter::send_ui_command(ui::ui_command_t type, int x, int y) {
 		this->time_loop->get_clock()->get_time() + time::time_t::from_double(0.001),
 		params);
 }
+
+// ---- vision and minimap (XR fork) ----
+
+void Presenter::apply_vision() {
+	std::shared_ptr<gamestate::vision::VisionState> vision;
+	if (this->simulation) {
+		if (auto game = this->simulation->get_game()) {
+			if (auto state = game->get_state()) {
+				vision = state->get_vision();
+			}
+		}
+	}
+	if (vision) {
+		if (auto controller = this->controller_slot->get()) {
+			vision->set_view_player(static_cast<gamestate::player_id_t>(controller->get_controlled()));
+		}
+	}
+	auto snapshot = vision ? vision->snapshot() : nullptr;
+	if (snapshot == this->vision_shown) {
+		return;
+	}
+	this->vision_shown = snapshot;
+	if (not snapshot) {
+		this->terrain_renderer->set_fog(nullptr, 0, 0, 0);
+		this->world_renderer->set_visibility({});
+		return;
+	}
+	this->terrain_renderer->set_fog(snapshot->tiles.get(), snapshot->ne_size, snapshot->se_size, snapshot->tiles_version);
+	if (snapshot->all_normal()) {
+		this->world_renderer->set_visibility({});
+	}
+	else {
+		this->world_renderer->set_visibility([snapshot](uint32_t id) { return snapshot->display_of(id); });
+	}
+}
+
+void Presenter::minimap_jump(float u, float v) {
+	if (not this->simulation or not this->camera) {
+		return;
+	}
+	auto game = this->simulation->get_game();
+	if (not game or not game->get_state() or not game->get_state()->get_map()) {
+		return;
+	}
+	const auto &size = game->get_state()->get_map()->get_size();
+	// map fractions of the minimap: u along se, v = 1 - ne fraction (see the camera view hook)
+	const double se = std::clamp(static_cast<double>(u), 0.0, 1.0) * static_cast<double>(size[1]);
+	const double ne = (1.0 - std::clamp(static_cast<double>(v), 0.0, 1.0)) * static_cast<double>(size[0]);
+	this->camera->look_at_coord(coord::scene3{ne, se, 0});
+}
+
+void Presenter::minimap_command(float u, float v) {
+	auto controller = this->controller_slot->get();
+	if (not this->simulation or not controller or not this->time_loop) {
+		return;
+	}
+	auto game = this->simulation->get_game();
+	if (not game or not game->get_state() or not game->get_state()->get_map()) {
+		return;
+	}
+	if (auto combat = game->get_state()->get_combat()) {
+		controller->prune_selected([&combat](gamestate::entity_id_t id) {
+			return combat->was_removed(id);
+		});
+	}
+	if (controller->get_selected().empty()) {
+		return;
+	}
+	const auto &size = game->get_state()->get_map()->get_size();
+	const double se = std::clamp(static_cast<double>(u), 0.0, 1.0) * static_cast<double>(size[1]);
+	const double ne = (1.0 - std::clamp(static_cast<double>(v), 0.0, 1.0)) * static_cast<double>(size[0]);
+	coord::phys3 target{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{0.0}};
+	log::log(INFO << "Input: minimap command at tile (" << ne << ", " << se << ") for "
+	              << controller->get_selected().size() << " selected");
+	// like a right click on the ground there: an enemy at the point is attacked (picked on
+	// the ground, no camera), a resource gathered, otherwise the units move
+	event::EventHandler::param_map::map_t params{
+		{"type", gamestate::component::command::command_t::MOVE},
+		{"target", target},
+		{"entity_ids", controller->get_selected_copy()},
+		{"controlled", controller->get_controlled()},
+	};
+	this->simulation->get_event_loop()->create_event(
+		"game.send_command",
+		this->simulation->get_commander(),
+		game->get_state(),
+		this->time_loop->get_clock()->get_time() + time::time_t::from_double(0.001),
+		params);
+}
+
+// ---- end vision and minimap (XR fork) ----
 
 void Presenter::run(const renderer::window_settings window_settings) {
 	log::log(INFO << "Presenter: Launching subsystems...");
@@ -1005,6 +1110,8 @@ void Presenter::render() {
 
 	// TODO: Pass current time to update() instead of fetching it in renderer
 	this->camera_manager->update();
+	// XR fork (vision): fog texture and hidden entities before the stages update
+	this->apply_vision();
 	this->terrain_renderer->update();
 	this->world_renderer->update();
 	this->update_selection_markers();

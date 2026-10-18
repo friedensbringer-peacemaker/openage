@@ -24,11 +24,15 @@
  *  T5. Civilisations: Britons (player 0) and Japanese (player 1): civ recorded,
  *      castle of the Britons trains longbowmen (game_setup patch), the town
  *      centres show different architecture, a fixed and a random choice.
- *  T6. Save game version 2 with civilisation, technologies and a queued
+ *  T6. Save game (version 3) with civilisation, technologies and a queued
  *      research; loading applies them again (villager health, age); a version 1
  *      file still loads.
  *  T7. Computer opponent: researches Loom and the Feudal Age (builds the second
  *      building it needs), then the Wheelbarrow.
+ *  T8. W1 + W2 together (fog of war "normal"): start area visible, enemy town
+ *      centre in the fog, civilisation patches work; Town Watch raises the line
+ *      of sight and the vision grid follows; save -> load -> save keeps
+ *      civilisation, techs, vision mode and explored tiles; version 2 loads.
  *
  * Prints "tech game check ok" and exits with 0 if everything passes.
  */
@@ -67,6 +71,7 @@
 #include "gamestate/save_game.h"
 #include "gamestate/tech.h"
 #include "gamestate/terrain_factory.h"
+#include "gamestate/vision/vision_state.h"
 #include "log/log.h"
 #include "util/fslike/directory.h"
 #include "util/path.h"
@@ -396,13 +401,14 @@ void check_research(const Options &opt) {
 	w.advance(1.0);
 	auto data = save::capture(w.state, base, w.game->get_generated_entity_range(), w.now, "tech check");
 	const auto text = save::serialize(data);
-	check(text.find("version = 2") != std::string::npos and text.find("civ = Britons") != std::string::npos
+	check(text.find("version = 3") != std::string::npos and text.find("vision = ") != std::string::npos
+	          and text.find("civ = Britons") != std::string::npos
 	          and text.find("tech = hd_base.data.tech.generic.loom.loom.Loom") != std::string::npos
 	          and text.find(" research\n") != std::string::npos and text.find("civs = Britons Franks") != std::string::npos,
 	      "save text with civilisation, techs and the queued research");
 	save::SaveData parsed;
 	std::string error;
-	check(save::parse(text, parsed, error), "parse version 2 " + error);
+	check(save::parse(text, parsed, error), "parse version 3 " + error);
 	MapSettings loaded_map = parsed.map;
 	World l{opt, loaded_map};
 	auto result = save::restore(parsed, l.state, l.loop, l.factory, l.production, l.game->get_generated_entity_range(), l.now);
@@ -422,11 +428,100 @@ void check_research(const Options &opt) {
 		}
 	}
 	check(queued, "queued research survives loading");
-	// version 1: no civilisation and techs, still loads
+	// version 1: no civilisation and techs, still loads (version 2: the same without vision)
 	std::string v1 = text;
-	v1.replace(v1.find("version = 2"), 11, "version = 1");
+	v1.replace(v1.find("version = 3"), 11, "version = 1");
 	save::SaveData old;
 	check(save::parse(v1, old, error), "version 1 file parses");
+}
+
+// T8 (W1 + W2 together): civilisation patches under the fog of war, a sight technology widens the
+// fog, and a save game keeps both (civilisation, technologies, vision mode, explored tiles)
+void check_civ_vision(const Options &opt) {
+	std::cout << "== T8 Kultur + Sicht" << std::endl;
+	MapSettings base;
+	base.ai.mode = ai_mode_t::OFF;
+	base.civs = {"Britons", "Franks"};
+	base.vision = vision_mode_t::NORMAL;
+	World w{opt, base};
+	w.advance(0.5);
+	auto vision = w.state->get_vision();
+	check(vision and vision->is_started() and vision->get_mode() == vision_mode_t::NORMAL, "fog of war started (normal)");
+	if (not vision) {
+		return;
+	}
+	const auto &grid = vision->get_grid();
+	auto tc = w.of(0, "TownCenter").front();
+	const auto p = w.position(tc);
+	const auto enemy = w.position(w.of(1, "TownCenter").front());
+	check(vision->sees(0, p.ne.to_double(), p.se.to_double(), 0.0), "start area visible (own town centre)");
+	check(not vision->sees(0, enemy.ne.to_double(), enemy.se.to_double(), 0.0), "enemy town centre in the fog");
+	const size_t visible0 = grid.visible_count(0);
+	const size_t explored0 = grid.explored_count(0);
+	std::cout << "  visible " << visible0 << ", explored " << explored0 << " of " << grid.tiles() << " tiles" << std::endl;
+	check(visible0 > 0 and explored0 >= visible0 and explored0 < grid.tiles() / 2, "only the start area is explored");
+	// civilisation patches work with the fog: tech tree and unique unit as in T5
+	check(w.techs()->find(0) and w.techs()->find(0)->civ == "Britons" and w.techs()->find(1)
+	          and w.techs()->find(1)->civ == "Franks",
+	      "civilisations Britons/Franks with vision");
+	bool thumb = false;
+	for (const auto &r : w.techs()->researchables(w.state, 0, ge("archery_range", "ArcheryRange"))) {
+		thumb = thumb or r.name == "ThumbRing";
+	}
+	check(not thumb, "Britons tech tree (no Thumb Ring) with vision");
+	// a technology that patches the line of sight reaches the vision grid (refresh -> restamp)
+	const double los_before = w.state->get_combat()->get_stats(tc->get_id())->line_of_sight;
+	w.production->grant_research(0, "FeudalAge");
+	w.advance(0.5);
+	w.production->grant_research(0, "TownWatch");
+	w.advance(1.0);
+	const double los_after = w.state->get_combat()->get_stats(tc->get_id())->line_of_sight;
+	std::cout << "  town centre line of sight " << los_before << " -> " << los_after << ", visible tiles "
+	          << visible0 << " -> " << grid.visible_count(0) << std::endl;
+	check(los_after > los_before, "Town Watch raises the line of sight of the town centre");
+	check(grid.visible_count(0) > visible0 and grid.explored_count(0) > explored0, "the wider sight explores more tiles");
+	// save -> load -> save: civilisation, techs, vision mode and explored tiles survive
+	auto data = save::capture(w.state, base, w.game->get_generated_entity_range(), w.now, "civ vision check");
+	const auto text = save::serialize(data);
+	check(text.find("vision = normal") != std::string::npos and text.find("explored = ") != std::string::npos
+	          and text.find("civ = Britons") != std::string::npos
+	          and text.find("TownWatch
+") != std::string::npos,
+	      "save text with vision, explored tiles, civilisation and Town Watch");
+	save::SaveData parsed;
+	std::string error;
+	check(save::parse(text, parsed, error) and parsed.map.vision == vision_mode_t::NORMAL, "parse " + error);
+	MapSettings loaded_map = parsed.map;
+	World l{opt, loaded_map};
+	auto result = save::restore(parsed, l.state, l.loop, l.factory, l.production, l.game->get_generated_entity_range(), l.now);
+	l.advance(0.5);
+	check(result.ok, "restore " + result.error);
+	auto lvision = l.state->get_vision();
+	check(lvision and lvision->get_mode() == vision_mode_t::NORMAL, "loaded: fog of war normal");
+	if (not lvision) {
+		return;
+	}
+	check(l.techs()->find(0) and l.techs()->find(0)->civ == "Britons" and l.techs()->find(0)->age == 2,
+	      "loaded: Britons, Feudal Age");
+	const auto ltc = l.of(0, "TownCenter");
+	check(not ltc.empty() and l.state->get_combat()->get_stats(ltc.front()->get_id())->line_of_sight == los_after,
+	      "loaded: town centre keeps the line of sight of Town Watch");
+	check(lvision->get_grid().explored_count(0) >= grid.explored_count(0), "loaded: explored tiles restored");
+	check(lvision->sees(0, p.ne.to_double(), p.se.to_double(), 0.0)
+	          and not lvision->sees(0, enemy.ne.to_double(), enemy.se.to_double(), 0.0),
+	      "loaded: start area visible, enemy town centre still in the fog");
+	auto again = save::capture(l.state, loaded_map, l.game->get_generated_entity_range(), l.now, "civ vision check");
+	check(again.players.size() == data.players.size() and again.players[0].techs == data.players[0].techs
+	          and again.players[0].civ == "Britons" and again.map.vision == vision_mode_t::NORMAL
+	          and again.players[0].explored == data.players[0].explored,
+	      "civilisation, techs, vision and explored tiles survive save -> load -> save");
+	// version 2 (W1, before the vision fields) still loads: vision normal, nothing explored
+	std::string v2 = text;
+	v2.replace(v2.find("version = 3"), 11, "version = 2");
+	v2.replace(v2.find("vision = normal\n"), 16, "");
+	save::SaveData old;
+	check(save::parse(v2, old, error) and old.map.vision == vision_mode_t::NORMAL and old.players.at(0).civ == "Britons",
+	      "version 2 file parses (civilisation kept, vision normal)");
 }
 
 // T7: the computer opponent researches
@@ -507,6 +602,7 @@ int main(int argc, char **argv) {
 	log::set_level(log::level::info);
 	try {
 		check_research(opt);
+		check_civ_vision(opt);
 		check_ai(opt);
 	}
 	catch (std::exception &err) {

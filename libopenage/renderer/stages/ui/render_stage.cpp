@@ -82,6 +82,10 @@ void UiRenderStage::initialize_render_pass(size_t width, size_t height, const ut
 	this->render_pass = this->renderer->add_render_pass({}, fbo);
 	// the overlay (menus) lies over the HUD bar
 	this->render_pass->add_renderables(Renderable{this->hud_uniforms, this->quad, true, false});
+	// XR fork: the minimap image lies under the overlay (its diamond is transparent there)
+	this->minimap_texture = this->renderer->add_texture(resources::Texture2dInfo(16, 16, resources::pixel_format::rgba8));
+	this->minimap_uniforms = this->shader->new_uniform_input("tex", this->minimap_texture, "rect", Eigen::Vector4f{-1.0f, -1.0f, -1.0f, -1.0f});
+	this->render_pass->add_renderables(Renderable{this->minimap_uniforms, this->quad, true, false, this->minimap_visible});
 	this->render_pass->add_renderables(Renderable{this->overlay_uniforms, this->quad, true, false});
 	this->update_rects();
 }
@@ -123,6 +127,7 @@ void UiRenderStage::resize(size_t width, size_t height) {
 	auto fbo = this->renderer->create_texture_target({this->output_texture});
 	this->render_pass->set_target(fbo);
 	this->update_rects();
+	this->minimap_rect[2] = 0;  // the minimap rectangle depends on the window size
 }
 
 void UiRenderStage::upload_rows(const std::shared_ptr<Texture2d> &texture,
@@ -145,6 +150,39 @@ void UiRenderStage::upload_rows(const std::shared_ptr<Texture2d> &texture,
 	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+void UiRenderStage::update_minimap() {
+	int x0 = 0, y0 = 0, w = 0, h = 0;
+	const uint32_t *pixels = this->controller->minimap_pixels(x0, y0, w, h);
+	*this->minimap_visible = pixels != nullptr and w > 0 and h > 0;
+	if (not *this->minimap_visible) {
+		return;
+	}
+	const auto size = this->minimap_texture->get_info().get_size();
+	if (static_cast<int>(size.first) != w or static_cast<int>(size.second) != h) {
+		this->minimap_texture = this->renderer->add_texture(resources::Texture2dInfo(w, h, resources::pixel_format::rgba8));
+		this->minimap_uniforms->update("tex", this->minimap_texture);
+		this->minimap_shown = 0;
+	}
+	if (this->controller->minimap_version() != this->minimap_shown) {
+		this->upload_rows(this->minimap_texture, pixels, w, 0, h);
+		this->minimap_shown = this->controller->minimap_version();
+	}
+	if (x0 != this->minimap_rect[0] or y0 != this->minimap_rect[1] or w != this->minimap_rect[2]
+	    or h != this->minimap_rect[3]) {
+		this->minimap_rect[0] = x0;
+		this->minimap_rect[1] = y0;
+		this->minimap_rect[2] = w;
+		this->minimap_rect[3] = h;
+		const float fw = static_cast<float>(std::max<size_t>(this->width, 1));
+		const float fh = static_cast<float>(std::max<size_t>(this->height, 1));
+		// window pixels (origin top left) -> NDC: left, bottom, right, top
+		this->minimap_uniforms->update("rect", Eigen::Vector4f{2.0f * static_cast<float>(x0) / fw - 1.0f,
+		                                                       1.0f - 2.0f * static_cast<float>(y0 + h) / fh,
+		                                                       2.0f * static_cast<float>(x0 + w) / fw - 1.0f,
+		                                                       1.0f - 2.0f * static_cast<float>(y0) / fh});
+	}
+}
+
 void UiRenderStage::update(double now) {
 	this->controller->update(now);
 
@@ -162,6 +200,8 @@ void UiRenderStage::update(double now) {
 		}
 		this->hud_shown = this->controller->hud_version();
 	}
+
+	this->update_minimap();
 
 	const uint32_t *overlay_pixels = this->controller->overlay_pixels();
 	const int overlay_w = this->controller->overlay_width();

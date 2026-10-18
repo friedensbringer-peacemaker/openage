@@ -220,6 +220,9 @@ int main(int argc, char **argv) {
 		settings.seed = seed;
 		settings.size = size;
 		settings.skirmish = true;
+		// vision (XR fork): this check commands units against enemies they may not see; the fog
+		// rules have their own checks (openage-vision-check, 93-vision-check.sh)
+		settings.vision = vision_mode_t::ALL;
 		// ai (XR fork): this check commands both players itself
 		settings.ai.mode = ai_mode_t::OFF;
 		w.game = std::make_shared<Game>(w.loop, mod_manager, entity_factory, terrain_factory, settings);

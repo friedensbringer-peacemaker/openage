@@ -44,6 +44,9 @@ struct HudInfo;
 
 namespace gamestate {
 struct MapSettings;
+namespace vision {
+struct Snapshot;
+}
 }
 
 namespace ui {
@@ -424,6 +427,21 @@ protected:
 	 * Apply a pending focus request (presenter thread, once per frame).
 	 */
 	void apply_focus();
+
+	/**
+	 * Fog of war (XR fork, gamestate/vision): hand the latest view of the
+	 * controlled player to the terrain (fog texture) and world (hidden/darkened
+	 * entities) stages; presenter thread, once per frame.
+	 */
+	void apply_vision();
+	std::shared_ptr<const gamestate::vision::Snapshot> vision_shown;
+
+	/**
+	 * Minimap (XR fork): jump the camera to a point of the map, give the
+	 * selection a move/attack command there (map fractions as in AoeHooks).
+	 */
+	void minimap_jump(float u, float v);
+	void minimap_command(float u, float v);
 	std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now();
 
 	/**

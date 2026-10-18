@@ -36,6 +36,10 @@ namespace tech {
 class TechState;
 }
 
+namespace vision {
+class VisionState;
+}
+
 /**
  * State of the game.
  *
@@ -85,6 +89,11 @@ public:
 	 * Technologies, ages and civilisations of the players (XR fork W1).
 	 */
 	const std::shared_ptr<tech::TechState> &get_tech() const;
+
+	/**
+	 * Fog of war of the game (XR fork): line of sight, explored tiles, minimap view.
+	 */
+	const std::shared_ptr<vision::VisionState> &get_vision() const;
 
 	/**
 	 * Add a new player to the index.
@@ -179,6 +188,11 @@ private:
 	std::shared_ptr<combat::CombatState> combat;
 	// XR fork W1: technologies
 	std::shared_ptr<tech::TechState> tech;
+
+	/**
+	 * Fog of war (XR fork).
+	 */
+	std::shared_ptr<vision::VisionState> vision;
 };
 } // namespace gamestate
 } // namespace openage

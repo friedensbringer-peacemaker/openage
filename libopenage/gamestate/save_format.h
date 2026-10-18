@@ -45,9 +45,11 @@ namespace openage::gamestate::save {
  * round trip without the engine.
  */
 
-/// 1: 0.6.0-xr.0.11; 2: XR fork W1 (civilisations, researched technologies, research in queues).
-/// Older versions still load (missing fields: no civilisation, nothing researched).
-constexpr int FORMAT_VERSION = 2;
+/// 1: 0.6.0-xr.0.11; 2: XR fork W1 (civilisations, researched technologies, research in queues);
+/// 3: XR fork W2 (vision mode of the map, explored tiles per player).
+/// Older versions still load (missing fields: no civilisation, nothing researched, vision
+/// NORMAL with nothing explored).
+constexpr int FORMAT_VERSION = 3;
 
 /// slots 1..SLOT_COUNT are chosen by the player, slot 0 is the autosave,
 /// QUICK_SLOT the quick save (F5/F9)
@@ -67,6 +69,8 @@ struct SavedPlayer {
 	std::string civ{};
 	std::vector<std::string> techs{};
 	std::vector<std::string> built{};
+	/// explored tiles (vision, version 3, VisionGrid::explored_text), empty = none stored
+	std::string explored{};
 };
 
 /// one entry of a training queue
@@ -263,6 +267,7 @@ inline std::string serialize(const SaveData &d) {
 		}
 		out << "\n";
 	}
+	out << "vision = " << vision_mode_name(m.vision) << "\n";
 	for (const auto &p : d.players) {
 		out << "[player]\n";
 		out << "id = " << p.id << "\n";
@@ -275,6 +280,8 @@ inline std::string serialize(const SaveData &d) {
 		}
 		for (const auto &b : p.built) {
 			out << "built = " << b << "\n";
+		if (not p.explored.empty()) {
+			out << "explored = " << p.explored << "\n";
 		}
 	}
 	for (const auto &e : d.entities) {
@@ -480,6 +487,11 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 				}
 				m.ai.attack_size = s;
 			}
+			else if (key == "vision") {
+				if (not vision_mode_parse(value, m.vision)) {
+					return fail("Sicht");
+				}
+			}
 			else if (key == "ai_seed") {
 				if (not(v >> m.ai.seed)) {
 					return fail("ai_seed");
@@ -499,6 +511,9 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 				if (not(v >> p.id)) {
 					return fail("Spieler-ID");
 				}
+			}
+			else if (key == "explored") {
+				p.explored = value;
 			}
 			else if (key == "resources") {
 				if (not parse_resources(value, p.resources)) {

@@ -64,6 +64,8 @@ private:
 	                 int y0,
 	                 int y1);
 	void update_rects();
+	/// minimap image of the controller (XR fork): texture size, upload, rectangle
+	void update_minimap();
 
 	std::shared_ptr<renderer::Renderer> renderer;
 	std::shared_ptr<openage::ui::UiController> controller;
@@ -77,6 +79,12 @@ private:
 	std::shared_ptr<renderer::Texture2d> output_texture;
 	uint32_t hud_shown = 0;
 	uint32_t overlay_shown = 0;
+	/// minimap (XR fork): own texture between the HUD and the overlay
+	std::shared_ptr<renderer::Texture2d> minimap_texture;
+	std::shared_ptr<renderer::UniformInput> minimap_uniforms;
+	std::shared_ptr<bool> minimap_visible = std::make_shared<bool>(false);
+	uint32_t minimap_shown = 0;
+	int minimap_rect[4] = {0, 0, 0, 0};
 	size_t width = 0;
 	size_t height = 0;
 };
