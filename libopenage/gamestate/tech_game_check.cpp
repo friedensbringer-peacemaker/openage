@@ -485,8 +485,7 @@ void check_civ_vision(const Options &opt) {
 	const auto text = save::serialize(data);
 	check(text.find("vision = normal") != std::string::npos and text.find("explored = ") != std::string::npos
 	          and text.find("civ = Britons") != std::string::npos
-	          and text.find("TownWatch
-") != std::string::npos,
+	          and text.find("TownWatch\n") != std::string::npos,
 	      "save text with vision, explored tiles, civilisation and Town Watch");
 	save::SaveData parsed;
 	std::string error;
