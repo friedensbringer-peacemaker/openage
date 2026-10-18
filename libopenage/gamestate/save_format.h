@@ -280,6 +280,7 @@ inline std::string serialize(const SaveData &d) {
 		}
 		for (const auto &b : p.built) {
 			out << "built = " << b << "\n";
+		}
 		if (not p.explored.empty()) {
 			out << "explored = " << p.explored << "\n";
 		}
