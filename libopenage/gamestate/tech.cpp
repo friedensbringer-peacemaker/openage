@@ -4,6 +4,11 @@
 
 #include <algorithm>
 #include <exception>
+#include <functional>
+#include <mutex>
+#include <optional>
+#include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "log/log.h"
@@ -165,6 +170,134 @@ Condition read_condition_set(const std::shared_ptr<nyan::View> &view, const nyan
 		parts.push_back(read_condition(view, view->get_object(object_name(value)), 0));
 	}
 	return all_of(std::move(parts));
+}
+
+
+namespace {
+
+bool refers_to_self(const Condition &c, const nyan::fqon_t &entity) {
+	if (c.kind == Condition::kind_t::BUILT and c.ref == entity) {
+		return true;
+	}
+	for (const auto &input : c.inputs) {
+		if (refers_to_self(input, entity)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+Condition replace_self(const Condition &c, const nyan::fqon_t &entity, const Condition &with) {
+	if (c.kind == Condition::kind_t::BUILT and c.ref == entity) {
+		return with;
+	}
+	Condition out = c;
+	for (auto &input : out.inputs) {
+		input = replace_self(input, entity, with);
+	}
+	return out;
+}
+
+/// research id of a game entity (engine.xr GenieUnit), -1 if none
+int64_t genie_research_id(const std::shared_ptr<nyan::View> &view, const nyan::fqon_t &entity) {
+	auto obj = view->get_object(entity);
+	for (const auto &value : obj.get_set("GameEntity.abilities")) {
+		auto ability = view->get_object(object_name(value));
+		const auto &parents = ability.get_parents();
+		if (not parents.empty() and parents[0] == "engine.xr.ability.GenieUnit") {
+			return ability.get_int("GenieUnitData.research_id");
+		}
+	}
+	return -1;
+}
+
+} // namespace
+
+Condition fix_self_condition(const std::shared_ptr<nyan::View> &view, const nyan::fqon_t &entity, const Condition &condition) {
+	if (not refers_to_self(condition, entity)) {
+		return condition;
+	}
+	Condition never;
+	never.kind = Condition::kind_t::NEVER;
+	never.unsupported = "own completion";
+	try {
+		const auto research = genie_research_id(view, entity);
+		const auto modpack = entity.substr(0, entity.find('.'));
+		auto data = view->get_object(modpack + ".data.util.xr.genie.GenieData");
+		std::unordered_map<int64_t, nyan::Object> techs;
+		for (const auto &value : data.get_orderedset("GenieData.techs")) {
+			auto tech = view->get_object(object_name(value));
+			techs.emplace(tech.get_int("GenieTech.research_id"), tech);
+		}
+		auto converted = [&](const nyan::Object &tech) -> std::optional<nyan::fqon_t> {
+			try {
+				return tech.get_object("GenieTech.tech").get_name();
+			}
+			catch (std::exception &) {
+				return std::nullopt;  // None: a technology of the data without a converted Tech
+			}
+		};
+		auto it = techs.find(research);
+		if (it == techs.end()) {
+			log::log(INFO << "Tech: " << short_of(entity) << " needs its own completion, no research " << research
+			              << " in the data: stays locked");
+			return replace_self(condition, entity, never);
+		}
+		// the requirements of that technology (converted ones; one level deeper for unconverted)
+		std::vector<Condition> parts;
+		std::vector<std::string> names;
+		std::function<void(const nyan::Object &, int)> add = [&](const nyan::Object &tech, int depth) {
+			for (const auto &req : tech.get_orderedset("GenieTech.required_techs")) {
+				auto number = std::dynamic_pointer_cast<nyan::Int>(req.get_ptr());
+				if (not number) {
+					continue;
+				}
+				auto r = techs.find(number->get());
+				if (r == techs.end()) {
+					continue;
+				}
+				if (auto fqon = converted(r->second)) {
+					parts.push_back(Condition::tech(*fqon));
+					names.push_back(short_of(*fqon));
+				}
+				else if (depth < 2) {
+					add(r->second, depth + 1);
+				}
+			}
+		};
+		if (auto own = converted(it->second)) {
+			parts.push_back(Condition::tech(*own));
+			names.push_back(short_of(*own));
+		}
+		else {
+			add(it->second, 0);
+		}
+		if (parts.empty()) {
+			log::log(INFO << "Tech: " << short_of(entity) << " needs its own completion, research " << research
+			              << " has no converted requirement: stays locked");
+			return replace_self(condition, entity, never);
+		}
+		std::ostringstream text;
+		for (size_t i = 0; i < names.size(); ++i) {
+			text << (i > 0 ? " + " : "") << names[i];
+		}
+		{
+			// once per game entity (the production reads it for every villager)
+			static std::mutex logged_mutex;
+			static std::unordered_set<std::string> logged;
+			std::lock_guard<std::mutex> lock{logged_mutex};
+			if (logged.insert(entity + "@" + text.str()).second) {
+				log::log(INFO << "Tech: " << short_of(entity) << " needed its own completion, now unlocked by research "
+				              << research << " of the data (" << text.str() << ")");
+			}
+		}
+		return replace_self(condition, entity, all_of(std::move(parts)));
+	}
+	catch (std::exception &err) {
+		log::log(INFO << "Tech: " << short_of(entity) << " needs its own completion, no engine.xr data ("
+		              << err.what() << "): stays locked");
+	}
+	return replace_self(condition, entity, never);
 }
 
 

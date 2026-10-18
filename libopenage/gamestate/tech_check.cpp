@@ -101,6 +101,11 @@ void check_catalog() {
 		check(prod::has_mechanic(t, true), std::string{"offered tech "} + t);
 		check(not std::string{prod::catalog_entry(t, true)->effect}.empty(), std::string{"effect "} + t);
 	}
+	// XR fork W4: towers shoot and take a garrison, herbal medicine heals the garrison
+	check(prod::has_mechanic("Tower") and prod::has_mechanic("BombardTower"), "W4: towers offered");
+	for (const char *t : {"GuardTower", "Keep", "HerbalMedicine"}) {
+		check(prod::has_mechanic(t, true), std::string{"W4: offered tech "} + t);
+	}
 	for (const char *t : {"HorseCollar", "Coinage", "Redemption", "CappedRam", "Careening"}) {
 		check(not prod::has_mechanic(t, true), std::string{"hidden tech "} + t);
 	}

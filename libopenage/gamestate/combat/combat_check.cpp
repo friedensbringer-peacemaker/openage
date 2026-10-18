@@ -60,6 +60,8 @@
 #include "gamestate/game_state.h"
 #include "gamestate/manager.h"
 #include "gamestate/map.h"
+#include "gamestate/player.h"
+#include "gamestate/tech.h"
 #include "gamestate/terrain_factory.h"
 #include "log/log.h"
 #include "pathfinding/cost_field.h"
@@ -631,6 +633,17 @@ void w4_checks(const util::Path &root, const std::string &modpack, uint32_t seed
 
 	// ---- watch tower shoots
 	std::cout << "W4.8 watch tower" << std::endl;
+	{
+		// the converted data binds the tower to its own completion: the data's requirement instead
+		const auto tower_fqon = modpack + ".data.game_entity.generic.tower.tower.Tower";
+		auto view = w.state->get_player(0)->get_db_view();
+		auto fixed = tech::fix_self_condition(view, tower_fqon, tech::Condition::built(tower_fqon));
+		std::cout << "  tower condition: kind " << static_cast<int>(fixed.kind) << " " << fixed.ref << std::endl;
+		check(fixed.kind == tech::Condition::kind_t::TECH and fixed.ref.find("FeudalAge") != std::string::npos,
+		      "watch tower: unlocked by the Feudal Age (data requirement of its research)");
+		auto other = tech::fix_self_condition(view, tower_fqon, tech::Condition::tech("x.CastleAge"));
+		check(other.kind == tech::Condition::kind_t::TECH and other.ref == "x.CastleAge", "other conditions unchanged");
+	}
 	{
 		auto enemies = w.find(1, "Archer");
 		if (enemies.empty()) {

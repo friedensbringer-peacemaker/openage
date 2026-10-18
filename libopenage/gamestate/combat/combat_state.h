@@ -581,6 +581,9 @@ private:
 	std::string modpack = "hd_base";
 	/// players with crenellations (infantry adds garrison arrows, 05 §5.4)
 	std::unordered_set<player_id_t> crenellations_players;
+	/// players with herbal medicine (garrison heals 4 times faster, public knowledge: the converted
+	/// technology has no patches)
+	std::unordered_set<player_id_t> herbal_players;
 	/// time of the last event or command (snapshots outside of an event)
 	time::time_t clock = time::TIME_ZERO;
 

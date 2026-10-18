@@ -577,6 +577,8 @@ void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
 					try {
 						condition = tech::read_condition_set(owner_db_view,
 						                                     creatable.get_set("CreatableGameEntity.condition"));
+						// XR fork W4: the watch tower waits for its own completion in the data
+						condition = tech::fix_self_condition(owner_db_view, fqon, condition);
 					}
 					catch (std::exception &err) {
 						log::log(WARN << "Production: condition of " << name << " not readable: " << err.what());

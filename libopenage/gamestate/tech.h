@@ -83,6 +83,15 @@ struct Message {
  */
 Condition read_condition_set(const std::shared_ptr<nyan::View> &view, const nyan::set_t &set);
 
+/**
+ * XR fork W4: a creatable whose condition is its own completion (the converted watch tower:
+ * "TowerBuilt", W1 finding) gets the requirements of the data instead: the technology the
+ * unit names (engine.xr GenieUnitData.research_id) and the technologies it requires
+ * (GenieData.techs, e.g. the Feudal Age). Other conditions are returned unchanged; without
+ * engine.xr data the creatable stays locked (NEVER).
+ */
+Condition fix_self_condition(const std::shared_ptr<nyan::View> &view, const nyan::fqon_t &entity, const Condition &condition);
+
 class TechState {
 public:
 	TechState() = default;

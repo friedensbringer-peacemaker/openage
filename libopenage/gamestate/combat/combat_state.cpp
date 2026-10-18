@@ -60,6 +60,8 @@ constexpr double ORDER_MOVE_PERIOD = 2.0;
 constexpr int CLASS_TOWER = 52;
 /// unit class of the scout cavalry (06 §6.2: no automatic attacks on villagers)
 constexpr int CLASS_SCOUT = 47;
+/// herbal medicine: garrisoned units heal this much faster (public knowledge)
+constexpr double HERBAL_MEDICINE = 4.0;
 
 time::time_t seconds(double s) {
 	return time::time_t::from_double(s);
@@ -1890,12 +1892,16 @@ void CombatState::scan(const std::shared_ptr<GameState> &state, const time::time
 	}
 	// infantry adds garrison arrows only with crenellations (05 §5.4, a technology of the data)
 	this->crenellations_players.clear();
+	this->herbal_players.clear();
 	if (auto tech = state->get_tech()) {
 		for (auto player : tech->players()) {
 			if (const auto *t = tech->find(player)) {
 				for (const auto &fqon : t->order) {
 					if (fqon.size() >= 13 and fqon.compare(fqon.size() - 13, 13, ".Crenellations") == 0) {
 						this->crenellations_players.insert(player);
+					}
+					if (fqon.size() >= 15 and fqon.compare(fqon.size() - 15, 15, ".HerbalMedicine") == 0) {
+						this->herbal_players.insert(player);
 					}
 				}
 			}
@@ -1918,6 +1924,8 @@ void CombatState::scan(const std::shared_ptr<GameState> &state, const time::time
 			continue;
 		}
 		if (c->stats->building and not c->occupants.empty() and c->stats->garrison_heal > 0.0) {
+			const double rate = c->stats->garrison_heal
+			                    * (this->herbal_players.contains(this->owner_of(c->entity, time)) ? HERBAL_MEDICINE : 1.0);
 			for (auto uid : c->occupants) {
 				auto *u = this->find(uid);
 				if (u == nullptr) {
@@ -1928,7 +1936,7 @@ void CombatState::scan(const std::shared_ptr<GameState> &state, const time::time
 				if (not current) {
 					continue;
 				}
-				auto add = garrison_heal(c->stats->garrison_heal, dt, u->heal_carry, u->stats->max_health - *current);
+				auto add = garrison_heal(rate, dt, u->heal_carry, u->stats->max_health - *current);
 				if (add > 0) {
 					live->set_attribute(time, u->stats->health_attribute, *current + add);
 					this->set_health_snapshot(uid, *current + add, u->stats->max_health, true);
