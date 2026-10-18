@@ -23,6 +23,7 @@ namespace gamestate::combat {
  *  - game.combat_tick: one attack step of an attacker
  *  - game.combat_scan: periodic auto attack scan and victory check
  *  - game.combat_remove: remove a dead entity after its death animation
+ *  - game.combat_projectile: impact of a projectile (XR fork W4)
  */
 class CombatEventHandler : public openage::event::OnceEventHandler {
 public:
@@ -30,6 +31,8 @@ public:
 		TICK,
 		SCAN,
 		REMOVE,
+		/// XR fork W4: impact of a projectile ("projectile" = id)
+		PROJECTILE,
 	};
 
 	explicit CombatEventHandler(kind what);

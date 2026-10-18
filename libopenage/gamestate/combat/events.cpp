@@ -19,6 +19,8 @@ const char *handler_name(CombatEventHandler::kind what) {
 		return "game.combat_tick";
 	case CombatEventHandler::kind::SCAN:
 		return "game.combat_scan";
+	case CombatEventHandler::kind::PROJECTILE:
+		return "game.combat_projectile";
 	case CombatEventHandler::kind::REMOVE:
 	default:
 		return "game.combat_remove";
@@ -45,6 +47,7 @@ void CombatEventHandler::invoke(openage::event::EventLoop & /* loop */,
 	auto gstate = std::dynamic_pointer_cast<GameState>(state);
 	auto combat = gstate->get_combat();
 	auto id = params.get<entity_id_t>("entity", 0);
+	combat->note_time(time);
 	switch (this->what) {
 	case kind::TICK:
 		combat->tick(gstate, id, time);
@@ -54,6 +57,9 @@ void CombatEventHandler::invoke(openage::event::EventLoop & /* loop */,
 		break;
 	case kind::REMOVE:
 		combat->remove(gstate, id, time);
+		break;
+	case kind::PROJECTILE:
+		combat->impact(gstate, params.get<uint64_t>("projectile", 0), time);
 		break;
 	}
 }
@@ -65,7 +71,8 @@ time::time_t CombatEventHandler::predict_invoke_time(const std::shared_ptr<opena
 }
 
 void add_event_handlers(const std::shared_ptr<openage::event::EventLoop> &loop) {
-	for (auto what : {CombatEventHandler::kind::TICK, CombatEventHandler::kind::SCAN, CombatEventHandler::kind::REMOVE}) {
+	for (auto what : {CombatEventHandler::kind::TICK, CombatEventHandler::kind::SCAN, CombatEventHandler::kind::REMOVE,
+	                  CombatEventHandler::kind::PROJECTILE}) {
 		loop->add_event_handler(std::make_shared<CombatEventHandler>(what));
 	}
 }

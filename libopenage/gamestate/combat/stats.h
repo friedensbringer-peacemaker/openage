@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -12,6 +13,25 @@
 
 
 namespace openage::gamestate::combat {
+
+/**
+ * Flight values of a projectile (XR fork W4, docs/aoe2-spec 05 §5.3), read from
+ * the projectile game entity: Move.speed, Projectile.arc (launch angle in
+ * degrees, converted from the data field "projectile arc"), the first
+ * Projectile.accuracy (accuracy %, dispersion), Projectile.target_mode
+ * (ExpectedPosition = lead, patched by ballistics) and the raw penetration
+ * mode of engine.xr GenieUnitData.
+ */
+struct ProjectileStats {
+	double speed = 7.0;
+	double arc = 0.0;
+	double accuracy = 100.0;
+	double dispersion = 0.0;
+	bool lead = false;
+	bool pierce = false;
+	/// damage of this projectile (ApplyDiscreteEffect of the projectile)
+	AttackProfile attack{};
+};
 
 /**
  * Combat values of a game entity type, read once from nyan (XR fork).
@@ -61,6 +81,65 @@ struct CombatStats {
 
 	/// the entity can move (Move ability)
 	bool movable = false;
+	/// Move.speed (tiles/s), 0 if it cannot move
+	double speed = 0.0;
+
+	// ---- XR fork W4 (docs/aoe2-spec 05, 06, 07)
+
+	/// first projectile of ShootProjectile and the second one (extra garrison arrows), if any
+	ProjectileStats projectile{};
+	bool has_secondary = false;
+	ProjectileStats secondary{};
+	/// arrows per volley: base (largest of ShootProjectile.min_projectiles and the data field
+	/// "projectile min count") and maximum
+	int min_projectiles = 0;
+	int max_projectiles = 0;
+	/// spawning area of the extra arrows (width across the shot, length along it) and the
+	/// launch height (ShootProjectile.spawning_area_offset_z)
+	double spawn_width = 0.0;
+	double spawn_length = 0.0;
+	double spawn_height = 1.0;
+	/// hit roll of melee attacks (data field "accuracy", 100 if missing)
+	double accuracy = 100.0;
+	/// unit class of the data (GenieUnitData.unit_class, -1 = unknown)
+	int unit_class = -1;
+	/// garrison: places, type mask, healing (HP/s) – largest over the data variants
+	int garrison_capacity = 0;
+	int garrison_mask = 0;
+	double garrison_heal = 0.0;
+	/// GameEntityStance ability (military units choose a stance)
+	bool stances = false;
+	/// Formation ability and the ordering priority of its subformation (front rows high)
+	bool formations = false;
+	int formation_priority = 0;
+	/// elevation modifiers of the entity or its projectile (05 §5.2): multiplier from above
+	double elevation_high = 1.25;
+	/// damage terrain restriction (data field "defense terrain bonus", -1 = none)
+	int defense_terrain = -1;
+	/// the town center (garrison arrows, town bell)
+	bool town_center = false;
+
+	/// attack of one hit divided by the reload time (garrison arrows, 05 §5.4); ranged
+	/// units: the pierce attack of the projectile
+	double dps() const {
+		int64_t sum = 0;
+		for (const auto &e : this->attack.effects) {
+			if (not ends_with(e.type, FALLBACK_SUFFIX)) {
+				sum = std::max(sum, e.amount);
+			}
+		}
+		return this->reload_time > 0.0 ? static_cast<double>(sum) / this->reload_time : 0.0;
+	}
+
+	/// the building shoots arrows (with or without garrison)
+	bool shoots_arrows() const {
+		return this->building and this->ranged and this->max_projectiles > 0;
+	}
+
+	/// military unit (stances, formations, patrol …)
+	bool military() const {
+		return this->unit and not this->building and this->can_attack and this->movable and not this->villager;
+	}
 
 	/// counts for the victory condition
 	bool counts_for_victory() const {

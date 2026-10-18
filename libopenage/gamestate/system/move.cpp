@@ -1,7 +1,8 @@
-// Copyright 2023-2025 the openage authors. See copying.md for legal info.
+// Copyright 2023-2026 the openage authors. See copying.md for legal info.
 
 #include "move.h"
 
+#include <algorithm>
 #include <compare>
 #include <vector>
 
@@ -111,14 +112,15 @@ const time::time_t Move::move_command(const std::shared_ptr<gamestate::GameEntit
 		return time::time_t::from_int(0);
 	}
 
-	return Move::move_default(entity, state, command->get_target(), start_time);
+	return Move::move_default(entity, state, command->get_target(), start_time, command->get_max_speed());
 }
 
 
 const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntity> &entity,
                                       const std::shared_ptr<openage::gamestate::GameState> &state,
                                       const coord::phys3 &destination,
-                                      const time::time_t &start_time) {
+                                      const time::time_t &start_time,
+                                      std::optional<double> max_speed) {
 	if (not entity->has_component(component::component_t::MOVE)) [[unlikely]] {
 		log::log(WARN << "Entity " << entity->get_id() << " has no move component.");
 		return time::time_t::from_int(0);
@@ -189,7 +191,12 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 		double move_time = 0;
 		if (not move_speed->is_infinite_positive()) {
 			auto distance = path_vector.length();
-			move_time = distance / move_speed->get();
+			// XR fork W4: a formation moves with its slowest member
+			double speed = move_speed->get();
+			if (max_speed and *max_speed > 0.0) {
+				speed = std::min(speed, *max_speed);
+			}
+			move_time = distance / speed;
 		}
 		total_time += move_time;
 

@@ -162,7 +162,8 @@ void VisionState::tick(const std::shared_ptr<GameState> &state, const time::time
 			static_sum += id;
 			continue;
 		}
-		if (combat and combat->is_dead(id)) {
+		// dead, or garrisoned in a building (XR fork W4: no sight of its own, not on the minimap)
+		if (combat and (combat->is_dead(id) or combat->garrisoned_in(id))) {
 			continue;
 		}
 		auto stats = combat ? combat->get_stats(id) : nullptr;

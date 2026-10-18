@@ -488,6 +488,12 @@ if(OPENAGE_NATIVE_ENTRY)
 	target_include_directories(openage-combat-rules-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 	add_test(NAME openage-combat-rules-check COMMAND openage-combat-rules-check)
 
+	# host test: combat behaviour of round W4 – projectiles, elevation, stances, target choice, garrison
+	# arrows, town bell, flight, formations (dependency-free, parameter sweep; XR fork)
+	add_executable(openage-combat-behavior-check gamestate/combat/behavior_check.cpp)
+	target_include_directories(openage-combat-behavior-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-combat-behavior-check COMMAND openage-combat-behavior-check)
+
 	# game state check of the combat with the converted modpack (--root <dir>, headless)
 	add_executable(openage-combat-check gamestate/combat/combat_check.cpp)
 	target_include_directories(openage-combat-check PRIVATE $<TARGET_PROPERTY:libopenage,INCLUDE_DIRECTORIES>)

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include "coord/phys.h"
 #include "time/time.h"
@@ -36,13 +37,15 @@ public:
 	 * @param state Game state.
 	 * @param destination Destination coordinates.
 	 * @param start_time Start time of change.
+	 * @param max_speed XR fork W4: speed limit (formation moves with its slowest member).
 	 *
 	 * @return Runtime of the change in simulation time.
 	 */
 	static const time::time_t move_default(const std::shared_ptr<gamestate::GameEntity> &entity,
 	                                       const std::shared_ptr<openage::gamestate::GameState> &state,
 	                                       const coord::phys3 &destination,
-	                                       const time::time_t &start_time);
+	                                       const time::time_t &start_time,
+	                                       std::optional<double> max_speed = std::nullopt);
 };
 
 } // namespace system

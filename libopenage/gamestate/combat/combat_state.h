@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -18,6 +19,7 @@
 
 #include "coord/phys.h"
 #include "event/evententity.h"
+#include "gamestate/combat/behavior.h"
 #include "gamestate/combat/rules.h"
 #include "gamestate/combat/stats.h"
 #include "gamestate/pick.h"
@@ -68,21 +70,82 @@ struct MatchStatus {
 };
 
 /**
+ * Combat state of one entity for the HUD (XR fork W4, thread-safe snapshot):
+ * stance, order, formation, garrison.
+ */
+struct CombatInfo {
+	stance_t stance = stance_t::AGGRESSIVE;
+	order_t order = order_t::NONE;
+	formation_t formation = formation_t::NONE;
+	/// the entity chooses stances / formations (data abilities)
+	bool stances = false;
+	bool formations = false;
+	/// garrisoned in a building (hidden)
+	bool inside = false;
+	/// building: places, occupants (short nyan names), arrows of the next volley
+	int capacity = 0;
+	std::vector<std::string> occupants{};
+	int arrows = 0;
+	/// town center: the town bell rings
+	bool bell = false;
+};
+
+/**
+ * A projectile in flight for the renderer (XR fork W4, thread-safe snapshot).
+ */
+struct ProjectileView {
+	Flight flight{};
+	/// simulation time of the launch (s); the projectile is drawn from then on
+	double launched = 0.0;
+	/// extra arrow of a garrison (secondary projectile)
+	bool secondary = false;
+	/// owner (player colour)
+	player_id_t owner = 0;
+};
+
+/**
+ * Combat values of an entity in a save game (XR fork W4, gamestate/save_game.cpp).
+ */
+struct SavedCombat {
+	stance_t stance = stance_t::AGGRESSIVE;
+	formation_t formation = formation_t::NONE;
+	order_t order = order_t::NONE;
+	/// patrol route, attack move destination
+	std::vector<Point> route{};
+	/// guarded / followed entity
+	entity_id_t order_entity = 0;
+	/// building it is garrisoned in (0 = none), entered with the town bell
+	entity_id_t inside = 0;
+	bool by_bell = false;
+	Point bell_from{};
+	/// town center: the bell rings
+	bool bell = false;
+};
+
+/**
  * Combat of the XR fork: attacks, damage, death, auto attack and the victory
  * condition. Lives in the game state, all non-const methods run in the
  * simulation thread (event handlers); the query methods marked thread-safe
  * may be called from any thread (input, HUD).
  *
  * Simplifications (not time-travel safe, unlike the curves of the engine):
- * the per-entity combat data is plain state, ranged attacks hit instantly
- * (no projectile entities), no attack bonuses from elevation, no stances.
+ * the per-entity combat data is plain state.
  *
  * Flow: order_attack() / the periodic scan set a target and schedule an
  * attack tick ("game.combat_tick") for the attacker. A tick walks into range
  * (move commands through the command queue, so the regular move system and
- * pathfinding are used), turns to the target and applies one hit per reload
- * time. Health 0 -> death animation, then "game.combat_remove" removes the
- * entity from the game state and the renderer and frees its tiles.
+ * pathfinding are used), turns to the target and attacks once per reload
+ * time: melee hits at once (hit roll with the accuracy), ranged attackers
+ * launch projectiles ("game.combat_projectile" at the impact). Health 0 ->
+ * death animation, then "game.combat_remove" removes the entity from the game
+ * state and the renderer and frees its tiles.
+ *
+ * Round W4 (docs/aoe2-spec 05, 06, 07): projectiles with flight time, arc,
+ * accuracy, dispersion and lead; elevation factor; stances with post and
+ * leash; patrol, guard, follow, attack move, stop; target choice by score
+ * (distance, time to kill, threat memory, best three, 10 s lock); garrison
+ * in buildings (type mask, capacity, arrows, healing, ungarrison, ejection
+ * of damaged buildings); town bell; flight of villagers; formations.
  */
 class CombatState : public openage::event::EventEntity {
 public:
@@ -134,6 +197,88 @@ public:
 	 */
 	void cancel_attack(entity_id_t attacker, const time::time_t &time);
 
+	// ---- orders of round W4 (simulation thread)
+
+	/**
+	 * A plain command of the player (move, gather, build, idle): attacks and
+	 * orders end, the post is the destination (stances measure from there).
+	 */
+	void player_moved(entity_id_t id, const std::optional<coord::phys3> &destination, const time::time_t &time);
+
+	/// stop (06 §6.1): no target, no order, stand where it is
+	void stop(const std::shared_ptr<GameState> &state, entity_id_t id, const time::time_t &time);
+
+	/// stance of a unit (06 §6.2); false if it has no stances
+	bool set_stance(entity_id_t id, stance_t stance);
+
+	/// formation of a unit (07 §7.5), used by the next move of several units
+	bool set_formation(entity_id_t id, formation_t formation);
+
+	/**
+	 * Move several units in their formation (07 §7.5): slots around the
+	 * destination facing the way, every unit with the speed of the slowest.
+	 *
+	 * @return ids of the units that got a slot (the others need a plain move).
+	 */
+	std::vector<entity_id_t> formation_move(const std::shared_ptr<GameState> &state,
+	                                        const std::vector<entity_id_t> &ids,
+	                                        const coord::phys3 &destination,
+	                                        const time::time_t &time);
+
+	/// patrol between the current position and \p point (06 §6.3)
+	bool order_patrol(const std::shared_ptr<GameState> &state, entity_id_t id, const coord::phys3 &point,
+	                  const time::time_t &time);
+	/// guard an own entity (06 §6.3)
+	bool order_guard(const std::shared_ptr<GameState> &state, entity_id_t id, entity_id_t guarded,
+	                 const time::time_t &time);
+	/// follow an entity at a distance (06 §6.3)
+	bool order_follow(const std::shared_ptr<GameState> &state, entity_id_t id, entity_id_t followed,
+	                  const time::time_t &time);
+	/// walk to \p point, attacking every enemy on the way (06 §6.3)
+	bool order_attack_move(const std::shared_ptr<GameState> &state, entity_id_t id, const coord::phys3 &point,
+	                       const time::time_t &time);
+
+	/**
+	 * Walk into an own building and stay there (05 §5.4, 06 §6.5).
+	 *
+	 * @param by_bell Entered with the town bell (comes out again with "back to work").
+	 * @return false if the building does not take the unit (mask, places, owner).
+	 */
+	bool order_garrison(const std::shared_ptr<GameState> &state, entity_id_t id, entity_id_t building,
+	                    const time::time_t &time, bool by_bell = false);
+
+	/// let the whole garrison of a building out ("Alle raus")
+	void ungarrison_all(const std::shared_ptr<GameState> &state, entity_id_t building, const time::time_t &time);
+
+	/**
+	 * Town bell of a town center (06 §6.4): on = villagers within +-25 tiles
+	 * go into the nearest town centers, towers and castles with free places;
+	 * off = they come out and go back to work.
+	 *
+	 * @return false if \p tc is no own town center.
+	 */
+	bool ring_bell(const std::shared_ptr<GameState> &state, entity_id_t tc, bool on, const time::time_t &time);
+
+	/// the town bell of the town center rings
+	bool bell_rings(entity_id_t tc) const;
+
+	/**
+	 * Building under the cursor that \p player can garrison units in, or nullptr.
+	 */
+	std::shared_ptr<GameEntity> pick_shelter(const std::shared_ptr<GameState> &state,
+	                                         const time::time_t &time,
+	                                         player_id_t player,
+	                                         const PickRequest &request) const;
+
+	/**
+	 * Unit or building under the cursor of any player except gaia (guard,
+	 * follow), or nullptr.
+	 */
+	std::shared_ptr<GameEntity> pick_unit(const std::shared_ptr<GameState> &state,
+	                                      const time::time_t &time,
+	                                      const PickRequest &request,
+	                                      entity_id_t except = 0) const;
+
 	/**
 	 * Enemy of \p player under the cursor (right click), or nullptr.
 	 */
@@ -149,10 +294,19 @@ public:
 	          entity_id_t id,
 	          const time::time_t &time);
 
+	/// time of the current event or command (simulation thread)
+	void note_time(const time::time_t &time) {
+		if (time > this->clock) {
+			this->clock = time;
+		}
+	}
+
 	// ---- event handlers
 	void tick(const std::shared_ptr<GameState> &state, entity_id_t attacker, const time::time_t &time);
 	void scan(const std::shared_ptr<GameState> &state, const time::time_t &time);
 	void remove(const std::shared_ptr<GameState> &state, entity_id_t id, const time::time_t &time);
+	/// impact of a projectile (XR fork W4)
+	void impact(const std::shared_ptr<GameState> &state, uint64_t projectile, const time::time_t &time);
 
 	/**
 	 * Health of an entity changed outside of combat (XR fork, production: a foundation
@@ -183,19 +337,63 @@ public:
 	                    bool proportional,
 	                    const time::time_t &time);
 
+	// ---- save games (XR fork W4)
+
+	/// combat values of an entity worth saving, nothing if all are defaults
+	std::optional<SavedCombat> save_entity(entity_id_t id) const;
+
+	/**
+	 * Apply saved combat values after all entities of a save game exist
+	 * (ids already translated): stance, formation, garrison (the unit is put
+	 * into the building at once), bell, orders.
+	 */
+	void load_entity(const std::shared_ptr<GameState> &state, entity_id_t id, const SavedCombat &saved,
+	                 const time::time_t &time);
+
 	// ---- queries, simulation thread
 	bool is_dead(entity_id_t id) const;
 	std::shared_ptr<const CombatStats> get_stats(entity_id_t id) const;
 	std::optional<entity_id_t> get_target(entity_id_t id) const;
+	stance_t get_stance(entity_id_t id) const;
+	order_t get_order(entity_id_t id) const;
+	formation_t get_formation(entity_id_t id) const;
+	/// building the unit is garrisoned in
+	std::optional<entity_id_t> garrisoned_in(entity_id_t id) const;
+	/// the unit walks to a building to garrison there
+	std::optional<entity_id_t> entering(entity_id_t id) const;
+	/// units in a building
+	std::vector<entity_id_t> occupants(entity_id_t building) const;
+	/// arrows of the next volley of a building (05 §5.4)
+	int arrow_count_of(entity_id_t building) const;
+	/// a villager flees from attackers (06 §6.4)
+	bool is_fleeing(entity_id_t id) const;
+	/// projectiles launched and their impacts (statistics, checks)
+	struct ProjectileStatsCount {
+		size_t launched = 0;
+		size_t hits = 0;
+		size_t misses = 0;
+		size_t miss_hits = 0;
+		size_t extra_arrows = 0;
+		size_t in_flight = 0;
+	};
+	ProjectileStatsCount projectile_counts() const;
 
 	// ---- queries, thread-safe
 	/// the entity was removed from the game (died); selections drop it
 	bool was_removed(entity_id_t id) const;
+	/// the entity is garrisoned (not drawn, not selectable)
+	bool is_hidden(entity_id_t id) const;
+	/// garrisoned entities and a version that changes with the set (renderer)
+	std::shared_ptr<const std::unordered_set<entity_id_t>> hidden_entities(uint64_t &version) const;
 	/// health of the given entities (unknown ids: alive = false)
 	std::vector<HealthInfo> get_health(const std::vector<entity_id_t> &ids) const;
 	/// combat values (name, unit/building, ...) of a registered entity, nullptr if
 	/// unknown or removed; the stats are immutable and may be kept by the caller
 	std::shared_ptr<const CombatStats> get_stats_snapshot(entity_id_t id) const;
+	/// stance, garrison, bell of an entity (XR fork W4)
+	std::optional<CombatInfo> get_info(entity_id_t id) const;
+	/// projectiles in flight (XR fork W4) and a version that changes with every launch/impact
+	std::vector<ProjectileView> get_projectiles(uint64_t &version) const;
 	/// current match status
 	MatchStatus get_match_status() const;
 	/// state of the match for \p player (VICTORY/DEFEAT/DRAW once decided)
@@ -223,6 +421,52 @@ private:
 		double last_edge = 0.0;
 		/// first hit was logged
 		bool hit_logged = false;
+
+		// ---- XR fork W4
+		stance_t stance = stance_t::AGGRESSIVE;
+		formation_t formation = formation_t::NONE;
+		/// where the unit got its last order or stopped (stances measure from here)
+		std::optional<Point> post{};
+		order_t order = order_t::NONE;
+		/// patrol: two points; attack move: the destination
+		std::vector<Point> route{};
+		size_t leg = 0;
+		std::optional<entity_id_t> order_entity{};
+		/// last move command of the order logic
+		time::time_t order_moved = time::TIME_MIN;
+		std::optional<Point> order_dest{};
+		/// garrison: inside a building, on the way into one, occupants of a building
+		std::optional<entity_id_t> inside{};
+		std::optional<entity_id_t> entering{};
+		std::vector<entity_id_t> occupants{};
+		double heal_carry = 0.0;
+		/// entered with the town bell: where it came from and what it did
+		bool by_bell = false;
+		Point bell_from{};
+		std::optional<entity_id_t> resume_gather{};
+		std::optional<entity_id_t> resume_build{};
+		/// town center: the bell rings
+		bool bell = false;
+		/// flight of villagers: attackers (id, time of the last attack report)
+		std::vector<std::pair<entity_id_t, double>> attackers{};
+		bool fleeing = false;
+		double flee_ordered = -1.0e9;
+		/// target lock after a failed attempt (06 §6.2): id -> until (s)
+		std::unordered_map<entity_id_t, double> locks{};
+	};
+
+	struct Projectile {
+		uint64_t id = 0;
+		entity_id_t shooter = 0;
+		player_id_t owner = 0;
+		std::shared_ptr<const CombatStats> stats;
+		/// hit roll passed: can only hit this target
+		std::optional<entity_id_t> target{};
+		Flight flight{};
+		double launched = 0.0;
+		/// elevation factor of the shooter at the launch
+		double elevation = 1.0;
+		bool secondary = false;
 	};
 
 	Combatant *find(entity_id_t id);
@@ -233,18 +477,69 @@ private:
 	bool is_moving(const std::shared_ptr<GameEntity> &entity, const time::time_t &time) const;
 	double edge_between(const Combatant &a, const Combatant &b, const time::time_t &time) const;
 	std::optional<entity_id_t> nearest_enemy(const Combatant &self, double range, const time::time_t &time) const;
+	/// automatic target choice (06 §6.2), honouring the stance; nothing if none
+	std::optional<entity_id_t> choose_target(const Combatant &self, const time::time_t &time) const;
+	/// distance from the post (or route, guarded object) for the stance rules
+	double from_post(const Combatant &self, const Point &p, const time::time_t &time) const;
 
 	void engage(const std::shared_ptr<GameState> &state, Combatant &attacker, entity_id_t target,
 	            bool explicit_order, const time::time_t &time);
 	void schedule_tick(const std::shared_ptr<GameState> &state, Combatant &attacker, const time::time_t &time);
 	void drop_target(Combatant &attacker, const time::time_t &time);
 	void halt(const std::shared_ptr<GameEntity> &entity, const time::time_t &time);
-	void hit(const std::shared_ptr<GameState> &state, Combatant &attacker, Combatant &target, const time::time_t &time);
+	/// one attack: melee hit or projectiles
+	void attack(const std::shared_ptr<GameState> &state, Combatant &attacker, Combatant &target, const time::time_t &time);
+	void launch(const std::shared_ptr<GameState> &state, Combatant &attacker, Combatant &target, const time::time_t &time);
+	/// damage of one hit; \p attacker may be gone already (projectiles)
+	void apply_hit(const std::shared_ptr<GameState> &state,
+	               const CombatStats &attacker_stats,
+	               entity_id_t attacker_id,
+	               player_id_t attacker_owner,
+	               Combatant &target,
+	               double factor,
+	               const time::time_t &time);
 	void die(const std::shared_ptr<GameState> &state, Combatant &victim, const time::time_t &time,
 	         const std::string &cause);
 	void update_match(const time::time_t &time);
 	void set_health_snapshot(entity_id_t id, int64_t health, int64_t max_health, bool alive);
 	bool allow_hit_log(const time::time_t &time);
+
+	/// elevation factor of an attack (05 §5.2)
+	double elevation_between(const std::shared_ptr<GameState> &state, const Point3 &a, const Point3 &b,
+	                         double high) const;
+	/// terrain factor g of a target (05 §5.2)
+	double terrain_factor_of(const std::shared_ptr<GameState> &state, const Combatant &target,
+	                         const time::time_t &time);
+	/// height of the terrain (scene up units)
+	double ground_height(const std::shared_ptr<GameState> &state, double ne, double se) const;
+
+	/// orders (patrol, guard, follow, attack move, stance leash) once per scan
+	void update_order(const std::shared_ptr<GameState> &state, Combatant &c, const time::time_t &time);
+	/// move command of the order logic (rate limited)
+	void order_move(const std::shared_ptr<GameState> &state, Combatant &c, const Point &dest, const time::time_t &time,
+	                bool force = false);
+	void clear_order(Combatant &c);
+	/// enter / leave buildings
+	bool accepts(const Combatant &building, const Combatant &unit, const time::time_t &time) const;
+	void enter(const std::shared_ptr<GameState> &state, Combatant &unit, Combatant &building, const time::time_t &time);
+	void leave(const std::shared_ptr<GameState> &state, Combatant &unit, Combatant &building, size_t slot,
+	           const time::time_t &time);
+	void eject_all(const std::shared_ptr<GameState> &state, Combatant &building, bool bell_only, const time::time_t &time);
+	/// running arrow value of a building (05 §5.4)
+	double running_arrows(const Combatant &building, const time::time_t &time) const;
+	/// villagers: react to an attack report (06 §6.4)
+	void attacked(const std::shared_ptr<GameState> &state, Combatant &victim, entity_id_t attacker,
+	              player_id_t attacker_owner, const time::time_t &time);
+	void update_flight(const std::shared_ptr<GameState> &state, Combatant &c, const time::time_t &time);
+	/// remember and resume the economic job of a villager (bell, flight)
+	void remember_job(Combatant &c);
+	void resume_job(const std::shared_ptr<GameState> &state, Combatant &c, const time::time_t &time);
+	/// the building is complete (no foundation)
+	bool finished(const Combatant &c) const;
+
+	void publish_info(const Combatant &c);
+	void publish_hidden();
+	void publish_projectiles();
 
 	std::shared_ptr<openage::event::EventLoop> loop;
 
@@ -266,11 +561,37 @@ private:
 	size_t logs_in_second = 0;
 	size_t logs_suppressed = 0;
 
+	// ---- XR fork W4, simulation thread
+	std::map<uint64_t, Projectile> projectiles;
+	uint64_t next_projectile = 1;
+	ProjectileStatsCount projectile_count{};
+	/// threat memory per player (06 §6.2)
+	std::map<player_id_t, ThreatMemory> threats;
+	/// deterministic randomness (hit rolls, dispersion, flight directions)
+	std::mt19937_64 rng{0x5734};
+	double last_scan = -1.0;
+	/// damage terrain restrictions of the data: restriction -> genie terrain id -> factor,
+	/// terrain fqon -> genie id (loaded once, empty without engine.xr data)
+	bool terrain_loaded = false;
+	std::unordered_map<int, std::unordered_map<int, double>> terrain_restrictions;
+	std::unordered_map<std::string, int> terrain_ids;
+	/// modpack of the game entities (GenieData lookup)
+	std::string modpack = "hd_base";
+	/// players with crenellations (infantry adds garrison arrows, 05 §5.4)
+	std::unordered_set<player_id_t> crenellations_players;
+	/// time of the last event or command (snapshots outside of an event)
+	time::time_t clock = time::TIME_ZERO;
+
 	// ---- shared with other threads
 	mutable std::mutex shared_mutex;
 	std::unordered_set<entity_id_t> removed;
 	std::unordered_map<entity_id_t, HealthInfo> health_snapshot;
 	std::unordered_map<entity_id_t, std::shared_ptr<const CombatStats>> stats_snapshot;
+	std::unordered_map<entity_id_t, CombatInfo> info_snapshot;
+	std::shared_ptr<const std::unordered_set<entity_id_t>> hidden_snapshot;
+	uint64_t hidden_version = 0;
+	std::vector<ProjectileView> projectile_snapshot;
+	uint64_t projectile_version = 0;
 	MatchStatus match_status{};
 	std::vector<std::function<void(const MatchStatus &)>> match_callbacks;
 };
