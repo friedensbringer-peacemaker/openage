@@ -8,7 +8,7 @@ layout(location=0) out vec4 out_col;
 uniform sampler2D tex;
 
 // XR fork (vision): fog of war, one texel per tile (red: 0 unexplored,
-// 0.5 explored, 1 visible), u = ne / ne tiles, v = se / se tiles
+// 0.75 explored, 1 visible), u = ne / ne tiles, v = se / se tiles
 uniform sampler2D fog;
 // (1 / ne tiles, 1 / se tiles, 1 = fog on)
 uniform vec3 fog_params;
@@ -42,7 +42,7 @@ void main()
 
     // XR fork (vision): world x = se, world z = -ne. Four bilinear taps half a
     // tile around the point blend the tile states over about two tiles (soft
-    // edges); visible = 1 (unchanged), explored = 0.5, unexplored = black.
+    // edges); visible = 1 (unchanged), explored = 0.75, unexplored = black.
     if (fog_params.z > 0.5) {
         vec2 tile = vec2(-world_pos.z, world_pos.x);
         float f = 0.25 * (fog_at(tile + vec2(-0.5, -0.5)) + fog_at(tile + vec2(0.5, -0.5))

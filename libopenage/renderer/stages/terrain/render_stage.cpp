@@ -119,11 +119,12 @@ void TerrainRenderStage::set_fog(const std::vector<uint8_t> *tiles, size_t ne_si
 	if (version == this->fog_version and this->fog_params.z() != 0.0f) {
 		return;
 	}
-	// one texel per tile: 0 black, 128 fog, 255 visible (bilinear filtering softens the edges)
+	// one texel per tile: 0 black, 192 fog (explored land is barely darkened, docs/aoe2-spec 13), 255 visible
+	// (bilinear filtering softens the edges)
 	std::vector<uint8_t> data(ne_size * se_size * 4);
 	for (size_t i = 0; i < tiles->size(); ++i) {
 		const uint8_t s = (*tiles)[i];
-		const uint8_t v = s >= 2 ? 255 : s == 1 ? 128 : 0;
+		const uint8_t v = s >= 2 ? 255 : s == 1 ? 192 : 0;
 		data[4 * i] = v;
 		data[4 * i + 1] = v;
 		data[4 * i + 2] = v;

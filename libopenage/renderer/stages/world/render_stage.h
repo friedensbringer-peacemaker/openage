@@ -169,7 +169,7 @@ public:
 	void set_visibility(std::function<uint8_t(uint32_t)> display);
 
 	/// tint of entities in the fog (u_tint of world2d.frag.glsl)
-	static constexpr float FOG_TINT = 0.55f;
+	static constexpr float FOG_TINT = 0.75f;
 
 	/**
 	 * Objects drawn in the last update() (XR fork, statistics).

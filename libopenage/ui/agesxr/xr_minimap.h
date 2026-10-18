@@ -85,6 +85,10 @@ inline void minimapFracToTile(float u, float v, int tilesNe, int tilesSe, float&
 
 constexpr uint32_t mmRgba(uint32_t r, uint32_t g, uint32_t b, uint32_t a = 255) { return r | (g << 8) | (b << 16) | (a << 24); }
 
+// Helligkeit im Nebel (erkundet, nicht sichtbar): kaum abgedunkelt wie im Original (docs/aoe2-spec 13 §Nebel); gleicher
+// Wert wie im Spielbild (Gelände-Shader 192/255, Welt-Pass FOG_TINT 0,75).
+constexpr float kMinimapFogged = 0.75f;
+
 // Spielerfarben wie die Sprites (world2d.frag.glsl): blau, rot, grün, gelb, türkis, lila, grau, orange.
 inline uint32_t minimapPlayerColor(uint64_t player) {
     static constexpr std::array<uint32_t, 8> kColors{mmRgba(0, 76, 255),   mmRgba(255, 0, 0),   mmRgba(0, 255, 0),
@@ -142,7 +146,7 @@ inline uint32_t minimapDotColor(const MinimapDot& d, const MinimapInput& in) {
     default:
         return 0;
     }
-    return d.fogged ? mmScale(c, 0.6f) : c;
+    return d.fogged ? mmScale(c, kMinimapFogged) : c;
 }
 
 // Kachelzustand als Helligkeit 0 … 1 (bilinear zwischen den Kachelmitten: weiche Ränder wie im Spielbild).
@@ -155,7 +159,7 @@ inline float minimapFogAt(const MinimapInput& in, float ne, float se) {
         tx = std::clamp(tx, 0, in.ne - 1);
         ty = std::clamp(ty, 0, in.se - 1);
         const uint8_t s = in.fog[static_cast<size_t>(tx) + static_cast<size_t>(ty) * static_cast<size_t>(in.ne)];
-        return s >= 2 ? 1.0f : s == 1 ? 0.5f : 0.0f;
+        return s >= 2 ? 1.0f : s == 1 ? kMinimapFogged : 0.0f;
     };
     const float a = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * fx;
     const float b = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * fx;
@@ -194,7 +198,7 @@ inline void rasterMinimapBase(const MinimapInput& in, int w, int h, std::vector<
         tx = std::clamp(tx, 0, nNe - 1);
         ty = std::clamp(ty, 0, nSe - 1);
         const uint8_t s = in.fog[static_cast<size_t>(tx) + static_cast<size_t>(ty) * static_cast<size_t>(nNe)];
-        return s >= 2 ? 256 : s == 1 ? 128 : 0;
+        return s >= 2 ? 256 : s == 1 ? 192 : 0;
     };
     for (int y = 0; y < H; ++y) {
         const float py = static_cast<float>(y) + 0.5f;
