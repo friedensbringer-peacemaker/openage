@@ -167,6 +167,8 @@ private:
 	void attack(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
 	void gather(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
 	void produce(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
+	/// XR fork W3: herd own sheep to the town centre, build a mill and farms, queue reseeds (plan_food)
+	void food_economy(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
 	/// villagers that may take a build job: no recent order, standing (idle or gathering), not fighting
 	std::vector<const Seen *> free_builders(const std::shared_ptr<GameState> &state, const World &world,
 	                                        double ne, double se, const time::time_t &time) const;
@@ -217,6 +219,9 @@ private:
 	std::unordered_map<std::string, double> last_build;
 	/// XR fork W1: time of the last research request (simulation seconds)
 	double last_research = -100.0;
+	/// XR fork W3: last herding order per own herdable, last reseed request (simulation seconds)
+	std::unordered_map<entity_id_t, double> last_herd;
+	double last_reseed = -100.0;
 	/// villagers that fell idle again shortly after a gather order (no path): longer cooldown
 	std::unordered_map<entity_id_t, size_t> quick_idle;
 	/// last builder assignment per foundation (simulation seconds) and the assignments so far

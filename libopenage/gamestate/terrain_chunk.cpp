@@ -54,6 +54,12 @@ const TerrainTile &TerrainChunk::get_tile(const coord::tile &pos) const {
 	return this->tiles.at(pos.ne + pos.se * this->size[0]);
 }
 
+void TerrainChunk::set_tile(size_t idx, const TerrainTile &tile) {
+	auto &current = this->tiles.at(idx);
+	current.terrain = tile.terrain;
+	current.terrain_asset_path = tile.terrain_asset_path;
+}
+
 void TerrainChunk::render_update(const time::time_t &time) {
 	if (this->render_entity != nullptr) {
 		// TODO: Update individual tiles instead of the whole chunk

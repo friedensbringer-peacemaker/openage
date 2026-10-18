@@ -8,6 +8,7 @@
 #include <exception>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -44,6 +45,8 @@
 #include "gamestate/econ.h"
 #include "gamestate/econ_math.h"
 #include "gamestate/entity_factory.h"
+#include "gamestate/food.h"
+#include "gamestate/food_math.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/manager.h"
@@ -296,6 +299,207 @@ bool is_unit(const std::shared_ptr<GameEntity> &entity) {
 bool is_complete(const std::shared_ptr<GameEntity> &entity) {
 	auto constructable = component_of<ConstructableComp>(entity, component::component_t::CONSTRUCTABLE);
 	return constructable == nullptr or constructable->is_complete();
+}
+
+// ---- XR fork W3: farms, docks, fishing traps
+
+/// buildings that stand on their tiles without blocking them (farmers walk on farms, ships over traps)
+bool is_field_name(const std::string &name) {
+	return name == "Farm" or name == "FishingTrap";
+}
+
+/**
+ * Placement terrain of a building on water (docs/aoe2-spec 04 §4.2 rule 6): the placement
+ * and side terrains of its Genie data (GenieUnitData.placement_terrain0/1,
+ * placement_side_terrain0/1, docs/KONVERTER-FELDER.md) as terrain objects of
+ * GenieData.terrains; the fishing trap has none and stands on any open water.
+ */
+struct WaterRule {
+	/// the building stands on water
+	bool water = false;
+	/// terrain objects allowed under the footprint (empty: any open water)
+	std::set<std::string> place;
+	/// terrain objects of which at least one must be next to the footprint (empty: none needed)
+	std::set<std::string> side;
+};
+
+bool water_terrain_name(const std::string &fqon) {
+	auto ends_with = [&](const char *suffix) {
+		const std::string s{suffix};
+		return fqon.size() >= s.size() and fqon.compare(fqon.size() - s.size(), s.size(), s) == 0;
+	};
+	return ends_with(".Water") or ends_with(".Water2") or ends_with(".Water3");
+}
+
+WaterRule water_rule(const std::shared_ptr<nyan::View> &view, const nyan::fqon_t &fqon) {
+	static std::mutex mutex;
+	static std::unordered_map<std::string, WaterRule> cache;
+	std::lock_guard<std::mutex> lock{mutex};
+	auto it = cache.find(fqon);
+	if (it != cache.end()) {
+		return it->second;
+	}
+	WaterRule rule;
+	try {
+		auto obj = view->get_object(fqon);
+		int64_t place[2] = {-1, -1};
+		int64_t side[2] = {-1, -1};
+		for (const auto &ability_val : obj.get_set("GameEntity.abilities")) {
+			auto ability = view->get_object(object_name(ability_val));
+			if (ability.get_parents()[0] != "engine.xr.ability.GenieUnit") {
+				continue;
+			}
+			place[0] = ability.get_int("GenieUnitData.placement_terrain0");
+			place[1] = ability.get_int("GenieUnitData.placement_terrain1");
+			side[0] = ability.get_int("GenieUnitData.placement_side_terrain0");
+			side[1] = ability.get_int("GenieUnitData.placement_side_terrain1");
+		}
+		if (place[0] >= 0 or place[1] >= 0) {
+			const auto modpack = fqon.substr(0, fqon.find('.'));
+			auto data = view->get_object(modpack + ".data.util.xr.genie.GenieData");
+			for (const auto &[key, value] : data.get_dict("GenieData.terrains")) {
+				auto id = std::dynamic_pointer_cast<nyan::Int>(key.get_ptr());
+				if (id == nullptr) {
+					continue;
+				}
+				const auto n = id->get();
+				if (n == place[0] or n == place[1]) {
+					rule.place.insert(object_name(value));
+				}
+				if (n == side[0] or n == side[1]) {
+					rule.side.insert(object_name(value));
+				}
+			}
+			rule.water = true;
+		}
+		else if (short_name(fqon) == "FishingTrap") {
+			rule.water = true;
+		}
+	}
+	catch (std::exception &err) {
+		log::log(WARN << "Production: placement terrain of " << fqon << " not readable (" << err.what()
+		              << "), placed like a land building");
+	}
+	if (rule.water) {
+		log::log(INFO << "Production: " << short_name(fqon) << " stands on water (" << rule.place.size()
+		              << " placement terrains, " << rule.side.size() << " shore terrains)");
+	}
+	cache.emplace(fqon, rule);
+	return rule;
+}
+
+/// result of a placement check (same rules for the foundation and the ghost)
+struct PlaceCheck {
+	bool ok = false;
+	std::string message;
+	std::vector<econ::tile_pos> tiles;
+	double ne = 0.0;
+	double se = 0.0;
+};
+
+/**
+ * Check the placement of a building at a clicked ground point: land buildings on free,
+ * buildable land without units (and not on farms, XR fork W3), water buildings by their
+ * water rule (docks next to the shore, traps on open water).
+ */
+PlaceCheck check_place(const std::shared_ptr<GameState> &state,
+                       const std::shared_ptr<GameEntity> &builder,
+                       const BuilderComp::Buildable &buildable,
+                       const coord::phys3 &ground_hit,
+                       const time::time_t &now) {
+	PlaceCheck result;
+	auto map = state->get_map();
+	auto hit = map->pick_terrain(ground_hit);
+	auto [ane, ase] = snap_anchor(hit.ne.to_double(), hit.se.to_double(), buildable.radius);
+	result.ne = ane;
+	result.se = ase;
+	result.tiles = building_tiles(ane, ase, buildable.radius);
+
+	// tiles where units stand
+	std::set<std::pair<long, long>> unit_tiles;
+	for (const auto &[id, entity] : state->get_game_entities()) {
+		if (is_unit(entity)) {
+			auto p = position_of(entity, now);
+			unit_tiles.insert({static_cast<long>(std::floor(p.ne.to_double())),
+			                   static_cast<long>(std::floor(p.se.to_double()))});
+		}
+	}
+	auto land = grid_of(builder, state, "Land");
+	auto water = grid_of(builder, state, "Water");
+	auto food_state = state->get_food();
+	const auto size = map->get_size();
+	auto outside = [&](const econ::tile_pos &t) {
+		return t.ne < 0 or t.se < 0 or t.ne >= static_cast<long>(size[0]) or t.se >= static_cast<long>(size[1]);
+	};
+	auto field_there = [&](const econ::tile_pos &t) {
+		return food_state != nullptr and food_state->field_tile(t.ne, t.se);
+	};
+
+	const auto rule = water_rule(state->get_db_view(), buildable.fqon);
+	if (rule.water) {
+		auto res = food::check_water_placement(result.tiles, not rule.side.empty(), [&](const econ::tile_pos &t) {
+			if (outside(t)) {
+				return food::water_tile_t::OUTSIDE;
+			}
+			coord::tile tile{t.ne, t.se};
+			const auto name = map->terrain_name(tile);
+			if (rule.side.contains(name)) {
+				return food::water_tile_t::SHORE;
+			}
+			const bool placeable = rule.place.empty() ? water_terrain_name(name) : rule.place.contains(name);
+			if (not placeable) {
+				return water_terrain_name(name) ? food::water_tile_t::OTHER_WATER : food::water_tile_t::LAND;
+			}
+			if ((water and not map->is_passable(*water, tile)) or field_there(t)) {
+				return food::water_tile_t::BLOCKED;
+			}
+			if (unit_tiles.contains({t.ne, t.se})) {
+				return food::water_tile_t::OCCUPIED;
+			}
+			return food::water_tile_t::WATER;
+		});
+		result.ok = res == food::water_place_t::OK;
+		result.message = food::water_place_message(res);
+		return result;
+	}
+
+	auto check = check_placement(result.tiles, [&](const econ::tile_pos &t) {
+		if (outside(t)) {
+			return tile_state_t::OUTSIDE;
+		}
+		coord::tile tile{t.ne, t.se};
+		if (land and not map->is_passable(*land, tile)) {
+			if (water and map->is_passable(*water, tile)) {
+				return tile_state_t::WATER;
+			}
+			return tile_state_t::BLOCKED;
+		}
+		// landscapes: ice and fords are land paths, but frozen/shallow water
+		if (not terrain_buildable(map->terrain_name(tile))) {
+			return tile_state_t::WATER;
+		}
+		// XR fork W3: farms do not block their tiles, but nothing else is built on them
+		if (field_there(t)) {
+			return tile_state_t::BLOCKED;
+		}
+		if (unit_tiles.contains({t.ne, t.se})) {
+			return tile_state_t::OCCUPIED;
+		}
+		return tile_state_t::FREE;
+	});
+	result.ok = check == placement_t::OK;
+	result.message = placement_message(check);
+	return result;
+}
+
+/// XR fork W3: the player has a finished mill (farms are offered only then, docs/aoe2-spec 13)
+bool has_mill(const tech::Facts &facts) {
+	for (const auto &b : facts.built) {
+		if (short_name(b) == "Mill") {
+			return true;
+		}
+	}
+	return false;
 }
 
 /// population of a player
@@ -825,6 +1029,11 @@ void Production::set_selection(const std::vector<entity_id_t> &ids) {
 }
 
 void Production::command(int code) {
+	if (code == CMD_RESEED_FARM) {
+		// XR fork W3: mill "Feld neu einsäen"
+		this->reseed();
+		return;
+	}
 	const auto *entry = known(code);
 	if (entry == nullptr) {
 		this->set_status("Unbekannter Befehl", status_t::warn);
@@ -839,6 +1048,19 @@ void Production::command(int code) {
 	else {
 		this->train(entry->name);
 	}
+}
+
+void Production::reseed() {
+	Request request;
+	request.kind = Request::kind_t::RESEED;
+	this->push(std::move(request));
+}
+
+void Production::reseed_for(player_id_t player) {
+	Request request;
+	request.kind = Request::kind_t::RESEED;
+	request.for_player = player;
+	this->push(std::move(request));
 }
 
 void Production::train(const std::string &id) {
@@ -1209,6 +1431,32 @@ void Production::update(const std::shared_ptr<GameState> &state,
 	};
 	auto queued_research = queued_research_all(state, now);
 
+	// XR fork W3: costs of a farm for a player (build list of its villagers; a reseed costs the same)
+	auto farm_cost = [&](player_id_t owner) -> std::optional<resource_amounts_t> {
+		for (const auto &[id, entity] : entities) {
+			auto b = component_of<BuilderComp>(entity, component::component_t::BUILDER);
+			if (b == nullptr or not entity->has_component(component::component_t::OWNERSHIP)
+			    or owner_of(entity, now) != owner) {
+				continue;
+			}
+			if (const auto *farm = b->find("Farm")) {
+				return farm->cost;
+			}
+		}
+		return std::nullopt;
+	};
+	// XR fork W3: a finished mill of the player (reseeds are queued there)
+	auto has_own_mill = [&](player_id_t owner) {
+		for (const auto &[id, entity] : entities) {
+			if (entity->has_component(component::component_t::OWNERSHIP) and owner_of(entity, now) == owner
+			    and entity_name(entity) == "Mill" and is_complete(entity)
+			    and not(state->get_combat() != nullptr and state->get_combat()->is_dead(id))) {
+				return true;
+			}
+		}
+		return false;
+	};
+
 	// --- requests ---
 	for (const auto &request : todo) {
 		// ai (XR fork): requests of a computer opponent leave the HUD status alone
@@ -1405,11 +1653,48 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			techs->research_done(state, loop, player, *fqon, now);
 		} break;
 
+		case Request::kind_t::RESEED: {
+			// XR fork W3: mill "Feld neu einsäen" (docs/aoe2-spec 13 L14): costs of a farm now
+			const auto owner = request.for_player.value_or(player_id);
+			auto food_state = state->get_food();
+			if (food_state == nullptr or not has_own_mill(owner)) {
+				status("Feld neu einsäen: zuerst eine Mühle bauen", status_t::warn);
+				break;
+			}
+			auto cost = farm_cost(owner);
+			if (not cost) {
+				status("Feld neu einsäen: keine Dorfbewohner, die Felder bauen", status_t::warn);
+				break;
+			}
+			auto reason = food_state->queue_reseed(state, owner, *cost);
+			if (not reason.empty()) {
+				status(reason, status_t::warn);
+				break;
+			}
+			status("Feld eingereiht (" + std::to_string(food_state->reseeds(owner)) + " in der Mühle)", status_t::info);
+		} break;
+
 		case Request::kind_t::CANCEL:
 		case Request::kind_t::CANCEL_AT: {
 			bool done = false;
 			for (const auto &entity : own) {
 				auto production = component_of<ProductionComp>(entity, component::component_t::PRODUCTION_QUEUE);
+				// XR fork W3: the reseeds follow the research items of a selected mill
+				auto food_state = state->get_food();
+				if (production != nullptr and food_state != nullptr and entity_name(entity) == "Mill"
+				    and ((request.kind == Request::kind_t::CANCEL_AT and request.index >= production->get_queue().size())
+				         or (request.kind == Request::kind_t::CANCEL and production->get_queue().size() == 0))) {
+					const auto owner = owner_of(entity, now);
+					const size_t reseeds = food_state->reseeds(owner);
+					const size_t index = request.kind == Request::kind_t::CANCEL_AT
+					                         ? request.index - production->get_queue().size()
+					                         : (reseeds > 0 ? reseeds - 1 : 0);
+					if (reseeds > 0 and food_state->cancel_reseed(state, owner, index)) {
+						status("Neusäen abgebrochen, Kosten erstattet", status_t::info);
+						done = true;
+						break;
+					}
+				}
 				if (production == nullptr or production->get_queue().size() == 0) {
 					continue;
 				}
@@ -1477,48 +1762,19 @@ void Production::update(const std::shared_ptr<GameState> &state,
 				status(label_of(buildable->name) + ": " + tech::missing_text(buildable->condition, facts), status_t::warn);
 				break;
 			}
-			auto map = state->get_map();
-			auto hit = map->pick_terrain(request.pos);
-			auto [ane, ase] = snap_anchor(hit.ne.to_double(), hit.se.to_double(), buildable->radius);
-			auto tiles = building_tiles(ane, ase, buildable->radius);
-
-			// tiles where units stand
-			std::set<std::pair<long, long>> unit_tiles;
-			for (const auto &[id, entity] : entities) {
-				if (is_unit(entity)) {
-					auto p = position_of(entity, now);
-					unit_tiles.insert({static_cast<long>(std::floor(p.ne.to_double())),
-					                   static_cast<long>(std::floor(p.se.to_double()))});
-				}
+			// XR fork W3: farms only after a mill (docs/aoe2-spec 13: the button appears with the mill)
+			if (buildable->name == "Farm" and not has_mill(facts_of(owner_of(builders.front(), now)))) {
+				status("Farm: zuerst eine Mühle bauen", status_t::warn);
+				break;
 			}
-			auto land = grid_of(builders.front(), state);
-			auto water = grid_of(builders.front(), state, "Water");
-			const auto size = map->get_size();
-			auto result = check_placement(tiles, [&](const econ::tile_pos &t) {
-				if (t.ne < 0 or t.se < 0 or t.ne >= static_cast<long>(size[0]) or t.se >= static_cast<long>(size[1])) {
-					return tile_state_t::OUTSIDE;
-				}
-				coord::tile tile{t.ne, t.se};
-				if (land and not map->is_passable(*land, tile)) {
-					if (water and map->is_passable(*water, tile)) {
-						return tile_state_t::WATER;
-					}
-					return tile_state_t::BLOCKED;
-				}
-				// landscapes: ice and fords are land paths, but frozen/shallow water
-				if (not terrain_buildable(map->terrain_name(tile))) {
-					return tile_state_t::WATER;
-				}
-				if (unit_tiles.contains({t.ne, t.se})) {
-					return tile_state_t::OCCUPIED;
-				}
-				return tile_state_t::FREE;
-			});
-			coord::phys3 anchor{coord::phys_t{ane}, coord::phys_t{ase}, coord::phys_t{0.0}};
-			if (result != placement_t::OK) {
-				status(placement_message(result), status_t::warn);
+			auto map = state->get_map();
+			auto place = check_place(state, builders.front(), *buildable, request.pos, now);
+			const auto &tiles = place.tiles;
+			coord::phys3 anchor{coord::phys_t{place.ne}, coord::phys_t{place.se}, coord::phys_t{0.0}};
+			if (not place.ok) {
+				status(place.message, status_t::warn);
 				log::log(INFO << "Production: " << request.id << " at tile " << tile_str(anchor)
-				              << " rejected: " << placement_message(result));
+				              << " rejected: " << place.message);
 				break;
 			}
 			auto owner = owner_of(builders.front(), now);
@@ -1562,8 +1818,16 @@ void Production::update(const std::shared_ptr<GameState> &state,
 				}
 				this->foundations.insert(building->get_id());
 			}
-			for (const auto &t : tiles) {
-				map->block_tile(coord::tile{t.ne, t.se}, now);
+			if (is_field_name(buildable->name)) {
+				// XR fork W3: farms and traps do not block their tiles; the ground shows the farm
+				if (auto food_state = state->get_food()) {
+					food_state->field_placed(state, building, now);
+				}
+			}
+			else {
+				for (const auto &t : tiles) {
+					map->block_tile(coord::tile{t.ne, t.se}, now);
+				}
 			}
 
 			// the selected villagers start building
@@ -1692,6 +1956,23 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			snap.construction = constructable->get_progress();
 		}
 	}
+	// XR fork W3: food (or other resource) left in the first selected entity, also of gaia
+	// (sheep, deer, carcass, farm, fish, trees, mines): line of the info panel
+	if (not selected.empty()) {
+		auto first = find_entity(state, selected.front());
+		auto h = component_of<component::Harvestable>(first, component::component_t::HARVESTABLE);
+		auto food_state = state->get_food();
+		const bool decayed = food_state != nullptr and first != nullptr and food_state->is_decayed(first->get_id());
+		if (h != nullptr and is_complete(first) and (not h->is_depleted() or decayed)) {
+			if (h->kind == food::source_t::OTHER) {
+				snap.selection_resource = std::string{resource_label(h->get_resource())} + " "
+				                          + std::to_string(static_cast<long>(std::floor(h->get_amount())));
+			}
+			else {
+				snap.selection_resource = food::amount_text(h->kind, h->get_amount(), h->dead, decayed);
+			}
+		}
+	}
 
 	// options: buildings of the first villager, else the units of the first building
 	std::shared_ptr<BuilderComp> builder;
@@ -1729,6 +2010,10 @@ void Production::update(const std::shared_ptr<GameState> &state,
 	};
 	if (builder != nullptr) {
 		for (const auto &b : builder->get_buildables()) {
+			// XR fork W3: the farm button appears once a mill stands (docs/aoe2-spec 13)
+			if (b.name == "Farm" and not has_mill(hud_facts)) {
+				continue;
+			}
 			Option option;
 			const auto *entry = known(b.name);
 			option.code = entry ? entry->code : 0;
@@ -1791,6 +2076,27 @@ void Production::update(const std::shared_ptr<GameState> &state,
 				snap.options.push_back(option);
 			}
 		}
+		// XR fork W3: the mill re-sows farms (one command, docs/aoe2-spec 13 L14)
+		auto food_state = state->get_food();
+		const bool mill = food_state != nullptr and entity_name(producer) == "Mill";
+		if (mill) {
+			Option option;
+			option.code = CMD_RESEED_FARM;
+			option.id = "ReseedFarm";
+			option.label = "Feld neu einsäen";
+			option.icon = "farm";
+			option.effect = "stellt ein Feld in die Warteschlange, das sich nach dem Verfall selbst erneuert";
+			auto cost = farm_cost(player_id);
+			if (cost) {
+				option.cost = *cost;
+				availability(option, food_state->reseeds(player_id));
+			}
+			else {
+				option.available = false;
+				option.reason = "Keine Dorfbewohner, die Felder bauen";
+			}
+			snap.options.push_back(option);
+		}
 		QueueState queue;
 		queue.building = producer->get_id();
 		queue.label = label_of_entity(producer);
@@ -1800,6 +2106,12 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			                       item.research ? label_of(item.name, true) : unit_label(player_id, item.fqon),
 			                       entry ? entry->icon : (item.research ? "tech" : "sword"),
 			                       item.research});
+		}
+		// XR fork W3: queued reseeds as symbols after the research items (click = cancel, full refund)
+		if (mill) {
+			for (size_t i = 0; i < food_state->reseeds(player_id); ++i) {
+				queue.items.push_back({"ReseedFarm", "Feld (neu einsäen)", "farm", false});
+			}
 		}
 		queue.progress = production->get_queue().progress(t);
 		queue.waiting_for_housing = production->get_queue().is_waiting();
@@ -2018,46 +2330,16 @@ void Production::update_placement_preview(const std::shared_ptr<GameState> &stat
 
 	// same footprint and tile rules as place_at()
 	auto map = state->get_map();
-	auto hit = map->pick_terrain(*cursor);
-	auto [ane, ase] = snap_anchor(hit.ne.to_double(), hit.se.to_double(), buildable->radius);
-	auto tiles = building_tiles(ane, ase, buildable->radius);
-	std::set<std::pair<long, long>> unit_tiles;
-	for (const auto &[eid, entity] : state->get_game_entities()) {
-		if (is_unit(entity)) {
-			auto p = position_of(entity, now);
-			unit_tiles.insert({static_cast<long>(std::floor(p.ne.to_double())),
-			                   static_cast<long>(std::floor(p.se.to_double()))});
-		}
-	}
-	auto land = grid_of(builder_entity, state);
-	auto water = grid_of(builder_entity, state, "Water");
-	const auto size = map->get_size();
-	auto check = check_placement(tiles, [&](const econ::tile_pos &tp) {
-		if (tp.ne < 0 or tp.se < 0 or tp.ne >= static_cast<long>(size[0]) or tp.se >= static_cast<long>(size[1])) {
-			return tile_state_t::OUTSIDE;
-		}
-		coord::tile tile{tp.ne, tp.se};
-		if (land and not map->is_passable(*land, tile)) {
-			if (water and map->is_passable(*water, tile)) {
-				return tile_state_t::WATER;
-			}
-			return tile_state_t::BLOCKED;
-		}
-		if (not terrain_buildable(map->terrain_name(tile))) {
-			return tile_state_t::WATER;
-		}
-		if (unit_tiles.contains({tp.ne, tp.se})) {
-			return tile_state_t::OCCUPIED;
-		}
-		return tile_state_t::FREE;
-	});
-	coord::phys3 anchor{coord::phys_t{ane}, coord::phys_t{ase}, coord::phys_t{0.0}};
+	auto place = check_place(state, builder_entity, *buildable, *cursor, now);
+	coord::phys3 anchor{coord::phys_t{place.ne}, coord::phys_t{place.se}, coord::phys_t{0.0}};
 	auto on_ground = map->on_terrain(anchor);
-	result.anchor_ne = ane;
-	result.anchor_se = ase;
+	result.anchor_ne = place.ne;
+	result.anchor_se = place.se;
 	result.anchor_up = on_ground.up.to_double();
-	result.valid = check == placement_t::OK;
-	result.reason = result.valid ? std::string{} : std::string{placement_message(check)};
+	result.valid = place.ok;
+	result.reason = result.valid ? std::string{} : place.message;
+	// XR fork W3 (spec 13): buildings without an own picture (farm, trap) show only a white outline
+	result.outline_only = is_field_name(buildable->name);
 
 	std::lock_guard<std::mutex> lock{this->mutex};
 	if (this->placement == id) {

@@ -5,12 +5,14 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 #include <nyan/nyan.h>
 
 #include "coord/phys.h"
 #include "gamestate/component/api_component.h"
 #include "gamestate/component/types.h"
+#include "gamestate/food_math.h"
 #include "gamestate/resources.h"
 #include "gamestate/types.h"
 #include "time/time.h"
@@ -52,6 +54,8 @@ public:
 		GATHERING,
 		/// walking to the drop site
 		TO_DROP_SITE,
+		/// XR fork W3: killing the animal before its food can be gathered (one strike per step)
+		HUNTING,
 	};
 
 	/// state of the gather job
@@ -69,6 +73,10 @@ public:
 		double chunk = 0.0;
 		/// failed walks in a row (no path)
 		int failed_walks = 0;
+		/// XR fork W3: resource spot (nyan) and kind of the target; the search for the next
+		/// target prefers the same spot (berries after berries, farms after farms)
+		std::string spot{};
+		food::source_t kind = food::source_t::OTHER;
 	};
 
 	Gather(const std::shared_ptr<openage::event::EventLoop> &loop,
@@ -80,6 +88,20 @@ public:
 	void set_skill(resource_t resource, const Skill &skill);
 
 	const Skill &get_skill(resource_t resource) const;
+
+	/**
+	 * XR fork W3: values of the Gather ability whose targets name the resource spot (a villager
+	 * gathers berries, hunts, farms and herds with different rates and capacities); spots that
+	 * no ability names use the first ability of the resource.
+	 */
+	void set_spot_skill(const std::string &spot, const Skill &skill);
+	const Skill &get_skill(resource_t resource, const std::string &spot) const;
+	/// an ability of the unit names the spot in its targets
+	bool names_spot(const std::string &spot) const;
+	/// all spot skills (XR fork W1 + W3: copied into the running unit after a technology)
+	const std::unordered_map<std::string, Skill> &get_spot_skills() const {
+		return this->spot_skills;
+	}
 
 	/// true if the unit can gather this resource
 	bool can_gather(resource_t resource) const;
@@ -94,8 +116,12 @@ public:
 	/// time of the last INFO log of this unit (throttling)
 	time::time_t last_log{time::TIME_MIN};
 
+	/// XR fork W3: the unit moves on water (fishing ship): it uses drop sites on water only
+	bool ship = false;
+
 private:
 	std::array<Skill, RESOURCE_COUNT> skills;
+	std::unordered_map<std::string, Skill> spot_skills;
 	Job job;
 	double carried;
 	resource_t carried_type;

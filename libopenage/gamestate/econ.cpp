@@ -30,14 +30,17 @@
 #include "gamestate/api/animation.h"
 #include "gamestate/api/property.h"
 #include "gamestate/api/types.h"
+#include "gamestate/component/api/constructable.h"
 #include "gamestate/component/api/drop_site.h"
 #include "gamestate/component/api/gather.h"
 #include "gamestate/component/api/harvestable.h"
 #include "gamestate/component/internal/command_queue.h"
 #include "gamestate/component/internal/commands/types.h"
+#include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
 #include "gamestate/component/types.h"
 #include "gamestate/econ_math.h"
+#include "gamestate/food_math.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/pick.h"
@@ -155,16 +158,26 @@ void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
 	std::array<bool, RESOURCE_COUNT> preferred{};
 	std::optional<nyan::Object> harvestable_ability;
 	std::optional<nyan::Object> drop_site_ability;
+	std::optional<nyan::Object> any_ability;
 	double radius = 0.5;
 	double height = 1.0;
+	bool on_water = false;
 
 	for (const auto &ability_val : abilities) {
 		auto ability_fqon = std::dynamic_pointer_cast<nyan::ObjectValue>(ability_val.get_ptr())->get_name();
 		auto ability_obj = owner_db_view->get_object(ability_fqon);
 		auto ability_parent = ability_obj.get_parents()[0];
+		if (not any_ability) {
+			any_ability = ability_obj;
+		}
 
 		try {
-			if (ability_parent == "engine.ability.type.Gather") {
+			if (ability_parent == "engine.ability.type.Move") {
+				// XR fork W3: ships (fishing ship) drop their load at docks only
+				const auto path = ability_obj.get<nyan::ObjectValue>("Move.path_type")->get_name();
+				on_water = path.size() >= 6 and path.compare(path.size() - 6, 6, ".Water") == 0;
+			}
+			else if (ability_parent == "engine.ability.type.Gather") {
 				auto rate_obj = ability_obj.get_object("Gather.gather_rate");
 				auto type = resource_of(rate_obj, "ResourceRate.type");
 				if (not type) {
@@ -172,10 +185,9 @@ void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
 				}
 				auto idx = static_cast<size_t>(*type);
 				bool prefer = *type == resource_t::FOOD and preferred_food_ability(ability_fqon);
-				if (gather and gather->can_gather(*type) and (preferred[idx] or not prefer)) {
-					// one ability per resource: the first one (berries for food)
-					continue;
-				}
+				// the first ability per resource is the default (berries for food); XR fork W3:
+				// every ability also counts for the resource spots it names (hunting, farming, herding)
+				const bool default_skill = not(gather and gather->can_gather(*type) and (preferred[idx] or not prefer));
 
 				component::Gather::Skill skill;
 				skill.available = true;
@@ -200,8 +212,16 @@ void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
 				if (not gather) {
 					gather = std::make_shared<component::Gather>(loop, ability_obj);
 				}
-				gather->set_skill(*type, skill);
-				preferred[idx] = prefer;
+				for (const auto &target_val : ability_obj.get_set("Gather.targets")) {
+					auto spot = std::dynamic_pointer_cast<nyan::ObjectValue>(target_val.get_ptr())->get_name();
+					if (not gather->names_spot(spot)) {
+						gather->set_spot_skill(spot, skill);
+					}
+				}
+				if (default_skill) {
+					gather->set_skill(*type, skill);
+					preferred[idx] = prefer;
+				}
 			}
 			else if (ability_parent == "engine.ability.type.Harvestable") {
 				harvestable_ability = ability_obj;
@@ -222,6 +242,7 @@ void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
 	}
 
 	if (gather) {
+		gather->ship = on_water;
 		entity->add_component(gather);
 	}
 
@@ -234,6 +255,15 @@ void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
 				auto harvestable = std::make_shared<component::Harvestable>(loop, *harvestable_ability, *type, amount);
 				harvestable->radius = radius;
 				harvestable->height = height;
+				// XR fork W3 (food): spot of the data, kind of source, decay of a dead animal
+				harvestable->spot = spot.get_name();
+				harvestable->decay_rate = spot.get_float("ResourceSpot.decay_rate");
+				std::vector<std::string> types;
+				for (const auto &type_val : nyan_obj.get_set("GameEntity.types")) {
+					auto type_name = std::dynamic_pointer_cast<nyan::ObjectValue>(type_val.get_ptr())->get_name();
+					types.push_back(type_name.substr(type_name.rfind('.') + 1));
+				}
+				harvestable->kind = food::source_of(types, nyan_entity.substr(nyan_entity.rfind('.') + 1));
 				entity->add_component(harvestable);
 			}
 		}
@@ -259,6 +289,16 @@ void init_components(const std::shared_ptr<openage::event::EventLoop> &loop,
 		}
 		auto drop_site = std::make_shared<component::DropSite>(loop, *drop_site_ability, accepts);
 		drop_site->radius = radius;
+		entity->add_component(drop_site);
+	}
+	else if (nyan_entity.size() >= 5 and nyan_entity.compare(nyan_entity.size() - 5, 5, ".Dock") == 0 and any_ability) {
+		// XR fork W3 (fishing): the converted dock has no DropSite ability; the fishing ship names it
+		// as its drop site (GenieUnitData.drop_sites = dock): food from ships
+		std::array<bool, RESOURCE_COUNT> accepts{};
+		accepts[static_cast<size_t>(resource_t::FOOD)] = true;
+		auto drop_site = std::make_shared<component::DropSite>(loop, *any_ability, accepts);
+		drop_site->radius = radius;
+		drop_site->water = true;
 		entity->add_component(drop_site);
 	}
 }
@@ -408,7 +448,40 @@ bool can_gather_from(const std::shared_ptr<GameEntity> &gatherer,
 		gatherer->get_component(component::component_t::GATHER));
 	auto harvestable = std::dynamic_pointer_cast<component::Harvestable>(
 		resource->get_component(component::component_t::HARVESTABLE));
-	return not harvestable->is_depleted() and gather->can_gather(harvestable->get_resource());
+	if (harvestable->is_depleted() or not gather->can_gather(harvestable->get_resource())) {
+		return false;
+	}
+	// XR fork W3 (food): animals, fields and fish only with an ability that names them
+	// (villagers hunt, herd and farm; fishing ships fish: the converted Fish ability names
+	// only the trap, its tasks name the fish classes)
+	const auto kind = harvestable->kind;
+	if (kind != food::source_t::OTHER and not gather->names_spot(harvestable->spot)
+	    and not(kind == food::source_t::FISH and gather->ship)) {
+		return false;
+	}
+	if (food::is_field(kind)) {
+		// own, finished fields
+		if (resource->has_component(component::component_t::CONSTRUCTABLE)) {
+			auto constructable = std::dynamic_pointer_cast<component::Constructable>(
+				resource->get_component(component::component_t::CONSTRUCTABLE));
+			if (not constructable->is_complete()) {
+				return false;
+			}
+		}
+	}
+	if (food::is_field(kind)) {
+		// fields of the own player only (herdables: the hunt waits until the animal is converted)
+		auto owner_of = [](const std::shared_ptr<GameEntity> &e) {
+			auto o = std::dynamic_pointer_cast<component::Ownership>(e->get_component(component::component_t::OWNERSHIP));
+			return o ? std::optional<player_id_t>{o->get_owners().get(time::TIME_MAX)} : std::nullopt;
+		};
+		auto own = owner_of(gatherer);
+		auto other = owner_of(resource);
+		if (own and other and *own != *other) {
+			return false;
+		}
+	}
+	return true;
 }
 
 } // namespace openage::gamestate::econ

@@ -62,7 +62,6 @@ constexpr const char *MONKS = "noch ohne Mechanik: Mönche (W6)";
 constexpr const char *SIEGE = "noch ohne Mechanik: Belagerung (W6)";
 constexpr const char *WALLS = "noch ohne Mechanik: Mauern (W5)";
 constexpr const char *TRADE = "noch ohne Mechanik: Markt/Handel (W7)";
-constexpr const char *FARMS = "noch ohne Mechanik: Farmen/Fischen (W3)";
 constexpr const char *GARRISON = "noch ohne Mechanik: Garnison (W4)";
 constexpr const char *WONDER = "noch ohne Mechanik: Wunder/Reliquien (W8)";
 /// the converted data unlocks the watch tower only after a tower exists (condition on itself)
@@ -109,7 +108,7 @@ constexpr CatalogEntry CATALOG[] = {
 	{"BombardCannon", "Bombardenkanone", 145, false, "hammer", detail::U, detail::SIEGE, ""},
 	{"Trebuchet", "Tribock", 146, false, "hammer", detail::U, detail::SIEGE, ""},
 	{"Petard", "Petarde", 147, false, "hammer", detail::U, detail::SIEGE, ""},
-	{"FishingShip", "Fischerboot", 150, false, "hammer", detail::U, detail::SHIPS, ""},
+	{"FishingShip", "Fischerboot", 150, false, "ship", detail::U, nullptr, ""},
 	{"TransportShip", "Transportschiff", 151, false, "hammer", detail::U, detail::SHIPS, ""},
 	{"TradeCog", "Handelskogge", 152, false, "hammer", detail::U, detail::SHIPS, ""},
 	{"Galley", "Galeere", 153, false, "hammer", detail::U, detail::SHIPS, ""},
@@ -138,9 +137,9 @@ constexpr CatalogEntry CATALOG[] = {
 	{"Castle", "Burg", 215, true, "tower", detail::B, nullptr, ""},
 	{"BombardTower", "Bombardenturm", 216, true, "tower", detail::B, detail::TOWERS, ""},
 	{"Market", "Markt", 220, true, "house", detail::B, detail::TRADE, ""},
-	{"Dock", "Hafen", 221, true, "house", detail::B, detail::SHIPS, ""},
-	{"Farm", "Farm", 222, true, "mill", detail::B, detail::FARMS, ""},
-	{"FishingTrap", "Fischreuse", 223, true, "mill", detail::B, detail::FARMS, ""},
+	{"Dock", "Hafen", 221, true, "dock", detail::B, nullptr, ""},
+	{"Farm", "Farm", 222, true, "farm", detail::B, nullptr, ""},
+	{"FishingTrap", "Fischreuse", 223, true, "trap", detail::B, nullptr, ""},
 	{"PalisadeWall", "Palisade", 224, true, "wall", detail::B, detail::WALLS, ""},
 	{"StoneWall", "Steinmauer", 225, true, "wall", detail::B, detail::WALLS, ""},
 	{"StoneGate", "Tor", 226, true, "wall", detail::B, detail::WALLS, ""},
@@ -164,9 +163,9 @@ constexpr CatalogEntry CATALOG[] = {
 	{"StoneMining", "Steinbergbau", 315, false, "tech", detail::T, nullptr, "Steinsammler schneller"},
 	{"StoneShaftMining", "Steinschachtbau", 316, false, "tech", detail::T, nullptr, "Steinsammler schneller"},
 	// Mill (farms)
-	{"HorseCollar", "Kummet", 317, false, "tech", detail::T, detail::FARMS, "Farmen: mehr Nahrung"},
-	{"HeavyPlow", "Schwerer Pflug", 318, false, "tech", detail::T, detail::FARMS, "Farmen: mehr Nahrung"},
-	{"CropRotation", "Fruchtwechsel", 319, false, "tech", detail::T, detail::FARMS, "Farmen: mehr Nahrung"},
+	{"HorseCollar", "Kummet", 317, false, "tech", detail::T, nullptr, "Farmen: mehr Nahrung"},
+	{"HeavyPlow", "Schwerer Pflug", 318, false, "tech", detail::T, nullptr, "Farmen: mehr Nahrung"},
+	{"CropRotation", "Fruchtwechsel", 319, false, "tech", detail::T, nullptr, "Farmen: mehr Nahrung"},
 	// Blacksmith
 	{"Forging", "Schmieden", 320, false, "tech", detail::T, nullptr, "Nahkampf: mehr Angriff"},
 	{"IronCasting", "Eisenguss", 321, false, "tech", detail::T, nullptr, "Nahkampf: mehr Angriff"},
@@ -317,6 +316,14 @@ constexpr std::pair<const char *, const char *> OTHER_LABELS[] = {
 
 /// number of catalog entries
 constexpr size_t CATALOG_SIZE = sizeof(CATALOG) / sizeof(CATALOG[0]);
+
+/**
+ * XR fork W3: commands of buildings that are no game entity or technology (codes 501–599,
+ * stable like the catalog codes).
+ */
+/// mill: "Feld neu einsäen" – queue a farm reseed (costs of a farm, spec 13 L14); the queued
+/// reseeds follow the research items in the training queue of the mill (cancel_training_at)
+constexpr int CMD_RESEED_FARM = 501;
 
 /**
  * Entry by short name (nullptr if not in the catalog). A few names exist as game

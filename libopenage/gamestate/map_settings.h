@@ -250,6 +250,10 @@ struct MapSettings {
 	std::vector<std::string> civs{};
 	/// XR fork (vision): fog of war of a random map; the test map is always ALL
 	vision_mode_t vision = vision_mode_t::NORMAL;
+	/// XR fork W3: animals for food on the random map (sheep near the starts and further away,
+	/// a boar and deer per start); placed after everything else, so false gives the map of
+	/// before W3 (regression check of the generator)
+	bool herds = true;
 	/// XR fork (save games): restore this save file after the map was generated
 	/// (gamestate/save_game.h); the other fields must be the map settings of the
 	/// file. Empty: a new game.

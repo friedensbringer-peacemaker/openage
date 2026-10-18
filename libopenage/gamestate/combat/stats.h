@@ -28,6 +28,10 @@ struct CombatStats {
 	/// automatically and do not count for the victory condition
 	bool ambient = false;
 	bool herdable = false;
+	/// XR fork W3 (hunting): animals (Herdable, AnimalPrey, AnimalPredator) can be hunted by
+	/// players although they belong to gaia; predators (boar) fight back
+	bool animal = false;
+	bool predator = false;
 
 	/// has Live with a health attribute
 	bool alive = false;

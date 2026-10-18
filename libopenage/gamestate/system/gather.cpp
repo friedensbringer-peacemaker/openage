@@ -30,11 +30,17 @@
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
 #include "gamestate/component/types.h"
+#include "gamestate/combat/combat_state.h"
+#include "gamestate/combat/stats.h"
+#include "gamestate/econ.h"
 #include "gamestate/econ_math.h"
+#include "gamestate/food.h"
+#include "gamestate/food_math.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/map.h"
 #include "gamestate/player.h"
+#include "gamestate/production.h"
 #include "gamestate/system/move.h"
 #include "util/fixed_point.h"
 
@@ -192,47 +198,98 @@ std::optional<time::time_t> walk_next_to(const std::shared_ptr<GameEntity> &enti
 	return std::nullopt;
 }
 
-/// nearest resource of a type that has a free side (nothing if none in range)
+/**
+ * XR fork W3: the gatherer may take this food source now: a free field (one worker each),
+ * a herdable of its own player or of gaia, any other source the unit can gather.
+ */
+bool may_take(const std::shared_ptr<GameState> &state,
+              const std::shared_ptr<GameEntity> &gatherer,
+              const std::shared_ptr<GameEntity> &candidate,
+              const component::Harvestable &harvestable,
+              const time::time_t &time) {
+	if (gatherer != nullptr and not econ::can_gather_from(gatherer, candidate)) {
+		return false;
+	}
+	if (food::is_field(harvestable.kind) and harvestable.worker and gatherer != nullptr
+	    and *harvestable.worker != gatherer->get_id()) {
+		return false;
+	}
+	if (harvestable.kind == food::source_t::HERDABLE and gatherer != nullptr and not harvestable.dead) {
+		auto owner = owner_of(candidate, time);
+		auto food_state = state->get_food();
+		if (owner != owner_of(gatherer, time) and not(food_state and food_state->is_gaia(owner))) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * Nearest resource of a type that has a free side (nothing if none in range). XR fork W3:
+ * the same resource spot as before first (berries after berries, farms after farms, deer
+ * after deer; carcasses before living animals), then any other source of the same kind;
+ * animals are never chosen by a gatherer that last gathered plants or mines.
+ */
 std::shared_ptr<GameEntity> find_resource(const std::shared_ptr<GameState> &state,
                                           path::grid_id_t grid,
                                           resource_t type,
                                           const coord::phys3 &from,
                                           double range,
                                           const time::time_t &time,
-                                          const std::shared_ptr<GameEntity> &exclude = nullptr) {
+                                          const std::shared_ptr<GameEntity> &exclude = nullptr,
+                                          const std::shared_ptr<GameEntity> &gatherer = nullptr,
+                                          const std::string &spot = {},
+                                          food::source_t kind = food::source_t::OTHER) {
 	std::shared_ptr<GameEntity> best;
-	double best_d2 = range * range;
+	double best_score = std::numeric_limits<double>::max();
+	const double range2 = range * range;
 	for (const auto &[id, candidate] : state->get_game_entities()) {
 		auto harvestable = harvestable_of(candidate);
 		if (candidate == exclude or harvestable == nullptr or harvestable->is_depleted()
 		    or harvestable->get_resource() != type) {
 			continue;
 		}
-		auto pos = position_of(candidate, time);
-		auto d2 = distance2(pos, from);
-		if (d2 >= best_d2) {
+		const bool same_spot = not spot.empty() and harvestable->spot == spot;
+		// another kind (berries -> deer) is not a continuation: the unit goes idle like in AoE II
+		if (gatherer != nullptr and harvestable->kind != kind and not same_spot) {
 			continue;
 		}
-		if (not has_free_side(state, grid, pos, harvestable->radius)) {
+		auto pos = position_of(candidate, time);
+		auto d2 = distance2(pos, from);
+		if (d2 >= range2) {
+			continue;
+		}
+		// same spot first, carcasses before living animals (tiles², so a penalty of 10 000 orders the groups)
+		double score = d2 + (same_spot or spot.empty() ? 0.0 : 10000.0)
+		               + (food::is_animal(harvestable->kind) and not harvestable->dead ? 5000.0 : 0.0);
+		if (score >= best_score) {
+			continue;
+		}
+		if (not may_take(state, gatherer, candidate, *harvestable, time)) {
+			continue;
+		}
+		if (not food::is_field(harvestable->kind) and not has_free_side(state, grid, pos, harvestable->radius)) {
 			continue;
 		}
 		best = candidate;
-		best_d2 = d2;
+		best_score = score;
 	}
 	return best;
 }
 
-/// nearest drop site of the player that accepts the resource
+/// nearest drop site of the player that accepts the resource (XR fork W3: ships use docks only)
 std::shared_ptr<GameEntity> find_drop_site(const std::shared_ptr<GameState> &state,
                                            player_id_t owner,
                                            resource_t type,
                                            const coord::phys3 &from,
-                                           const time::time_t &time) {
+                                           const time::time_t &time,
+                                           bool ship = false) {
 	std::shared_ptr<GameEntity> best;
 	double best_d2 = std::numeric_limits<double>::max();
 	for (const auto &[id, candidate] : state->get_game_entities()) {
 		auto drop_site = drop_site_of(candidate);
-		if (drop_site == nullptr or not drop_site->accepts(type) or owner_of(candidate, time) != owner) {
+		if (drop_site == nullptr or not drop_site->accepts(type) or owner_of(candidate, time) != owner
+		    or drop_site->water != ship) {
 			continue;
 		}
 		auto d2 = distance2(position_of(candidate, time), from);
@@ -306,6 +363,126 @@ time::time_t go_drop_off(const std::shared_ptr<GameEntity> &entity,
                          GatherComp &gather,
                          const time::time_t &time);
 
+/// XR fork W3: the next target after the old one is gone, empty or taken (same spot or kind near it)
+std::shared_ptr<GameEntity> next_target(const std::shared_ptr<GameEntity> &entity,
+                                        const std::shared_ptr<GameState> &state,
+                                        GatherComp &gather,
+                                        const coord::phys3 &from,
+                                        const std::shared_ptr<GameEntity> &exclude,
+                                        const time::time_t &time) {
+	auto &job = gather.get_job();
+	auto grid = grid_of(entity, state);
+	if (not grid) {
+		return nullptr;
+	}
+	auto next = find_resource(state, *grid, job.resource, from, RESUME_SEARCH_RANGE, time, exclude, entity, job.spot,
+	                          job.kind);
+	if (next != nullptr) {
+		auto h = harvestable_of(next);
+		job.target = next->get_id();
+		job.target_pos = position_of(next, time);
+		job.spot = h->spot;
+		job.kind = h->kind;
+	}
+	return next;
+}
+
+/**
+ * XR fork W3: kill the animal of the job (docs/aoe2-spec 02 §2.4): walk into the strike range
+ * (prey: the spear range, boars and herdables: melee), strike once per reload through the
+ * combat state. A herdable of gaia is approached until the food tick gives it to the
+ * player of the hunter; one of another player is not taken.
+ */
+time::time_t hunt(const std::shared_ptr<GameEntity> &entity,
+                  const std::shared_ptr<GameState> &state,
+                  GatherComp &gather,
+                  const std::shared_ptr<GameEntity> &target,
+                  const component::Harvestable &harvestable,
+                  const time::time_t &time) {
+	auto &job = gather.get_job();
+	auto combat = state->get_combat();
+	auto food_state = state->get_food();
+	auto a_stats = combat->get_stats(entity->get_id());
+	auto t_stats = combat->get_stats(target->get_id());
+	if (a_stats == nullptr or not a_stats->can_attack or t_stats == nullptr) {
+		log::log(INFO << "Gather: unit " << entity->get_id() << " cannot hunt entity " << target->get_id() << ", idle");
+		return end_job(gather);
+	}
+	const auto owner = owner_of(entity, time);
+	const auto target_owner = owner_of(target, time);
+	bool may_strike = true;
+	if (harvestable.kind == food::source_t::HERDABLE and target_owner != owner) {
+		if (not(food_state and food_state->is_gaia(target_owner))) {
+			log::log(INFO << "Gather: unit " << entity->get_id() << " cannot take herdable " << target->get_id()
+			              << " of player " << target_owner << ", idle");
+			return end_job(gather);
+		}
+		may_strike = false;
+	}
+	auto pos = position_of(entity, time);
+	auto tpos = position_of(target, time);
+	const double edge = food::edge_distance(pos.ne.to_double(), pos.se.to_double(), a_stats->radius,
+	                                        tpos.ne.to_double(), tpos.se.to_double(), t_stats->radius);
+	if (may_strike and food::can_strike(harvestable.kind, edge)) {
+		auto pos_component = std::dynamic_pointer_cast<component::Position>(
+			entity->get_component(component::component_t::POSITION));
+		auto to_target = tpos - pos;
+		pos_component->set_position(time, pos);
+		if (to_target.length() > 1e-3) {
+			pos_component->set_angle(time, to_target.to_angle());
+		}
+		auto result = combat->strike(state, entity->get_id(), target->get_id(), time);
+		if (job.phase != phase_t::HUNTING and unit_log_due(gather, time)) {
+			log::log(INFO << "Gather: unit " << entity->get_id() << " hunts " << prod::entity_name(target) << " "
+			              << target->get_id() << " at tile " << tile_str(tpos) << " (edge " << edge << ")");
+		}
+		job.phase = phase_t::HUNTING;
+		job.failed_walks = 0;
+		if (result.killed) {
+			// the next step gathers the carcass
+			job.phase = phase_t::TO_RESOURCE;
+			return time::time_t::from_double(0.05);
+		}
+		return time::time_t::from_double(std::max(0.1, result.ready_in));
+	}
+
+	// walk towards the animal; it moves, so the way is planned again after a short step
+	double dx = pos.ne.to_double() - tpos.ne.to_double();
+	double dy = pos.se.to_double() - tpos.se.to_double();
+	double len = std::hypot(dx, dy);
+	if (len < 1e-6) {
+		dx = 1.0;
+		dy = 0.0;
+		len = 1.0;
+	}
+	const double keep = a_stats->radius + t_stats->radius
+	                    + (harvestable.kind == food::source_t::PREY ? 0.6 * food::PREY_STRIKE_RANGE : 0.1);
+	auto map = state->get_map();
+	auto dest = map->on_terrain(coord::phys3{coord::phys_t{tpos.ne.to_double() + dx / len * keep},
+	                                         coord::phys_t{tpos.se.to_double() + dy / len * keep},
+	                                         coord::phys_t{0.0}});
+	auto duration = Move::move_default(entity, state, dest, time);
+	auto end = position_of(entity, time + duration);
+	std::optional<time::time_t> walk;
+	if (distance2(end, dest) < 0.25) {
+		walk = duration;
+	}
+	else {
+		walk = walk_next_to(entity, state, tpos, harvestable.radius, time);
+	}
+	if (not walk) {
+		job.failed_walks += 1;
+		if (job.failed_walks >= 2 * MAX_FAILED_WALKS) {
+			log::log(INFO << "Gather: unit " << entity->get_id() << " cannot reach " << prod::entity_name(target) << " "
+			              << target->get_id() << ", idle");
+			return end_job(gather);
+		}
+		return time::time_t::from_double(0.3);
+	}
+	job.phase = phase_t::HUNTING;
+	return std::clamp(*walk, time::time_t::from_double(0.1), time::time_t::from_double(0.5));
+}
+
 /**
  * Continue at the resource: gather the next chunk, walk to it, look for the next
  * resource of the same type, or carry the load home.
@@ -315,21 +492,22 @@ time::time_t continue_at_resource(const std::shared_ptr<GameEntity> &entity,
                                   GatherComp &gather,
                                   const time::time_t &time) {
 	auto &job = gather.get_job();
-	const auto &skill = gather.get_skill(job.resource);
+	auto food_state = state->get_food();
 
-	if (gather.get_carried() >= skill.capacity - 1e-6) {
+	if (gather.get_carried() >= gather.get_skill(job.resource, job.spot).capacity - 1e-6) {
 		return go_drop_off(entity, state, gather, time);
 	}
 
 	auto target = job.target ? find_entity(state, *job.target) : nullptr;
 	auto harvestable = harvestable_of(target);
-	if (harvestable == nullptr or harvestable->is_depleted()) {
+	const bool taken = harvestable != nullptr and not harvestable->is_depleted()
+	                   and not may_take(state, entity, target, *harvestable, time);
+	if (harvestable == nullptr or harvestable->is_depleted() or taken) {
 		// next resource of the same type near the old one
-		auto grid = grid_of(entity, state);
-		std::shared_ptr<GameEntity> next;
-		if (grid) {
-			next = find_resource(state, *grid, job.resource, job.target_pos, RESUME_SEARCH_RANGE, time);
+		if (taken and food_state) {
+			food_state->release(target, entity->get_id());
 		}
+		auto next = next_target(entity, state, gather, job.target_pos, target, time);
 		if (next == nullptr) {
 			if (gather.get_carried() > 0.0) {
 				return go_drop_off(entity, state, gather, time);
@@ -340,9 +518,22 @@ time::time_t continue_at_resource(const std::shared_ptr<GameEntity> &entity,
 		}
 		target = next;
 		harvestable = harvestable_of(next);
-		job.target = next->get_id();
-		job.target_pos = position_of(next, time);
 	}
+	// XR fork W3: one worker per field
+	if (food::is_field(harvestable->kind) and food_state and not food_state->claim(target, entity->get_id())) {
+		auto next = next_target(entity, state, gather, job.target_pos, target, time);
+		if (next == nullptr) {
+			log::log(INFO << "Gather: unit " << entity->get_id() << " finds no free field, idle");
+			return end_job(gather);
+		}
+		job.phase = phase_t::TO_RESOURCE;
+		return time::time_t::from_double(0.1);
+	}
+	// XR fork W3: animals are killed before their food can be gathered
+	if (food::is_animal(harvestable->kind) and not harvestable->dead) {
+		return hunt(entity, state, gather, target, *harvestable, time);
+	}
+	const auto &skill = gather.get_skill(job.resource, job.spot);
 
 	auto target_pos = position_of(target, time);
 	auto pos = position_of(entity, time);
@@ -364,18 +555,15 @@ time::time_t continue_at_resource(const std::shared_ptr<GameEntity> &entity,
 			return end_job(gather);
 		}
 		// unreachable: try another resource of the same type
-		auto grid = grid_of(entity, state);
-		std::shared_ptr<GameEntity> next;
-		if (grid) {
-			next = find_resource(state, *grid, job.resource, pos, RESUME_SEARCH_RANGE, time, target);
+		if (food_state) {
+			food_state->release(target, entity->get_id());
 		}
+		auto next = next_target(entity, state, gather, pos, target, time);
 		if (next == nullptr) {
 			log::log(INFO << "Gather: unit " << entity->get_id() << " finds no path to "
 			              << to_string(job.resource) << ", idle");
 			return end_job(gather);
 		}
-		job.target = next->get_id();
-		job.target_pos = position_of(next, time);
 		// re-evaluated in the next step (after a short pause)
 		job.phase = phase_t::TO_RESOURCE;
 		return time::time_t::from_double(0.1);
@@ -420,7 +608,7 @@ time::time_t go_drop_off(const std::shared_ptr<GameEntity> &entity,
 	auto &job = gather.get_job();
 	auto pos = position_of(entity, time);
 	auto owner = owner_of(entity, time);
-	auto site = find_drop_site(state, owner, gather.get_carried_type(), pos, time);
+	auto site = find_drop_site(state, owner, gather.get_carried_type(), pos, time, gather.ship);
 	if (site == nullptr) {
 		log::log(INFO << "Gather: unit " << entity->get_id() << " has no drop site for "
 		              << to_string(gather.get_carried_type()) << ", idle");
@@ -439,7 +627,8 @@ time::time_t go_drop_off(const std::shared_ptr<GameEntity> &entity,
 	// data's carry graphics (Move override of the container's carry progress, e.g.
 	// a bundle of wood or a basket) replace it on the way to the drop site. The walk
 	// back starts in continue_at_resource with the plain Move animation again.
-	const auto &skill = gather.get_skill(gather.get_carried_type());
+	const auto &skill = gather.get_carried_type() == job.resource ? gather.get_skill(job.resource, job.spot)
+	                                                              : gather.get_skill(gather.get_carried_type());
 	if (*walk > 0 and not skill.carry_animation.empty()
 	    and gather.get_carried() >= skill.carry_from * skill.capacity - 1e-6) {
 		entity->render_update(time, skill.carry_animation);
@@ -477,7 +666,7 @@ const time::time_t Gather::gather_command(const std::shared_ptr<gamestate::GameE
 	auto target = find_entity(state, command->get_target());
 	auto harvestable = harvestable_of(target);
 	if (harvestable == nullptr or harvestable->is_depleted()
-	    or not gather->can_gather(harvestable->get_resource())) {
+	    or not econ::can_gather_from(entity, target)) {
 		log::log(INFO << "Gather: unit " << entity->get_id() << " cannot gather from entity "
 		              << command->get_target());
 		end_job(*gather);
@@ -485,11 +674,17 @@ const time::time_t Gather::gather_command(const std::shared_ptr<gamestate::GameE
 	}
 
 	auto &job = gather->get_job();
+	// XR fork W3: a new order lets the old field go
+	if (job.target and *job.target != target->get_id() and state->get_food()) {
+		state->get_food()->release(find_entity(state, *job.target), entity->get_id());
+	}
 	job = GatherComp::Job{};
 	job.phase = phase_t::NONE;
 	job.target = target->get_id();
 	job.resource = harvestable->get_resource();
 	job.target_pos = position_of(target, start_time);
+	job.spot = harvestable->spot;
+	job.kind = harvestable->kind;
 	if (gather->get_carried() > 0.0 and gather->get_carried_type() != job.resource) {
 		// AoE: switching the resource drops the load
 		gather->set_carried(job.resource, 0.0);
@@ -527,7 +722,24 @@ const time::time_t Gather::gather_step(const std::shared_ptr<gamestate::GameEnti
 			auto taken = harvestable->take(job.chunk);
 			gather->set_carried(job.resource, gather->get_carried() + taken);
 			if (harvestable->get_amount() <= 0.0) {
-				deplete(target, state, start_time);
+				auto food_state = state->get_food();
+				if (food::is_field(harvestable->kind) and food_state) {
+					// XR fork W3: reseeded from the mill queue (the worker builds it) or decays
+					if (food_state->field_empty(state, target, entity, start_time) == food::empty_t::RESEED) {
+						job.chunk = 0.0;
+						end_job(*gather);
+						return time::time_t::from_double(0.05);
+					}
+				}
+				else if (harvestable->dead and food_state) {
+					// XR fork W3: a carcass gathered empty
+					log::log(INFO << "Gather: carcass " << target->get_id() << " gathered empty by unit "
+					              << entity->get_id());
+					food_state->carcass_empty(state, target, start_time);
+				}
+				else {
+					deplete(target, state, start_time);
+				}
 			}
 		}
 		job.chunk = 0.0;
@@ -535,6 +747,7 @@ const time::time_t Gather::gather_step(const std::shared_ptr<gamestate::GameEnti
 	}
 
 	case phase_t::TO_RESOURCE:
+	case phase_t::HUNTING:
 		return continue_at_resource(entity, state, *gather, start_time);
 
 	case phase_t::TO_DROP_SITE: {

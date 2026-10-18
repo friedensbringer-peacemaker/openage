@@ -4,9 +4,14 @@
 
 #include <nyan/nyan.h>
 
+#include <optional>
+#include <string>
+
 #include "gamestate/component/api_component.h"
 #include "gamestate/component/types.h"
+#include "gamestate/food_math.h"
 #include "gamestate/resources.h"
+#include "gamestate/types.h"
 
 
 namespace openage::gamestate::component {
@@ -57,6 +62,9 @@ public:
 	/// mark as removed from the world
 	void set_depleted();
 
+	/// XR fork W3: refill (a farm is finished again) and take it as the new starting amount
+	void refill(double amount);
+
 private:
 	resource_t resource;
 	double amount;
@@ -68,6 +76,18 @@ public:
 	double radius = 0.5;
 	/// hitbox height (scene up units, for picking)
 	double height = 1.0;
+
+	// ---- XR fork W3 (food): how it is gathered, decay, worker
+	/// nyan ResourceSpot of the data (the Gather.targets of a gatherer name it)
+	std::string spot{};
+	/// kind of food source (animal, farm, fish, other)
+	food::source_t kind = food::source_t::OTHER;
+	/// food lost per second once the animal is dead (ResourceSpot.decay_rate)
+	double decay_rate = 0.0;
+	/// the animal is dead (a carcass): gatherable, decays
+	bool dead = false;
+	/// farm / trap: the worker that holds it (one each, spec 02 §2.6)
+	std::optional<entity_id_t> worker{};
 };
 
 } // namespace openage::gamestate::component

@@ -149,6 +149,41 @@ public:
 	          entity_id_t id,
 	          const time::time_t &time);
 
+	// ---- XR fork W3 (hunting, gamestate/food.h): gaia animals as targets of players
+
+	/// result of strike()
+	struct StrikeResult {
+		/// a hit was applied now
+		bool struck = false;
+		/// the target is dead (now or before)
+		bool killed = false;
+		/// seconds until the attacker may strike again (reload)
+		double ready_in = 0.0;
+	};
+
+	/**
+	 * One hit of a hunter on an animal (or a herdable of its own player) without an attack
+	 * order: the gather system walks the hunter into range and calls this once per step.
+	 * Respects the reload time of the attacker; a predator (boar) fights back like a
+	 * military unit. No owner check (the caller decides what may be hunted).
+	 */
+	StrikeResult strike(const std::shared_ptr<GameState> &state,
+	                    entity_id_t attacker,
+	                    entity_id_t target,
+	                    const time::time_t &time);
+
+	/**
+	 * Called when an entity dies; returning true keeps it in the game as a dead entity
+	 * (a carcass that is gathered, gamestate/food.h): no removal after the death animation,
+	 * the handler removes it later with remove().
+	 */
+	void on_death(std::function<bool(const std::shared_ptr<GameEntity> &, const time::time_t &)> handler);
+
+	/// called after every hit (attacker, target), e.g. a prey flees
+	void on_hit(std::function<void(const std::shared_ptr<GameEntity> &, const std::shared_ptr<GameEntity> &,
+	                               const time::time_t &)> handler);
+	// ---- end XR fork W3
+
 	// ---- event handlers
 	void tick(const std::shared_ptr<GameState> &state, entity_id_t attacker, const time::time_t &time);
 	void scan(const std::shared_ptr<GameState> &state, const time::time_t &time);
@@ -229,6 +264,8 @@ private:
 	const Combatant *find(entity_id_t id) const;
 	player_id_t owner_of(const std::shared_ptr<GameEntity> &entity, const time::time_t &time) const;
 	bool is_enemy(const Combatant &a, const Combatant &b, const time::time_t &time) const;
+	/// XR fork W3: a player's entity and a gaia animal (explicit hunt, a boar fighting back)
+	bool is_hunt(const Combatant &a, const Combatant &b, const time::time_t &time) const;
 	coord::phys3 position_of(const std::shared_ptr<GameEntity> &entity, const time::time_t &time) const;
 	bool is_moving(const std::shared_ptr<GameEntity> &entity, const time::time_t &time) const;
 	double edge_between(const Combatant &a, const Combatant &b, const time::time_t &time) const;
@@ -254,6 +291,11 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<const CombatStats>> stats_cache;
 
 	std::unordered_set<player_id_t> neutral;
+	/// XR fork W3: death and hit handlers (food state)
+	std::vector<std::function<bool(const std::shared_ptr<GameEntity> &, const time::time_t &)>> death_handlers;
+	std::vector<std::function<void(const std::shared_ptr<GameEntity> &, const std::shared_ptr<GameEntity> &,
+	                               const time::time_t &)>>
+		hit_handlers;
 	/// fog of war (XR fork), may be nullptr
 	std::shared_ptr<vision::VisionState> vision;
 	/// players that ever had units or buildings

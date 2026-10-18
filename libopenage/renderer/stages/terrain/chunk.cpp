@@ -41,6 +41,10 @@ void TerrainChunk::fetch_updates(const time::time_t & /* time */) {
 	// Recreate the mesh data
 	// TODO: Change mesh instead of recreating it
 	// TODO: Multiple meshes
+	// XR fork W3: the render stage removes the renderables of the old meshes (terrain changed later)
+	for (auto &mesh : this->meshes) {
+		this->retired.push_back(mesh);
+	}
 	this->meshes.clear();
 	for (const auto &terrain_path : terrain_paths) {
 		auto new_mesh = this->create_mesh(terrain_size, tiles, heightmap_verts, terrain_path);
@@ -65,6 +69,12 @@ void TerrainChunk::update_uniforms(const time::time_t &time) {
 
 const std::vector<std::shared_ptr<TerrainRenderMesh>> &TerrainChunk::get_meshes() const {
 	return this->meshes;
+}
+
+std::vector<std::shared_ptr<TerrainRenderMesh>> TerrainChunk::take_retired_meshes() {
+	std::vector<std::shared_ptr<TerrainRenderMesh>> out;
+	out.swap(this->retired);
+	return out;
 }
 
 std::shared_ptr<TerrainRenderMesh> TerrainChunk::create_mesh(const util::Vector2s vert_size,

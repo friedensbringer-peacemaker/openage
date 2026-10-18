@@ -18,7 +18,10 @@
 #include "gamestate/component/internal/commands/idle.h"
 #include "gamestate/component/internal/commands/move.h"
 #include "gamestate/component/types.h"
+#include "gamestate/component/api/harvestable.h"
 #include "gamestate/econ.h"
+#include "gamestate/food.h"
+#include "gamestate/food_math.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/map.h"
@@ -185,12 +188,46 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 		}
 	}
 
+	// XR fork W3 (food): a right click on an own decayed farm builds it again (costs of a farm)
+	std::optional<entity_id_t> rebuilt_by;
+	if (command_type == component::command::command_t::MOVE and not plain and not enemy_picked
+	    and build_target == nullptr and not ids.empty() and gstate->get_food() != nullptr) {
+		auto first = gstate->get_game_entity(ids.front());
+		auto owner = std::dynamic_pointer_cast<component::Ownership>(
+			first->get_component(component::component_t::OWNERSHIP));
+		auto picked = gstate->get_food()->pick_decayed(gstate, params.get("target", coord::phys3{0, 0, 0}),
+		                                               owner->get_owners().get(time), time);
+		if (picked) {
+			auto field = gstate->get_game_entity(*picked);
+			for (auto id : ids) {
+				auto entity = gstate->get_game_entity(id);
+				if (not entity->has_component(component::component_t::BUILDER)) {
+					continue;
+				}
+				auto reason = gstate->get_food()->rebuild(gstate, field, entity, time);
+				if (reason.empty()) {
+					rebuilt_by = id;
+					build_target = field;
+					gather_target = nullptr;
+				}
+				else {
+					log::log(INFO << "Command: decayed field " << *picked << " not rebuilt: " << reason);
+				}
+				break;
+			}
+		}
+	}
+
 	bool rally_picked = false;
 	std::shared_ptr<GameEntity> rally_entity;
 	for (auto id : ids) {
 		auto entity = gstate->get_game_entity(id);
 		auto command_queue = std::dynamic_pointer_cast<component::CommandQueue>(
 			entity->get_component(component::component_t::COMMANDQUEUE));
+		if (rebuilt_by and *rebuilt_by == id) {
+			// already has its build command (FoodState::rebuild)
+			continue;
+		}
 
 		// XR fork (production): build a foundation; buildings set their rally point
 		if (prod::can_build(entity, build_target, time)) {
@@ -221,6 +258,16 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 				time,
 				std::make_shared<component::command::GatherCommand>(gather_target->get_id()));
 			continue;
+		}
+		// XR fork W3: units that cannot hunt attack an animal under the cursor (soldiers kill deer and boars)
+		if (gather_target != nullptr and gather_target->has_component(component::component_t::HARVESTABLE)
+		    and gstate->get_combat() != nullptr) {
+			auto h = std::dynamic_pointer_cast<component::Harvestable>(
+				gather_target->get_component(component::component_t::HARVESTABLE));
+			if (food::is_animal(h->kind) and not h->dead
+			    and gstate->get_combat()->order_attack(gstate, id, gather_target->get_id(), time)) {
+				continue;
+			}
 		}
 
 		switch (command_type) {

@@ -369,6 +369,10 @@ void TechState::refresh_player(const std::shared_ptr<GameState> &state,
 					gather->set_skill(type, fresh_gather->get_skill(type));
 				}
 			}
+			// XR fork W3: the rates per resource spot (hunting, farming, herding)
+			for (const auto &[spot, skill] : fresh_gather->get_spot_skills()) {
+				gather->set_spot_skill(spot, skill);
+			}
 		}
 		auto queue = component_of<component::ProductionQueue>(entity, component::component_t::PRODUCTION_QUEUE);
 		auto fresh_queue = component_of<component::ProductionQueue>(fresh, component::component_t::PRODUCTION_QUEUE);

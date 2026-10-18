@@ -28,6 +28,22 @@ const Gather::Skill &Gather::get_skill(resource_t resource) const {
 	return this->skills.at(static_cast<size_t>(resource));
 }
 
+void Gather::set_spot_skill(const std::string &spot, const Skill &skill) {
+	this->spot_skills[spot] = skill;
+}
+
+const Gather::Skill &Gather::get_skill(resource_t resource, const std::string &spot) const {
+	auto it = this->spot_skills.find(spot);
+	if (it != this->spot_skills.end() and it->second.available) {
+		return it->second;
+	}
+	return this->get_skill(resource);
+}
+
+bool Gather::names_spot(const std::string &spot) const {
+	return this->spot_skills.contains(spot);
+}
+
 bool Gather::can_gather(resource_t resource) const {
 	auto idx = static_cast<size_t>(resource);
 	return idx < RESOURCE_COUNT and this->skills[idx].available;
