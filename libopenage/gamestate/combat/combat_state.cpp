@@ -520,6 +520,7 @@ void CombatState::player_moved(entity_id_t id, const std::optional<coord::phys3>
 	this->clear_order(*c);
 	c->entering.reset();
 	c->fleeing = false;
+	c->return_to_post = false;
 	c->resume_gather.reset();
 	c->resume_build.reset();
 	if (destination) {
@@ -596,9 +597,48 @@ std::vector<entity_id_t> CombatState::formation_move(const std::shared_ptr<GameS
 	centroid.y /= static_cast<double>(members.size());
 	const Point dest = ground(destination);
 	Point dir{dest.x - centroid.x, dest.y - centroid.y};
-	const auto slots = formation_slots(formation, members, dest, dir);
+	auto slots = formation_slots(formation, members, dest, dir);
 	const double speed = group_speed(speeds);
 	auto map = state->get_map();
+	// slots on blocked tiles (trees, buildings) move to the nearest free tile no other slot uses
+	std::optional<path::grid_id_t> grid;
+	if (auto move = component_of<component::Move>(this->find(members.front().id)->entity, component::component_t::MOVE)) {
+		try {
+			grid = map->get_grid_id(move->get_ability().get<nyan::ObjectValue>("Move.path_type")->get_name());
+		}
+		catch (std::exception &) {
+		}
+	}
+	if (grid) {
+		std::vector<Point> taken;
+		for (auto &[id, slot] : slots) {
+			auto free = [&](const Point &p) {
+				if (not map->is_passable(*grid, phys(p).to_tile())) {
+					return false;
+				}
+				for (const auto &t : taken) {
+					if (distance(t, p) < 0.7) {
+						return false;
+					}
+				}
+				return true;
+			};
+			if (not free(slot)) {
+				bool found = false;
+				for (int r = 1; r <= 6 and not found; ++r) {
+					for (int i = 0; i < 8 * r and not found; ++i) {
+						const double a = 6.283185307 * static_cast<double>(i) / static_cast<double>(8 * r);
+						Point p{slot.x + std::cos(a) * r * 0.75, slot.y + std::sin(a) * r * 0.75};
+						if (free(p)) {
+							slot = p;
+							found = true;
+						}
+					}
+				}
+			}
+			taken.push_back(slot);
+		}
+	}
 	std::vector<entity_id_t> moved;
 	for (const auto &[id, slot] : slots) {
 		auto *c = this->find(id);
@@ -756,10 +796,16 @@ void CombatState::update_order(const std::shared_ptr<GameState> &state, Combatan
 	default:
 		break;
 	}
-	// stance leash: back to the post (06 §6.2)
-	if (not c.target and c.post and not moving and stance_returns(c.stance, distance(pos, *c.post))
-	    and c.stats->military()) {
-		this->order_move(state, c, *c.post, time);
+	// stance leash: back to the post (06 §6.2); after an automatic fight a defensive unit
+	// walks back as well
+	if (not c.target and c.post and not moving and c.stats->military()) {
+		const double d = distance(pos, *c.post);
+		if (stance_returns(c.stance, d) or (c.return_to_post and d > 1.0)) {
+			this->order_move(state, c, *c.post, time);
+		}
+		if (d <= 1.0) {
+			c.return_to_post = false;
+		}
 	}
 }
 
@@ -1132,12 +1178,18 @@ void CombatState::engage(const std::shared_ptr<GameState> &state,
                          entity_id_t target,
                          bool explicit_order,
                          const time::time_t &time) {
+	if (not attacker.post and attacker.stats->movable and not attacker.inside) {
+		attacker.post = ground(this->position_of(attacker.entity, time));
+	}
 	attacker.target = target;
 	attacker.explicit_order = explicit_order;
 	attacker.chase_destination.reset();
 	attacker.chase_failures = 0;
 	if (explicit_order) {
 		attacker.order = order_t::ATTACK;
+	}
+	else if (attacker.stance == stance_t::DEFENSIVE or attacker.stance == stance_t::STAND_GROUND) {
+		attacker.return_to_post = true;
 	}
 	this->schedule_tick(state, attacker, time);
 }
@@ -1883,6 +1935,10 @@ void CombatState::scan(const std::shared_ptr<GameState> &state, const time::time
 				}
 			}
 		}
+		// units without a command keep the place where they stand as their post
+		if (not c->post and c->stats->movable and not c->inside and not this->is_moving(c->entity, time)) {
+			c->post = ground(this->position_of(c->entity, time));
+		}
 		this->update_flight(state, *c, time);
 		this->update_order(state, *c, time);
 	}
@@ -2004,14 +2060,14 @@ std::optional<SavedCombat> CombatState::save_entity(entity_id_t id) const {
 	    or c->order == order_t::FOLLOW) {
 		s.order = c->order;
 		s.route = c->route;
-		s.order_entity = c->order_entity.value_or(0);
+		s.order_entity = c->order_entity;
 	}
-	s.inside = c->inside.value_or(0);
+	s.inside = c->inside;
 	s.by_bell = c->by_bell;
 	s.bell_from = c->bell_from;
 	s.bell = c->bell;
 	if (s.stance == stance_t::AGGRESSIVE and s.formation == formation_t::NONE and s.order == order_t::NONE
-	    and s.inside == 0 and not s.bell) {
+	    and not s.inside and not s.bell) {
 		return std::nullopt;
 	}
 	return s;
@@ -2030,23 +2086,21 @@ void CombatState::load_entity(const std::shared_ptr<GameState> &state, entity_id
 		c->formation = saved.formation;
 	}
 	c->bell = saved.bell;
-	if (saved.inside != 0) {
-		if (auto *b = this->find(saved.inside); b and this->accepts(*b, *c, time)) {
+	if (saved.inside) {
+		if (auto *b = this->find(*saved.inside); b and this->accepts(*b, *c, time)) {
 			c->by_bell = saved.by_bell;
 			c->bell_from = saved.bell_from;
 			this->enter(state, *c, *b, time);
 		}
 		else {
-			log::log(INFO << "Load: garrison building " << saved.inside << " of entity " << id << " is gone");
+			log::log(INFO << "Load: garrison building " << *saved.inside << " of entity " << id << " is gone");
 		}
 	}
 	else if (saved.order != order_t::NONE) {
 		c->order = saved.order;
 		c->route = saved.route;
 		c->leg = c->route.size() >= 2 ? 1 : 0;
-		if (saved.order_entity != 0) {
-			c->order_entity = saved.order_entity;
-		}
+		c->order_entity = saved.order_entity;
 	}
 	this->publish_info(*c);
 }

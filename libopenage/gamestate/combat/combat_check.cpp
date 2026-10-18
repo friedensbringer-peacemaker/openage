@@ -34,6 +34,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -43,6 +44,7 @@
 #include "gamestate/combat/combat_state.h"
 #include "gamestate/combat/events.h"
 #include "gamestate/component/api/live.h"
+#include "gamestate/component/internal/activity.h"
 #include "gamestate/component/internal/commands/types.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
@@ -56,6 +58,7 @@
 #include "gamestate/game.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
+#include "gamestate/manager.h"
 #include "gamestate/map.h"
 #include "gamestate/terrain_factory.h"
 #include "log/log.h"
@@ -164,6 +167,514 @@ struct World {
 
 double dist(const coord::phys3 &a, const coord::phys3 &b) {
 	return std::hypot(a.ne.to_double() - b.ne.to_double(), a.se.to_double() - b.se.to_double());
+}
+
+// ---------------------------------------------------------------- round W4 (XR fork)
+
+/// a fresh game for the W4 checks (skirmish, everything visible, no computer player)
+struct W4World : World {
+	std::shared_ptr<EntityFactory> factory;
+	std::string modpack;
+
+	entity_id_t spawn(player_id_t owner, const std::string &dir, const std::string &cls, double ne, double se) {
+		auto fqon = this->modpack + ".data.game_entity.generic." + dir + "." + dir + "." + cls;
+		auto entity = this->factory->add_game_entity(this->loop, this->state, owner, fqon);
+		auto pos = std::dynamic_pointer_cast<component::Position>(entity->get_component(component::component_t::POSITION));
+		coord::phys3 p{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{0.0}};
+		pos->set_position(this->now, this->state->get_map()->on_terrain(p));
+		auto own = std::dynamic_pointer_cast<component::Ownership>(entity->get_component(component::component_t::OWNERSHIP));
+		own->set_owner(this->now, owner);
+		auto activity = std::dynamic_pointer_cast<component::Activity>(entity->get_component(component::component_t::ACTIVITY));
+		activity->init(this->now);
+		entity->get_manager()->run_activity_system(this->now);
+		this->state->add_game_entity(entity);
+		return entity->get_id();
+	}
+
+	void teleport(entity_id_t id, double ne, double se) {
+		auto pos = std::dynamic_pointer_cast<component::Position>(
+			this->state->get_game_entity(id)->get_component(component::component_t::POSITION));
+		coord::phys3 p{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{0.0}};
+		pos->set_position(this->now, this->state->get_map()->on_terrain(p));
+	}
+
+	void set_health(entity_id_t id, int64_t health) {
+		auto stats = this->combat()->get_stats(id);
+		auto live = std::dynamic_pointer_cast<component::Live>(
+			this->state->get_game_entity(id)->get_component(component::component_t::LIVE));
+		live->set_attribute(this->now, stats->health_attribute, health);
+	}
+
+	void order(component::command::command_t type, const std::vector<entity_id_t> &ids, const coord::phys3 &target,
+	           std::optional<entity_id_t> entity = std::nullopt, int arg = 0) {
+		openage::event::EventHandler::param_map::map_t params{
+			{"type", type},
+			{"target", target},
+			{"entity_ids", ids},
+			{"combat_arg", arg},
+		};
+		if (entity) {
+			params.emplace("target_entity", *entity);
+		}
+		this->loop->create_event("game.send_command", this->commander, this->state, this->now, params);
+		this->advance(0.05);
+	}
+
+	bool moving(entity_id_t id) const {
+		auto pos = std::dynamic_pointer_cast<component::Position>(
+			this->state->get_game_entity(id)->get_component(component::component_t::POSITION));
+		auto a = pos->get_positions().get(this->now);
+		auto b = pos->get_positions().get(this->now + time::time_t::from_double(0.1));
+		return dist(a, b) > 1e-3;
+	}
+
+	/// a passable land spot near (ne, se), searched on a spiral
+	std::optional<std::pair<double, double>> free_spot(double ne, double se) const {
+		auto map = this->state->get_map();
+		auto land = map->get_grid_id(this->modpack + ".data.util.path_type.types.Land");
+		const auto size = map->get_size();
+		for (int r = 0; r < 8; ++r) {
+			for (int i = 0; i < 16; ++i) {
+				const double a = 0.3927 * i;
+				const double n = ne + r * std::cos(a), s = se + r * std::sin(a);
+				if (n < 2 or s < 2 or n > static_cast<double>(size[0]) - 3 or s > static_cast<double>(size[1]) - 3) {
+					continue;
+				}
+				coord::phys3 p{coord::phys_t{n}, coord::phys_t{s}, coord::phys_t{0}};
+				if (map->is_passable(land, p.to_tile())) {
+					return std::pair{std::floor(n) + 0.5, std::floor(s) + 0.5};
+				}
+			}
+		}
+		return std::nullopt;
+	}
+};
+
+coord::phys3 at(double ne, double se) {
+	return coord::phys3{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{0}};
+}
+
+void w4_checks(const util::Path &root, const std::string &modpack, uint32_t seed, size_t size) {
+	using component::command::command_t;
+	std::cout << "W4. projectiles, stances, orders, garrison, town bell, flight, formations" << std::endl;
+	W4World w;
+	w.modpack = modpack;
+	w.loop = std::make_shared<openage::event::EventLoop>();
+	auto mod_manager = std::make_shared<assets::ModManager>(root / "assets" / "converted");
+	for (const auto &mod : assets::ModManager::enumerate_modpacks(root / "assets" / "converted")) {
+		mod_manager->register_modpack(mod);
+	}
+	mod_manager->activate_modpacks({"engine", modpack});
+	w.factory = std::make_shared<EntityFactory>();
+	auto terrain_factory = std::make_shared<TerrainFactory>();
+	w.loop->add_event_handler(std::make_shared<gamestate::event::DragSelectHandler>());
+	w.loop->add_event_handler(std::make_shared<gamestate::event::SpawnEntityHandler>(w.loop, w.factory));
+	w.loop->add_event_handler(std::make_shared<gamestate::event::SendCommandHandler>());
+	w.loop->add_event_handler(std::make_shared<gamestate::event::ProcessCommandHandler>());
+	w.loop->add_event_handler(std::make_shared<gamestate::event::WaitHandler>());
+	combat::add_event_handlers(w.loop);
+	w.commander = std::make_shared<gamestate::event::Commander>(w.loop);
+	MapSettings settings;
+	settings.type = map_type_t::RANDOM;
+	settings.seed = seed;
+	settings.size = size;
+	settings.skirmish = true;
+	settings.vision = vision_mode_t::ALL;
+	settings.ai.mode = ai_mode_t::OFF;
+	w.game = std::make_shared<Game>(w.loop, mod_manager, w.factory, terrain_factory, settings);
+	w.state = w.game->get_state();
+	w.loop->reach_time(w.now, w.state);
+	w.advance(0.5);
+	auto combat = w.combat();
+
+	auto knights0 = w.find(0, "Knight");
+	auto knights1 = w.find(1, "Knight");
+	auto militia0 = w.find(0, "Militia");
+	auto militia1 = w.find(1, "Militia");
+	auto archers0 = w.find(0, "Archer");
+	auto tc0 = w.find(0, "TownCenter");
+	auto villagers0 = w.find(0, "Villager");
+	if (knights0.size() < 3 or knights1.size() < 3 or militia0.size() < 3 or militia1.size() < 3 or archers0.size() < 3
+	    or tc0.empty() or villagers0.size() < 3) {
+		check(false, "W4: skirmish armies and a town center");
+		return;
+	}
+
+	// the armies stay calm (no attack) unless a check gives a unit another stance: every check
+	// sees only the fights it starts
+	for (const auto &list : {knights0, knights1, militia0, militia1, archers0, w.find(1, "Archer")}) {
+		for (auto id : list) {
+			combat->set_stance(id, combat::stance_t::NO_ATTACK);
+		}
+	}
+
+	// ---- data values
+	auto as = combat->get_stats(archers0[0]);
+	auto ts = combat->get_stats(tc0[0]);
+	auto ks = combat->get_stats(knights0[0]);
+	auto vs = combat->get_stats(villagers0[0]);
+	std::cout << "  archer projectile: speed " << as->projectile.speed << ", arc " << as->projectile.arc
+	          << ", accuracy " << as->projectile.accuracy << ", dispersion " << as->projectile.dispersion
+	          << ", lead " << as->projectile.lead << ", class " << as->unit_class << std::endl;
+	std::cout << "  town center: garrison " << ts->garrison_capacity << " mask " << ts->garrison_mask << " heal "
+	          << ts->garrison_heal << ", arrows " << ts->min_projectiles << "-" << ts->max_projectiles
+	          << ", secondary " << ts->has_secondary << ", dps " << ts->dps() << std::endl;
+	check(as->ranged and as->projectile.speed > 1.0 and as->projectile.accuracy > 0.0 and as->projectile.dispersion > 0.0,
+	      "archer projectile: speed, accuracy, dispersion from the data");
+	check(not as->projectile.lead, "archer without ballistics: no lead");
+	check(as->unit_class == 0 and vs->unit_class == 4 and ks->unit_class == 12, "unit classes archer 0, villager 4, knight 12");
+	check(ts->garrison_capacity == 15 and ts->garrison_mask == 11, "town center: 15 places, mask 11 (data variant)");
+	check(ts->min_projectiles == 1 and ts->max_projectiles >= 10, "town center: 1 base arrow, max from the data");
+	check(ts->can_attack and ts->shoots_arrows(), "town center shoots");
+	check(std::abs(ts->garrison_heal - 0.1) < 1e-6, "town center heals 0.1 HP/s");
+	check(ks->stances and ks->formations and ks->military(), "knight: stances and formations");
+	check(not vs->military() and not vs->stances, "villager: no stances");
+
+	// ---- projectiles: flight time before the damage
+	std::cout << "W4.1 projectiles" << std::endl;
+	{
+		auto shooter = archers0[0];
+		auto victim = knights1[0];
+		auto spot = w.free_spot(w.position(victim).ne.to_double() - 3.0, w.position(victim).se.to_double());
+		if (spot) {
+			w.teleport(shooter, spot->first, spot->second);
+		}
+		combat->set_stance(victim, combat::stance_t::NO_ATTACK);
+		auto before = combat->projectile_counts();
+		auto health = w.health(victim);
+		w.order(command_t::ATTACK, {shooter}, w.position(victim), victim);
+		bool launched = w.advance_until(6.0, [&] { return combat->projectile_counts().launched > before.launched; });
+		check(launched, "the archer launches a projectile");
+		uint64_t version = 0;
+		auto flying = combat->get_projectiles(version);
+		check(not flying.empty() and flying.front().flight.duration > 0.2, "projectile in flight (snapshot)");
+		check(w.health(victim) == health, "no damage at the launch");
+		bool hit = w.advance_until(3.0, [&] {
+			auto c = combat->projectile_counts();
+			return c.hits + c.misses > before.hits + before.misses;
+		});
+		check(hit, "impact after the flight time");
+		w.advance_until(20.0, [&] { return w.health(victim) < health; });
+		check(w.health(victim) < health, "the knight loses health from arrows");
+		w.order(command_t::STOP, {shooter}, w.position(shooter));
+		auto counts = combat->projectile_counts();
+		std::cout << "  projectiles: " << counts.launched << " launched, " << counts.hits << " hits, " << counts.misses
+		          << " misses (" << counts.miss_hits << " hit something else)" << std::endl;
+		check(counts.launched >= counts.hits + counts.misses, "every impact belongs to a launch");
+	}
+
+	// ---- stances
+	std::cout << "W4.2 stances" << std::endl;
+	{
+		auto unit = militia0[0];
+		auto enemy = militia1[0];
+		combat->set_stance(enemy, combat::stance_t::NO_ATTACK);
+		auto upos = w.position(unit);
+		auto spot = w.free_spot(upos.ne.to_double() + 3.0, upos.se.to_double());
+		check(spot.has_value(), "free spot next to the militia");
+		if (spot) {
+			// no attack: never
+			w.order(command_t::STANCE, {unit}, upos, std::nullopt, static_cast<int>(combat::stance_t::NO_ATTACK));
+			check(combat->get_stance(unit) == combat::stance_t::NO_ATTACK, "stance command: no attack");
+			w.teleport(enemy, spot->first, spot->second);
+			w.advance(3.0);
+			check(not combat->get_target(unit), "no attack: an enemy next to it is not attacked");
+			// stand ground: only in range, no chasing
+			w.order(command_t::STANCE, {unit}, upos, std::nullopt, static_cast<int>(combat::stance_t::STAND_GROUND));
+			w.advance(3.0);
+			check(not combat->get_target(unit) and dist(w.position(unit), upos) < 0.6,
+			      "stand ground: an enemy 3 tiles away is not chased");
+			// defensive: within R + 5 of the post -> attacks
+			w.order(command_t::STANCE, {unit}, upos, std::nullopt, static_cast<int>(combat::stance_t::DEFENSIVE));
+			bool engaged = w.advance_until(4.0, [&] { return combat->get_target(unit).has_value(); });
+			check(engaged, "defensive: the enemy within R + 5 is attacked");
+			// the enemy is taken far away: the unit comes back to its post
+			auto far = w.free_spot(upos.ne.to_double() + 12.0, upos.se.to_double() + 6.0);
+			if (far) {
+				w.teleport(enemy, far->first, far->second);
+			}
+			bool back = w.advance_until(25.0, [&] {
+				return not combat->get_target(unit) and not w.moving(unit) and dist(w.position(unit), upos) < 1.5;
+			});
+			check(back, "defensive: back to the post when the enemy leaves");
+			w.order(command_t::STANCE, {unit}, upos, std::nullopt, static_cast<int>(combat::stance_t::AGGRESSIVE));
+			combat->kill(w.state, enemy, w.now);
+			w.advance(1.0);
+		}
+	}
+
+	// ---- orders: patrol, attack move, guard, follow, stop
+	std::cout << "W4.3 orders" << std::endl;
+	{
+		auto unit = militia0[1];
+		auto start = w.position(unit);
+		auto end = w.free_spot(start.ne.to_double() - 5.0, start.se.to_double() + 1.0);
+		if (end) {
+			w.order(command_t::PATROL, {unit}, at(end->first, end->second));
+			check(combat->get_order(unit) == combat::order_t::PATROL, "patrol order");
+			double near_end = 1e9, near_start_after = 1e9;
+			bool reached_end = false;
+			for (int i = 0; i < 400; ++i) {
+				w.advance(0.1);
+				const double de = dist(w.position(unit), at(end->first, end->second));
+				near_end = std::min(near_end, de);
+				if (de < 1.0) {
+					reached_end = true;
+				}
+				if (reached_end) {
+					near_start_after = std::min(near_start_after, dist(w.position(unit), start));
+				}
+			}
+			check(near_end < 1.0 and near_start_after < 1.0, "patrol: reaches the end and walks back");
+			w.order(command_t::STOP, {unit}, start);
+			check(combat->get_order(unit) == combat::order_t::NONE and not w.moving(unit), "stop: no order, stands");
+		}
+		// guard a villager: follows it
+		auto guard = militia0[2];
+		auto villager = villagers0[2];
+		auto vpos = w.position(villager);
+		w.teleport(guard, vpos.ne.to_double() + 1.0, vpos.se.to_double());
+		w.order(command_t::GUARD, {guard}, vpos, villager);
+		check(combat->get_order(guard) == combat::order_t::GUARD, "guard order");
+		auto away = w.free_spot(vpos.ne.to_double() + 7.0, vpos.se.to_double() + 3.0);
+		if (away) {
+			w.command(command_t::MOVE, {villager}, at(away->first, away->second));
+			w.advance(20.0);
+			check(dist(w.position(guard), w.position(villager)) < 4.0, "guard: stays near the guarded villager");
+		}
+		w.order(command_t::FOLLOW, {guard}, w.position(villager), villager);
+		check(combat->get_order(guard) == combat::order_t::FOLLOW, "follow order");
+		w.order(command_t::STOP, {guard}, w.position(guard));
+		// attack move: the knights walk towards the enemy army and fight on the way
+		w.order(command_t::STANCE, knights0, w.position(knights0[0]), std::nullopt,
+		        static_cast<int>(combat::stance_t::AGGRESSIVE));
+		w.order(command_t::ATTACK_MOVE, knights0, w.position(knights1[2]));
+		check(combat->get_order(knights0[0]) == combat::order_t::ATTACK_MOVE, "attack move order");
+		bool fighting = w.advance_until(30.0, [&] {
+			for (auto id : knights0) {
+				if (w.exists(id) and combat->get_target(id)) {
+					return true;
+				}
+			}
+			return false;
+		});
+		check(fighting, "attack move: enemies on the way are attacked");
+		w.advance(3.0);
+		std::vector<entity_id_t> alive_knights;
+		for (auto id : knights0) {
+			if (w.exists(id) and not combat->is_dead(id)) {
+				alive_knights.push_back(id);
+			}
+		}
+		if (not alive_knights.empty()) {
+			w.order(command_t::STOP, alive_knights, w.position(alive_knights[0]));
+			w.order(command_t::STANCE, alive_knights, w.position(alive_knights[0]), std::nullopt,
+			        static_cast<int>(combat::stance_t::NO_ATTACK));
+			check(not combat->get_target(alive_knights[0]) and combat->get_order(alive_knights[0]) == combat::order_t::NONE,
+			      "stop ends the attack move");
+		}
+	}
+
+	// ---- garrison
+	std::cout << "W4.4 garrison" << std::endl;
+	auto tc = tc0[0];
+	{
+		std::vector<entity_id_t> in{villagers0[0], villagers0[1]};
+		w.set_health(in[0], 10);
+		const auto h0 = w.health(in[0]);
+		w.order(command_t::GARRISON, in, w.position(tc), tc);
+		bool inside = w.advance_until(40.0, [&] {
+			return combat->garrisoned_in(in[0]) == tc and combat->garrisoned_in(in[1]) == tc;
+		});
+		check(inside, "two villagers walk into the town center");
+		check(combat->is_hidden(in[0]) and combat->occupants(tc).size() == 2, "garrisoned: hidden, 2 occupants");
+		check(combat->arrow_count_of(tc) == 3, "town center: 1 + 2 villagers = 3 arrows");
+		auto info = combat->get_info(tc);
+		check(info and info->capacity == 15 and info->occupants.size() == 2 and info->arrows == 3,
+		      "HUD info: garrison 2/15, 3 arrows");
+		w.order(command_t::MOVE, {in[0]}, w.position(tc));
+		check(combat->garrisoned_in(in[0]) == tc, "garrisoned units take no commands");
+		w.advance(30.0);
+		const auto h1 = w.health(in[0]);
+		std::cout << "  healing in 30 s: " << h0 << " -> " << h1 << std::endl;
+		check(h1 >= h0 + 2 and h1 <= h0 + 4, "healing 0.1 HP/s in the town center");
+		// an enemy comes close: the town center shoots its garrison arrows
+		auto before = combat->projectile_counts();
+		auto tpos = w.position(tc);
+		auto near = w.free_spot(tpos.ne.to_double() + 4.0, tpos.se.to_double() + 1.0);
+		auto target_knight = w.find(1, "Knight");
+		if (near and not target_knight.empty()) {
+			combat->set_stance(target_knight[0], combat::stance_t::NO_ATTACK);
+			w.teleport(target_knight[0], near->first, near->second);
+			bool volley = w.advance_until(6.0, [&] {
+				return combat->projectile_counts().launched >= before.launched + 3;
+			});
+			check(volley, "town center with 2 villagers shoots 3 arrows per volley");
+			check(combat->projectile_counts().extra_arrows > before.extra_arrows, "extra arrows on the spawning area");
+		}
+		else {
+			check(false, "spot for an enemy next to the town center");
+		}
+		w.order(command_t::UNGARRISON, {tc}, tpos);
+		check(combat->occupants(tc).empty() and not combat->garrisoned_in(in[0]) and not combat->is_hidden(in[0]),
+		      "ungarrison: everybody out");
+		const auto out = w.position(in[0]);
+		const double gap = std::max(std::abs(out.ne.to_double() - tpos.ne.to_double()),
+		                            std::abs(out.se.to_double() - tpos.se.to_double()));
+		check(gap > ts->radius, "ungarrisoned villager stands outside the footprint");
+		if (not target_knight.empty() and w.exists(target_knight[0])) {
+			combat->kill(w.state, target_knight[0], w.now);
+		}
+		w.advance(2.0);
+	}
+
+	// ---- town bell
+	std::cout << "W4.5 town bell" << std::endl;
+	{
+		auto vill = w.find(0, "Villager");
+		w.order(command_t::BELL, {tc}, w.position(tc), std::nullopt, 1);
+		check(combat->bell_rings(tc), "bell rings");
+		bool all_in = w.advance_until(45.0, [&] {
+			for (auto id : vill) {
+				if (w.exists(id) and not combat->garrisoned_in(id)) {
+					return false;
+				}
+			}
+			return true;
+		});
+		check(all_in, "all villagers near the town center go inside");
+		check(combat->occupants(tc).size() == vill.size(), "occupants = villagers");
+		w.order(command_t::BELL, {tc}, w.position(tc), std::nullopt, 0);
+		check(not combat->bell_rings(tc) and combat->occupants(tc).empty(), "back to work: the town center is empty");
+		w.advance(2.0);
+	}
+
+	// ---- flight of villagers
+	std::cout << "W4.6 flight of villagers" << std::endl;
+	{
+		std::vector<entity_id_t> v;
+		for (auto id : w.find(0, "Villager")) {
+			if (w.health(id) == combat->get_stats(id)->max_health) {
+				v.push_back(id);
+			}
+		}
+		auto enemy = w.find(1, "Militia");
+		if (enemy.empty()) {
+			enemy = w.find(1, "Knight");
+		}
+		if (not v.empty() and not enemy.empty()) {
+			auto vpos = w.position(v[0]);
+			auto spot = w.free_spot(vpos.ne.to_double() + 1.5, vpos.se.to_double());
+			if (spot) {
+				w.teleport(enemy[0], spot->first, spot->second);
+			}
+			w.order(command_t::ATTACK, {enemy[0]}, w.position(v[0]), v[0]);
+			bool fled = w.advance_until(10.0, [&] { return combat->is_fleeing(v[0]); });
+			check(fled, "an attacked villager flees");
+			bool ran = w.advance_until(3.0, [&] { return w.exists(v[0]) and dist(w.position(v[0]), vpos) > 0.8; });
+			std::cout << "  villager " << v[0] << " moved " << (w.exists(v[0]) ? dist(w.position(v[0]), vpos) : -1.0)
+			          << " tiles, health " << (w.exists(v[0]) ? w.health(v[0]) : -1) << std::endl;
+			check(ran, "the villager runs away");
+			combat->kill(w.state, enemy[0], w.now);
+			bool calm = w.advance_until(15.0, [&] { return not w.exists(v[0]) or not combat->is_fleeing(v[0]); });
+			check(calm, "the villager calms down once the attacks stop");
+		}
+	}
+
+	// ---- formations
+	std::cout << "W4.7 formations" << std::endl;
+	{
+		std::vector<entity_id_t> army;
+		for (auto id : w.find(0, "Knight")) {
+			army.push_back(id);
+		}
+		for (auto id : w.find(0, "Archer")) {
+			army.push_back(id);
+		}
+		if (army.size() >= 3) {
+			auto first = w.position(army[0]);
+			auto dest = w.free_spot(first.ne.to_double() - 4.0, first.se.to_double() - 4.0);
+			w.order(command_t::FORMATION, army, first, std::nullopt, static_cast<int>(combat::formation_t::LINE));
+			check(combat->get_formation(army[0]) == combat::formation_t::LINE, "formation command: line");
+			if (dest) {
+				std::vector<coord::phys3> starts;
+				for (auto id : army) {
+					starts.push_back(w.position(id));
+				}
+				w.command(command_t::MOVE, army, at(dest->first, dest->second));
+				w.advance(2.0);
+				double slowest = 1e9;
+				for (auto id : army) {
+					slowest = std::min(slowest, combat->get_stats(id)->speed);
+				}
+				bool within = true;
+				for (size_t i = 0; i < army.size(); ++i) {
+					within = within and dist(w.position(army[i]), starts[i]) <= slowest * 2.05 + 0.3;
+				}
+				check(within, "formation moves with the slowest member");
+				w.advance(20.0);
+				std::vector<coord::phys3> ends;
+				for (auto id : army) {
+					ends.push_back(w.position(id));
+				}
+				double min_gap = 1e9;
+				for (size_t i = 0; i < ends.size(); ++i) {
+					for (size_t j = i + 1; j < ends.size(); ++j) {
+						min_gap = std::min(min_gap, dist(ends[i], ends[j]));
+					}
+				}
+				std::cout << "  formation: " << army.size() << " units, smallest gap " << min_gap << std::endl;
+				check(min_gap > 0.4, "formation: units stand apart in their slots");
+			}
+		}
+	}
+
+	// ---- watch tower shoots
+	std::cout << "W4.8 watch tower" << std::endl;
+	{
+		auto enemies = w.find(1, "Archer");
+		if (enemies.empty()) {
+			enemies = w.find(1, "Militia");
+		}
+		if (not enemies.empty()) {
+			auto epos = w.position(enemies[0]);
+			auto spot = w.free_spot(epos.ne.to_double() + 5.0, epos.se.to_double() + 1.0);
+			if (spot) {
+				auto tower = w.spawn(0, "tower", "Tower", spot->first, spot->second);
+				auto st = combat->get_stats(tower);
+				check(st and st->building and st->shoots_arrows() and st->unit_class == 52, "watch tower: class 52, shoots");
+				combat->set_stance(enemies[0], combat::stance_t::NO_ATTACK);
+				auto before = combat->projectile_counts();
+				bool shot = w.advance_until(8.0, [&] { return combat->projectile_counts().launched > before.launched; });
+				check(shot, "the watch tower shoots at an enemy in range");
+			}
+		}
+	}
+
+	// ---- delete, save values
+	std::cout << "W4.9 delete and save values" << std::endl;
+	{
+		auto m = w.find(0, "Militia");
+		if (not m.empty()) {
+			combat->set_stance(m[0], combat::stance_t::DEFENSIVE);
+			auto saved = combat->save_entity(m[0]);
+			check(saved and saved->stance == combat::stance_t::DEFENSIVE, "save: stance");
+			w.order(command_t::KILL, {m[0]}, w.position(m[0]));
+			check(combat->is_dead(m[0]) or not w.exists(m[0]), "delete: the unit dies");
+		}
+		auto v = w.find(0, "Villager");
+		if (not v.empty()) {
+			w.order(command_t::GARRISON, {v[0]}, w.position(tc), tc);
+			w.advance_until(30.0, [&] { return combat->garrisoned_in(v[0]).has_value(); });
+			auto saved = combat->save_entity(v[0]);
+			check(saved and saved->inside == tc, "save: garrison building");
+			w.order(command_t::UNGARRISON, {tc}, w.position(tc));
+			if (saved) {
+				combat->load_entity(w.state, v[0], *saved, w.now);
+			}
+			check(combat->garrisoned_in(v[0]) == tc, "load: back in the building at once");
+		}
+	}
 }
 
 } // namespace
@@ -439,6 +950,9 @@ int main(int argc, char **argv) {
 		check(tile_cost() != path::COST_IMPASSABLE, "town center tiles passable again");
 		w.advance(3.0);
 		check(decided == 1, "decided only once");
+
+		// ---- round W4 (XR fork): own game
+		w4_checks(root, modpack, seed, size);
 	}
 	catch (std::exception &err) {
 		std::cout << "combat check FAILED: " << err.what() << std::endl;

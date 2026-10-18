@@ -113,9 +113,9 @@ struct SavedCombat {
 	/// patrol route, attack move destination
 	std::vector<Point> route{};
 	/// guarded / followed entity
-	entity_id_t order_entity = 0;
-	/// building it is garrisoned in (0 = none), entered with the town bell
-	entity_id_t inside = 0;
+	std::optional<entity_id_t> order_entity{};
+	/// building it is garrisoned in, entered with the town bell
+	std::optional<entity_id_t> inside{};
 	bool by_bell = false;
 	Point bell_from{};
 	/// town center: the bell rings
@@ -445,6 +445,8 @@ private:
 		Point bell_from{};
 		std::optional<entity_id_t> resume_gather{};
 		std::optional<entity_id_t> resume_build{};
+		/// fought automatically in a defensive stance: walks back to the post afterwards
+		bool return_to_post = false;
 		/// town center: the bell rings
 		bool bell = false;
 		/// flight of villagers: attackers (id, time of the last attack report)
