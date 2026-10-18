@@ -15,7 +15,7 @@
  *  T2. Feudal Age: locked with the reason of the data (2 buildings), not paid;
  *      after a mill and a lumber camp exist it is offered; cancel refunds the
  *      food; researched again -> age 2, "Feudalzeit" in the snapshot, message
- *      "Spieler 1 … erreicht die Feudalzeit", the house shows its new graphic.
+ *      "Spieler 1 … ist zur Feudalzeit vorangeschritten.", the house shows its new graphic.
  *  T3. Unlocks: in the Dark Age the archery range is not offered to villagers,
  *      in the Feudal Age it is; ships/farms/monks never (catalog).
  *  T4. Line upgrade Swordsman (Man-at-Arms) in a barracks: an existing militia
@@ -320,7 +320,7 @@ void check_research(const Options &opt) {
 	w.advance(feudal->time + 1.0);
 	snap = w.production->snapshot();
 	check(w.techs()->find(0)->age == 2 and snap.age == 2 and snap.age_label == "Feudalzeit", "age 2: Feudalzeit");
-	check(snap.status.find("erreicht die Feudalzeit") != std::string::npos, "message: " + snap.status);
+	check(snap.status.find("ist zur Feudalzeit vorangeschritten") != std::string::npos, "message: " + snap.status);
 	{
 		auto view = w.state->get_player(0)->get_db_view();
 		auto animated = view->get_object(ge("house", "House") + ".Idle.Animated");

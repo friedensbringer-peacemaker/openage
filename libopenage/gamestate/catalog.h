@@ -65,6 +65,8 @@ constexpr const char *TRADE = "noch ohne Mechanik: Markt/Handel (W7)";
 constexpr const char *FARMS = "noch ohne Mechanik: Farmen/Fischen (W3)";
 constexpr const char *GARRISON = "noch ohne Mechanik: Garnison (W4)";
 constexpr const char *WONDER = "noch ohne Mechanik: Wunder/Reliquien (W8)";
+/// the converted data unlocks the watch tower only after a tower exists (condition on itself)
+constexpr const char *TOWERS = "noch ohne Mechanik: Türme (W5)";
 } // namespace detail
 
 // clang-format off
@@ -128,13 +130,13 @@ constexpr CatalogEntry CATALOG[] = {
 	{"Blacksmith", "Schmiede", 208, true, "hammer", detail::B, nullptr, ""},
 	{"University", "Universität", 209, true, "tech", detail::B, nullptr, ""},
 	{"Outpost", "Außenposten", 210, true, "tower", detail::B, nullptr, ""},
-	{"Tower", "Wachturm", 211, true, "tower", detail::B, nullptr, ""},
+	{"Tower", "Wachturm", 211, true, "tower", detail::B, detail::TOWERS, ""},
 	{"TownCenter", "Dorfzentrum", 212, true, "house", detail::B, nullptr, ""},
 	// buildings without own mechanic yet; needed as requirement of the Imperial Age (2 of them)
 	{"Monastery", "Kloster", 213, true, "house", detail::B, nullptr, ""},
 	{"SiegeWorkshop", "Belagerungswerkstatt", 214, true, "hammer", detail::B, nullptr, ""},
 	{"Castle", "Burg", 215, true, "tower", detail::B, nullptr, ""},
-	{"BombardTower", "Bombardenturm", 216, true, "tower", detail::B, nullptr, ""},
+	{"BombardTower", "Bombardenturm", 216, true, "tower", detail::B, detail::TOWERS, ""},
 	{"Market", "Markt", 220, true, "house", detail::B, detail::TRADE, ""},
 	{"Dock", "Hafen", 221, true, "house", detail::B, detail::SHIPS, ""},
 	{"Farm", "Farm", 222, true, "mill", detail::B, detail::FARMS, ""},
@@ -186,9 +188,9 @@ constexpr CatalogEntry CATALOG[] = {
 	{"Architecture", "Architektur", 336, false, "tech", detail::T, nullptr, "Gebäude: mehr LP und Rüstung"},
 	{"Ballistics", "Ballistik", 337, false, "tech", detail::T, nullptr, "Geschosse zielen vor"},
 	{"Chemistry", "Chemie", 338, false, "tech", detail::T, nullptr, "Fernkampf: mehr Angriff"},
-	{"GuardTower", "Wehrturm", 339, false, "tech", detail::T, nullptr, "Wachtürme stärker"},
-	{"Keep", "Bergfried", 340, false, "tech", detail::T, nullptr, "Wehrtürme stärker"},
-	{"BombardTower", "Bombardenturm", 341, false, "tech", detail::T, nullptr, "Bombardenturm baubar"},
+	{"GuardTower", "Wehrturm", 339, false, "tech", detail::T, detail::TOWERS, "Wachtürme stärker"},
+	{"Keep", "Bergfried", 340, false, "tech", detail::T, detail::TOWERS, "Wehrtürme stärker"},
+	{"BombardTower", "Bombardenturm", 341, false, "tech", detail::T, detail::TOWERS, "Bombardenturm baubar"},
 	{"HeatedShot", "Glühende Geschosse", 342, false, "tech", detail::T, nullptr, "Türme stärker gegen Schiffe"},
 	{"MurderHoles", "Pechnasen", 343, false, "tech", detail::T, nullptr, "Türme ohne Mindestreichweite"},
 	{"TreadmillCrane", "Tretkran", 344, false, "tech", detail::T, nullptr, "Dorfbewohner bauen schneller"},

@@ -77,9 +77,9 @@ inline const char *age_label(int age) {
 	}
 }
 
-/// "erreicht die Feudalzeit" (message of an age change)
+/// message of an age change for all players (docs/aoe2-spec 13: "<Name> ist zur <Zeitalter> vorangeschritten.")
 inline std::string age_reached_text(const std::string &who, int age) {
-	return who + " erreicht die " + age_label(age);
+	return who + " ist zur " + age_label(age) + " vorangeschritten.";
 }
 
 /// short name of a nyan object ("hd_base...loom.Loom" -> "Loom")

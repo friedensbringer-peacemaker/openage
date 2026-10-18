@@ -12,7 +12,7 @@
  * - conditions: AND / OR / NOT / SUBSETMIN over every subset of facts (2^6 sweep),
  *   the data's Feudal/Castle/Imperial conditions, nested gates, reasons in German
  * - offer state matrix (age 1..4 x condition age x researched x queued x mechanic)
- * - ages from researched technologies, labels, "X erreicht die Feudalzeit"
+ * - ages from researched technologies, labels, "X ist zur Feudalzeit vorangeschritten."
  * - line upgrades: prefix of the line, membership (militia line, not the barracks)
  * - civilisation choice: fixed, random deterministic per seed and player, two random
  *   players differ (seed sweep 1..2000)
@@ -240,7 +240,7 @@ void check_ages() {
 	check(std::string{age_label(1)} == "Dunkles Zeitalter" and std::string{age_label(2)} == "Feudalzeit"
 	          and std::string{age_label(3)} == "Ritterzeit" and std::string{age_label(4)} == "Imperialzeit",
 	      "German age names");
-	check(age_reached_text("Spieler 2 (Franken)", 2) == "Spieler 2 (Franken) erreicht die Feudalzeit", "age message");
+	check(age_reached_text("Spieler 2 (Franken)", 2) == "Spieler 2 (Franken) ist zur Feudalzeit vorangeschritten.", "age message");
 	Facts f;
 	check(age_of(f) == 1, "dark age without techs");
 	f.researched.insert(te("loom", "Loom"));
