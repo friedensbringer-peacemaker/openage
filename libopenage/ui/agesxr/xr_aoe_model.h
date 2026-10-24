@@ -361,7 +361,7 @@ struct AoeCombat {
 //   Militär: Patrouille Z · Wachen X · Folgen C · Löschen Entf · Garnison G / Aggressiv A · Defensiv D ·
 //            Stellung halten N · Kein Angriff O · Halt S / Linie Q · Kasten W · Gestaffelt E · Flanke F ·
 //            Angriffsbewegung Tab (Formationen ab zwei Militäreinheiten)
-//   Dorfbewohner: Zeilen 1–2 = Bauen (Engine), Zeile 3: Garnison G · Halt S · Löschen Entf · – · Abbrechen
+//   Dorfbewohner: Zeilen 1–2 = Bauen (Engine), Zeile 3: Garnison Z · Halt X · Löschen Entf · – · Abbrechen
 //   Gebäude: Zeilen 1–2 = Ausbilden/Forschen, Zeile 3: Glocke B (Dorfzentrum) · – · Löschen Entf ·
 //            Alle raus · Abbrechen
 // true = das Raster wurde belegt (sonst bleibt aoeFixedRow).
@@ -398,8 +398,9 @@ inline bool aoeCombatGrid(AoeModel& m, const AoeCombat& c, bool cancelTraining, 
         return true;
     }
     if (c.villager) {
-        m.grid[10] = {kAoeCmdGarrison, HudIcon::Garrison, "Garnison", true, "", 'G'};
-        m.grid[11] = {kAoeCmdHalt, HudIcon::Halt, "Halt", true, "", 'S'};
+        // Tasten des Rasterplatzes (Z, X): G/S gehören der Seitentaste und dem Bauangebot
+        m.grid[10] = {kAoeCmdGarrison, HudIcon::Garrison, "Garnison", true, ""};
+        m.grid[11] = {kAoeCmdHalt, HudIcon::Halt, "Halt", true, ""};
         m.grid[12] = del;
         m.grid[13] = AoeCommand{};
         m.grid[14] = aoeCancelCell(cancelTraining, cancelPlacement);
