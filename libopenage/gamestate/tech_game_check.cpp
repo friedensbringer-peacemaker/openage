@@ -296,8 +296,10 @@ void check_research(const Options &opt) {
 	check(w.option(snap, "House") != nullptr and w.option(snap, "Mill") != nullptr, "villager builds house and mill");
 	check(w.option(snap, "ArcheryRange") == nullptr and w.option(snap, "Blacksmith") == nullptr,
 	      "archery range, blacksmith hidden in the Dark Age");
-	check(w.option(snap, "Farm") == nullptr and w.option(snap, "Dock") == nullptr and w.option(snap, "Market") == nullptr,
-	      "farm, dock, market hidden (no mechanic)");
+	// XR fork W3: the dock has its mechanic now, the farm waits for a mill, the market for W7
+	check(w.option(snap, "Farm") == nullptr and w.option(snap, "Market") == nullptr,
+	      "farm hidden without a mill, market hidden (no mechanic)");
+	check(w.option(snap, "Dock") != nullptr, "dock offered (W3)");
 	auto house = w.spawn(0, ge("house", "House"), 6.0, -6.0);
 	w.advance(0.5);
 	const auto house_anim = house->get_animation_path();

@@ -331,6 +331,8 @@ enum class water_tile_t : uint8_t {
 	OUTSIDE,
 	/// placement terrain of the building (water / shallows of the dock, water of the trap)
 	WATER,
+	/// other water the terrain restriction of the building allows (e.g. medium or deep water)
+	ALLOWED,
 	/// side terrain (beach, ice beach): the shore the dock needs next to it
 	SHORE,
 	/// other land
@@ -376,21 +378,28 @@ inline const char *water_place_message(water_place_t result) {
 }
 
 /**
- * Placement of a building on water (spec 04 §4.2 rule 6): every footprint tile has the
- * placement terrain, nothing blocks it; with \p need_shore at least one tile of the ring
- * around the footprint (8-neighbourhood) is shore. Order of the checks: outside, not
- * water, blocked, occupied, no shore.
+ * Placement of a building on water (spec 04 §4.2 rules 2 and 6): every footprint tile is
+ * water the terrain restriction of the building allows (WATER or ALLOWED), with
+ * \p need_place at least one of them has the placement terrain of the data (WATER), nothing
+ * blocks it; with \p need_shore at least one tile of the ring around the footprint
+ * (8-neighbourhood) is shore. Order of the checks: outside, not water, blocked, occupied,
+ * no shore.
  */
 template <typename StateFn>
-water_place_t check_water_placement(const std::vector<econ::tile_pos> &tiles, bool need_shore, StateFn &&state) {
+water_place_t check_water_placement(const std::vector<econ::tile_pos> &tiles, bool need_shore, bool need_place,
+                                    StateFn &&state) {
 	bool not_water = false;
 	bool blocked = false;
 	bool occupied = false;
+	bool placed = false;
 	for (const auto &t : tiles) {
 		switch (state(t)) {
 		case water_tile_t::OUTSIDE:
 			return water_place_t::OUTSIDE;
 		case water_tile_t::WATER:
+			placed = true;
+			break;
+		case water_tile_t::ALLOWED:
 			break;
 		case water_tile_t::BLOCKED:
 			blocked = true;
@@ -403,7 +412,7 @@ water_place_t check_water_placement(const std::vector<econ::tile_pos> &tiles, bo
 			break;
 		}
 	}
-	if (not_water) {
+	if (not_water or (need_place and not placed)) {
 		return water_place_t::NOT_WATER;
 	}
 	if (blocked) {

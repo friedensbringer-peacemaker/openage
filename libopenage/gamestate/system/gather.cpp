@@ -461,24 +461,30 @@ time::time_t hunt(const std::shared_ptr<GameEntity> &entity,
 	auto dest = map->on_terrain(coord::phys3{coord::phys_t{tpos.ne.to_double() + dx / len * keep},
 	                                         coord::phys_t{tpos.se.to_double() + dy / len * keep},
 	                                         coord::phys_t{0.0}});
-	auto duration = Move::move_default(entity, state, dest, time);
-	auto end = position_of(entity, time + duration);
 	std::optional<time::time_t> walk;
-	if (distance2(end, dest) < 0.25) {
-		walk = duration;
+	// first the point in strike range on this side, then the tile of the animal itself (it stands
+	// on a passable tile), then the tiles next to it
+	for (const auto &goal : {dest, map->on_terrain(tpos)}) {
+		auto duration = Move::move_default(entity, state, goal, time);
+		auto end = position_of(entity, time + duration);
+		if (distance2(end, goal) < 0.25) {
+			walk = duration;
+			break;
+		}
 	}
-	else {
+	if (not walk) {
 		walk = walk_next_to(entity, state, tpos, harvestable.radius, time);
 	}
 	if (not walk) {
 		job.failed_walks += 1;
-		if (job.failed_walks >= 2 * MAX_FAILED_WALKS) {
+		if (job.failed_walks >= 4 * MAX_FAILED_WALKS) {
 			log::log(INFO << "Gather: unit " << entity->get_id() << " cannot reach " << prod::entity_name(target) << " "
 			              << target->get_id() << ", idle");
 			return end_job(gather);
 		}
-		return time::time_t::from_double(0.3);
+		return time::time_t::from_double(0.5);
 	}
+	job.failed_walks = 0;
 	job.phase = phase_t::HUNTING;
 	return std::clamp(*walk, time::time_t::from_double(0.1), time::time_t::from_double(0.5));
 }

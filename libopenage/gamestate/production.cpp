@@ -321,6 +321,9 @@ struct WaterRule {
 	std::set<std::string> place;
 	/// terrain objects of which at least one must be next to the footprint (empty: none needed)
 	std::set<std::string> side;
+	/// terrain objects the terrain restriction of the building allows (factor > 0.05, spec 04 §4.2
+	/// rule 2; empty: the water terrains)
+	std::set<std::string> allowed;
 };
 
 bool water_terrain_name(const std::string &fqon) {
@@ -344,6 +347,7 @@ WaterRule water_rule(const std::shared_ptr<nyan::View> &view, const nyan::fqon_t
 		auto obj = view->get_object(fqon);
 		int64_t place[2] = {-1, -1};
 		int64_t side[2] = {-1, -1};
+		int64_t restriction = -1;
 		for (const auto &ability_val : obj.get_set("GameEntity.abilities")) {
 			auto ability = view->get_object(object_name(ability_val));
 			if (ability.get_parents()[0] != "engine.xr.ability.GenieUnit") {
@@ -353,16 +357,20 @@ WaterRule water_rule(const std::shared_ptr<nyan::View> &view, const nyan::fqon_t
 			place[1] = ability.get_int("GenieUnitData.placement_terrain1");
 			side[0] = ability.get_int("GenieUnitData.placement_side_terrain0");
 			side[1] = ability.get_int("GenieUnitData.placement_side_terrain1");
+			restriction = ability.get_int("GenieUnitData.terrain_restriction");
 		}
-		if (place[0] >= 0 or place[1] >= 0) {
+		rule.water = place[0] >= 0 or place[1] >= 0 or short_name(fqon) == "FishingTrap";
+		if (rule.water) {
 			const auto modpack = fqon.substr(0, fqon.find('.'));
 			auto data = view->get_object(modpack + ".data.util.xr.genie.GenieData");
+			std::unordered_map<int64_t, std::string> terrains;
 			for (const auto &[key, value] : data.get_dict("GenieData.terrains")) {
 				auto id = std::dynamic_pointer_cast<nyan::Int>(key.get_ptr());
 				if (id == nullptr) {
 					continue;
 				}
 				const auto n = id->get();
+				terrains[n] = object_name(value);
 				if (n == place[0] or n == place[1]) {
 					rule.place.insert(object_name(value));
 				}
@@ -370,10 +378,20 @@ WaterRule water_rule(const std::shared_ptr<nyan::View> &view, const nyan::fqon_t
 					rule.side.insert(object_name(value));
 				}
 			}
-			rule.water = true;
-		}
-		else if (short_name(fqon) == "FishingTrap") {
-			rule.water = true;
+			// terrain restriction of the building: where it may stand at all
+			for (const auto &r_val : data.get_orderedset("GenieData.terrain_restrictions")) {
+				auto r = view->get_object(object_name(r_val));
+				if (r.get_int("GenieTerrainRestriction.restriction_id") != restriction) {
+					continue;
+				}
+				for (const auto &[key, value] : r.get_dict("GenieTerrainRestriction.factors")) {
+					auto id = std::dynamic_pointer_cast<nyan::Int>(key.get_ptr());
+					auto factor = std::dynamic_pointer_cast<nyan::Float>(value.get_ptr());
+					if (id != nullptr and factor != nullptr and factor->get() > 0.05 and terrains.contains(id->get())) {
+						rule.allowed.insert(terrains[id->get()]);
+					}
+				}
+			}
 		}
 	}
 	catch (std::exception &err) {
@@ -382,7 +400,8 @@ WaterRule water_rule(const std::shared_ptr<nyan::View> &view, const nyan::fqon_t
 	}
 	if (rule.water) {
 		log::log(INFO << "Production: " << short_name(fqon) << " stands on water (" << rule.place.size()
-		              << " placement terrains, " << rule.side.size() << " shore terrains)");
+		              << " placement terrains, " << rule.side.size() << " shore terrains, " << rule.allowed.size()
+		              << " terrains of its restriction)");
 	}
 	cache.emplace(fqon, rule);
 	return rule;
@@ -437,7 +456,8 @@ PlaceCheck check_place(const std::shared_ptr<GameState> &state,
 
 	const auto rule = water_rule(state->get_db_view(), buildable.fqon);
 	if (rule.water) {
-		auto res = food::check_water_placement(result.tiles, not rule.side.empty(), [&](const econ::tile_pos &t) {
+		const bool need_place = not rule.place.empty();
+		auto res = food::check_water_placement(result.tiles, not rule.side.empty(), need_place, [&](const econ::tile_pos &t) {
 			if (outside(t)) {
 				return food::water_tile_t::OUTSIDE;
 			}
@@ -446,8 +466,12 @@ PlaceCheck check_place(const std::shared_ptr<GameState> &state,
 			if (rule.side.contains(name)) {
 				return food::water_tile_t::SHORE;
 			}
-			const bool placeable = rule.place.empty() ? water_terrain_name(name) : rule.place.contains(name);
-			if (not placeable) {
+			// placement terrain of the data (dock: water, shallows); other water its restriction allows
+			// (open water: not walkable for land units)
+			const bool placement = need_place and rule.place.contains(name);
+			const bool open_water = water_terrain_name(name)
+			                        and (rule.allowed.empty() or rule.allowed.contains(name));
+			if (not placement and not open_water) {
 				return water_terrain_name(name) ? food::water_tile_t::OTHER_WATER : food::water_tile_t::LAND;
 			}
 			if ((water and not map->is_passable(*water, tile)) or field_there(t)) {
@@ -456,7 +480,7 @@ PlaceCheck check_place(const std::shared_ptr<GameState> &state,
 			if (unit_tiles.contains({t.ne, t.se})) {
 				return food::water_tile_t::OCCUPIED;
 			}
-			return food::water_tile_t::WATER;
+			return placement ? food::water_tile_t::WATER : food::water_tile_t::ALLOWED;
 		});
 		result.ok = res == food::water_place_t::OK;
 		result.message = food::water_place_message(res);

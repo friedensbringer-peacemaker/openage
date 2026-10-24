@@ -520,6 +520,21 @@ if(OPENAGE_NATIVE_ENTRY)
 		target_link_libraries(openage-tech-game-check PRIVATE Qt6::Core Qt6::Gui)
 	endif()
 	# ---- end ai (XR fork) ----
+
+	# ---- XR fork W3: food economy ----
+	# host test: food rules and the animals of the random map (dependency-free, parameter sweep)
+	add_executable(openage-food-check gamestate/food_check.cpp gamestate/map_generator.cpp)
+	target_include_directories(openage-food-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-food-check COMMAND openage-food-check)
+	# game state check of herdables, hunting, farms, reseeding, fishing with the converted modpack (--root <dir>, headless)
+	add_executable(openage-food-game-check gamestate/food_game_check.cpp)
+	target_include_directories(openage-food-game-check PRIVATE $<TARGET_PROPERTY:libopenage,INCLUDE_DIRECTORIES>)
+	add_dependencies(openage-food-game-check cppgen)
+	target_link_libraries(openage-food-game-check PRIVATE libopenage nyan::nyan Eigen3::Eigen Threads::Threads)
+	if(OPENAGE_QT)
+		target_link_libraries(openage-food-game-check PRIVATE Qt6::Core Qt6::Gui)
+	endif()
+	# ---- end XR fork W3 ----
 endif()
 
 # XR fork: the in-engine UI (libopenage/ui/agesxr) logs via __android_log_print
