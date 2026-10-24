@@ -459,8 +459,10 @@ time::time_t hunt(const std::shared_ptr<GameEntity> &entity,
 	const double keep = a_stats->radius + t_stats->radius
 	                    + (harvestable.kind == food::source_t::PREY ? 0.6 * food::PREY_STRIKE_RANGE : 0.1);
 	auto map = state->get_map();
-	auto dest = map->on_terrain(coord::phys3{coord::phys_t{tpos.ne.to_double() + dx / len * keep},
-	                                         coord::phys_t{tpos.se.to_double() + dy / len * keep},
+	const auto msize = map->get_size();
+	auto inside = [&](double v, size_t n) { return std::clamp(v, 0.5, std::max(0.5, static_cast<double>(n) - 0.5)); };
+	auto dest = map->on_terrain(coord::phys3{coord::phys_t{inside(tpos.ne.to_double() + dx / len * keep, msize[0])},
+	                                         coord::phys_t{inside(tpos.se.to_double() + dy / len * keep, msize[1])},
 	                                         coord::phys_t{0.0}});
 	std::optional<time::time_t> walk;
 	// first the point in strike range on this side, then the tile of the animal itself (it stands

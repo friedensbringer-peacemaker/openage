@@ -1158,9 +1158,10 @@ void AiPlayer::food_economy(const std::shared_ptr<GameState> &state, const World
 		const double dn = pos.ne.to_double() - world.home_ne;
 		const double ds = pos.se.to_double() - world.home_se;
 		const double len = std::max(1e-6, std::hypot(dn, ds));
-		auto dest = state->get_map()->on_terrain(coord::phys3{coord::phys_t{world.home_ne + dn / len * 3.0},
-		                                                      coord::phys_t{world.home_se + ds / len * 3.0},
-		                                                      coord::phys_t{0.0}});
+		const auto msize = state->get_map()->get_size();
+		const double hne = std::clamp(world.home_ne + dn / len * 3.0, 0.5, static_cast<double>(msize[0]) - 0.5);
+		const double hse = std::clamp(world.home_se + ds / len * 3.0, 0.5, static_cast<double>(msize[1]) - 0.5);
+		auto dest = state->get_map()->on_terrain(coord::phys3{coord::phys_t{hne}, coord::phys_t{hse}, coord::phys_t{0.0}});
 		queue->add_command(time, std::make_shared<component::command::MoveCommand>(dest));
 		this->last_herd[id] = now;
 		herded += 1;
