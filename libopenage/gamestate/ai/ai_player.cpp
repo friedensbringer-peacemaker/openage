@@ -200,7 +200,9 @@ AiPlayer::World AiPlayer::observe(const std::shared_ptr<GameState> &state, const
 	auto vision = state->get_vision();
 	for (const auto &[id, entity] : state->get_game_entities()) {
 		auto stats = combat->get_stats(id);
-		if (not stats or combat->is_dead(id) or not stats->attackable()
+		// XR fork W4: units in a building (or on their way in) are neither seen nor given jobs
+		if (not stats or combat->is_dead(id) or not stats->attackable() or combat->garrisoned_in(id)
+		    or combat->entering(id)
 		    or not entity->has_component(component::component_t::OWNERSHIP)
 		    or not entity->has_component(component::component_t::POSITION)) {
 			continue;
@@ -341,6 +343,38 @@ bool AiPlayer::order_attack(const std::shared_ptr<GameState> &state,
 	return true;
 }
 
+bool AiPlayer::order_attack_move(const std::shared_ptr<GameState> &state,
+                                 const Seen &unit,
+                                 double ne,
+                                 double se,
+                                 const time::time_t &time) {
+	const double now = time.to_double();
+	auto last = this->last_order.find(unit.id);
+	if (last != this->last_order.end() and now - last->second < this->params.unit_order_cooldown) {
+		return false;
+	}
+	this->last_order[unit.id] = now;
+	coord::phys3 point{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{0.0}};
+	if (not state->get_combat()->order_attack_move(state, unit.id, state->get_map()->on_terrain(point), time)) {
+		return false;
+	}
+	std::lock_guard<std::mutex> lock{this->status_mutex};
+	this->status.attack_moves += 1;
+	return true;
+}
+
+void AiPlayer::set_stances(const std::shared_ptr<GameState> &state, const World &world) {
+	// XR fork W4 (docs/aoe2-spec 06 §6.2, 09): the army at home guards the base without chasing enemies
+	// across the map (defensive), the attack waves fight everything on their way (aggressive)
+	auto combat = state->get_combat();
+	for (const auto &unit : world.army) {
+		const auto wanted = this->wave.contains(unit.id) ? combat::stance_t::AGGRESSIVE : combat::stance_t::DEFENSIVE;
+		if (combat->get_stance(unit.id) != wanted) {
+			combat->set_stance(unit.id, wanted);
+		}
+	}
+}
+
 // ---------------------------------------------------------------- defence
 
 void AiPlayer::defend(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time) {
@@ -378,7 +412,46 @@ void AiPlayer::defend(const std::shared_ptr<GameState> &state, const World &worl
 			this->defending = false;
 			log::log(INFO << "AI P" << this->player << ": base safe again at t=" << fmt1(now) << " s");
 		}
+		// XR fork W4: back to work once the base is safe (town bell off)
+		if (this->bell_tc and not this->defending) {
+			if (combat->bell_rings(*this->bell_tc)) {
+				combat->ring_bell(state, *this->bell_tc, false, time);
+			}
+			log::log(INFO << "AI P" << this->player << ": town bell off, villagers back to work at t=" << fmt1(now) << " s");
+			this->bell_tc.reset();
+		}
 		return;
+	}
+	// XR fork W4: enemy soldiers among the villagers: ring the town bell (docs/aoe2-spec 06 §6.4, 09)
+	if (not this->bell_tc) {
+		size_t near_villagers = 0;
+		for (const auto *t : threats) {
+			if (not t->military) {
+				continue;
+			}
+			for (const auto &v : world.villagers) {
+				if (dist(t->ne, t->se, v.ne, v.se) <= this->params.villager_guard_radius) {
+					near_villagers += 1;
+					break;
+				}
+			}
+		}
+		const Seen *tc = nullptr;
+		for (const auto &b : world.buildings) {
+			if (b.town_center and (tc == nullptr or dist(b.ne, b.se, world.home_ne, world.home_se)
+			                                         < dist(tc->ne, tc->se, world.home_ne, world.home_se))) {
+				tc = &b;
+			}
+		}
+		if (near_villagers > 0 and tc != nullptr and combat->ring_bell(state, tc->id, true, time)) {
+			this->bell_tc = tc->id;
+			{
+				std::lock_guard<std::mutex> lock{this->status_mutex};
+				this->status.bells += 1;
+			}
+			log::log(INFO << "AI P" << this->player << ": town bell rings (" << near_villagers
+			              << " enemy soldiers near the villagers) at t=" << fmt1(now) << " s");
+		}
 	}
 	this->last_threat = now;
 	if (not this->defending) {
@@ -433,6 +506,8 @@ void AiPlayer::defend(const std::shared_ptr<GameState> &state, const World &worl
 void AiPlayer::attack(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time) {
 	const double now = time.to_double();
 	auto combat = state->get_combat();
+	// XR fork W4: stances of the army (home defensive, waves aggressive)
+	this->set_stances(state, world);
 
 	// running wave: drop dead units
 	if (not this->wave.empty()) {
@@ -496,7 +571,16 @@ void AiPlayer::attack(const std::shared_ptr<GameState> &state, const World &worl
 				continue;
 			}
 			if (current == nullptr) {
-				this->order_attack(state, unit, *objective, time);
+				// XR fork W4: march with an attack move, buildings (no automatic targets) when close
+				if (objective->building and dist(unit.ne, unit.se, objective->ne, objective->se) - objective->radius
+				                                  > unit.sight + 1.0) {
+					if (combat->get_order(unit.id) != combat::order_t::ATTACK_MOVE) {
+						this->order_attack_move(state, unit, objective->ne, objective->se, time);
+					}
+				}
+				else {
+					this->order_attack(state, unit, *objective, time);
+				}
 			}
 		}
 		return;
@@ -553,7 +637,16 @@ void AiPlayer::attack(const std::shared_ptr<GameState> &state, const World &worl
 	              << "), t=" << fmt1(now) << " s");
 	for (const auto *unit : home) {
 		this->wave.insert(unit->id);
-		this->order_attack(state, *unit, *objective, time);
+	}
+	// XR fork W4: the wave marches with an attack move (aggressive) and fights on the way
+	this->set_stances(state, world);
+	for (const auto *unit : home) {
+		if (objective->building) {
+			this->order_attack_move(state, *unit, objective->ne, objective->se, time);
+		}
+		else {
+			this->order_attack(state, *unit, *objective, time);
+		}
 	}
 }
 

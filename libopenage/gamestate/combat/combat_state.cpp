@@ -664,7 +664,7 @@ bool CombatState::order_patrol(const std::shared_ptr<GameState> &state, entity_i
 	}
 	this->player_moved(id, std::nullopt, time);
 	c->order = order_t::PATROL;
-	c->route = {ground(this->position_of(c->entity, time)), ground(point)};
+	c->route = {ground(this->position_of(c->entity, time)), this->passable_near(state, *c, ground(point))};
 	c->leg = 1;
 	this->order_move(state, *c, c->route[1], time, true);
 	this->publish_info(*c);
@@ -709,12 +709,58 @@ bool CombatState::order_attack_move(const std::shared_ptr<GameState> &state, ent
 	if (c == nullptr or c->dead or c->inside or not c->stats->military()) {
 		return false;
 	}
-	this->player_moved(id, point, time);
+	const Point dest = this->passable_near(state, *c, ground(point));
+	this->player_moved(id, phys(dest), time);
 	c->order = order_t::ATTACK_MOVE;
-	c->route = {ground(point)};
+	c->route = {dest};
 	this->order_move(state, *c, c->route[0], time, true);
 	this->publish_info(*c);
 	return true;
+}
+
+Point CombatState::passable_near(const std::shared_ptr<GameState> &state, const Combatant &c, const Point &p) const {
+	auto map = state->get_map();
+	std::optional<path::grid_id_t> grid;
+	if (auto move = component_of<component::Move>(c.entity, component::component_t::MOVE)) {
+		try {
+			grid = map->get_grid_id(move->get_ability().get<nyan::ObjectValue>("Move.path_type")->get_name());
+		}
+		catch (std::exception &) {
+		}
+	}
+	if (not grid or map->is_passable(*grid, phys(p).to_tile())) {
+		return p;
+	}
+	// nearest free tile around the point (buildings, trees), on each ring the one nearest to the unit
+	const auto from = ground(this->position_of(c.entity, this->clock));
+	const auto size = map->get_size();
+	for (int r = 1; r <= 10; ++r) {
+		std::optional<Point> best;
+		double best_d = 1e30;
+		for (int dn = -r; dn <= r; ++dn) {
+			for (int ds = -r; ds <= r; ++ds) {
+				if (std::max(std::abs(dn), std::abs(ds)) != r) {
+					continue;
+				}
+				const Point q{std::floor(p.x) + dn + 0.5, std::floor(p.y) + ds + 0.5};
+				if (q.x < 0.0 or q.y < 0.0 or q.x >= static_cast<double>(size[0]) or q.y >= static_cast<double>(size[1])) {
+					continue;
+				}
+				if (not map->is_passable(*grid, phys(q).to_tile())) {
+					continue;
+				}
+				const double d = distance(q, from);
+				if (d < best_d) {
+					best_d = d;
+					best = q;
+				}
+			}
+		}
+		if (best) {
+			return *best;
+		}
+	}
+	return p;
 }
 
 void CombatState::order_move(const std::shared_ptr<GameState> &state, Combatant &c, const Point &dest,
@@ -744,7 +790,9 @@ void CombatState::update_order(const std::shared_ptr<GameState> &state, Combatan
 		if (c.target or c.route.size() < 2) {
 			return;
 		}
-		if (distance(pos, c.route[c.leg]) <= PATROL_ARRIVE) {
+		// arrived (or standing close to it: a crowd of units cannot all reach one point)
+		const double dleg = distance(pos, c.route[c.leg]);
+		if (dleg <= PATROL_ARRIVE or (not moving and dleg <= 2.0)) {
 			c.leg = 1 - c.leg;
 			this->order_move(state, c, c.route[c.leg], time, true);
 		}
@@ -757,8 +805,9 @@ void CombatState::update_order(const std::shared_ptr<GameState> &state, Combatan
 		if (c.target or c.route.empty()) {
 			return;
 		}
-		if (distance(pos, c.route[0]) <= PATROL_ARRIVE) {
-			c.post = c.route[0];
+		const double dend = distance(pos, c.route[0]);
+		if (dend <= PATROL_ARRIVE or (not moving and dend <= 3.0 and time - c.order_moved > seconds(1.0))) {
+			c.post = pos;
 			this->clear_order(c);
 			this->publish_info(c);
 			return;
@@ -1277,7 +1326,7 @@ double CombatState::terrain_factor_of(const std::shared_ptr<GameState> &state, c
 			// global table of the data (engine.xr, W0): restriction factors and terrain ids
 			auto view = state->get_player(this->owner_of(target.entity, time))->get_db_view();
 			nyan::Object data = view->get_object(this->modpack + ".data.util.xr.genie.GenieData");
-			for (const auto &value : data.get_set("GenieData.terrain_restrictions")) {
+			for (const auto &value : data.get_orderedset("GenieData.terrain_restrictions")) {
 				auto obj_value = std::dynamic_pointer_cast<nyan::ObjectValue>(value.get_ptr());
 				if (not obj_value) {
 					continue;

@@ -427,7 +427,12 @@ inline bool aoeCombatGrid(AoeModel& m, const AoeCombat& c, bool cancelTraining, 
 // W4: Taste eines Feldes (eigene Taste, sonst die des Rasterplatzes) und ihr Text („Entf“, „Tab“, „Q“).
 inline char aoeKeyOf(const AoeModel& m, int cell) {
     const char own = m.cell(cell).hotkey;
-    return own != 0 ? own : aoeHotkey(cell);
+    if (own != 0) return own;
+    // die Taste des Platzes gilt nicht, wenn ein anderes Feld sie als eigene Taste hat
+    const char key = aoeHotkey(cell);
+    for (int i = 0; i < kAoeGridCells; ++i)
+        if (i != cell && m.cell(i).id != 0 && m.cell(i).hotkey == key) return 0;
+    return key;
 }
 inline std::string aoeKeyText(char key) {
     if (key == kAoeKeyDelete) return "Entf";

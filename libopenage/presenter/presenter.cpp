@@ -1044,8 +1044,8 @@ void Presenter::update_selection_markers() {
 				if (t < 0.0 or t > p.flight.duration) {
 					continue;
 				}
-				// shaft of about 0.45 tiles along the flight direction
-				const double back = std::max(0.0, t - 0.45 / std::max(1.0, std::hypot(p.flight.to.ne - p.flight.from.ne,
+				// shaft of about 0.6 tiles, 3 px wide along the flight direction
+				const double back = std::max(0.0, t - 0.6 / std::max(1.0, std::hypot(p.flight.to.ne - p.flight.from.ne,
 				                                                                       p.flight.to.se - p.flight.from.se)
 				                                                            / p.flight.duration));
 				const auto head = project(gamestate::combat::flight_at(p.flight, t));
@@ -1053,7 +1053,7 @@ void Presenter::update_selection_markers() {
 				Eigen::Vector2f d = head - tail;
 				const Eigen::Vector2f px{d.x() / px_x, d.y() / px_y};
 				const float len = px.norm();
-				Eigen::Vector2f n = len > 1e-3f ? Eigen::Vector2f{-px.y() / len * px_x, px.x() / len * px_y}
+				Eigen::Vector2f n = len > 1e-3f ? Eigen::Vector2f{-px.y() / len * 1.5f * px_x, px.x() / len * 1.5f * px_y}
 				                                : Eigen::Vector2f{px_x, 0.0f};
 				shaft.quad(tail - n, tail + n, head + n, head - n);
 				tip.rect(head.x() - 1.5f * px_x, head.y() - 1.5f * px_y, head.x() + 1.5f * px_x, head.y() + 1.5f * px_y);

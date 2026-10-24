@@ -349,12 +349,28 @@ int main(int argc, char **argv) {
 			check(attacked and st.first_attack and *st.first_attack >= p.first_attack_earliest,
 			      "attack wave after the earliest time (t=" + std::to_string(st.first_attack.value_or(-1.0)) + " s)");
 			auto tc0 = w.town_center(0);
+			// XR fork W4: the wave marches with an attack move (aggressive) towards the town center
 			bool tc_targeted = false;
+			size_t aggressive = 0, marching = 0;
 			for (auto id : w.find(1, true)) {
 				auto t = w.combat()->get_target(id);
 				tc_targeted = tc_targeted or (t and tc0 and *t == *tc0);
+				marching += w.combat()->get_order(id) == combat::order_t::ATTACK_MOVE ? 1 : 0;
+				aggressive += w.combat()->get_stance(id) == combat::stance_t::AGGRESSIVE ? 1 : 0;
 			}
-			check(tc_targeted, "wave attacks the town center of player 0");
+			check(tc_targeted or marching > 0, "wave attacks / attack-moves to the town center of player 0 ("
+			                                       + std::to_string(marching) + " marching)");
+			check(aggressive > 0, "wave units aggressive");
+			bool reached = w.advance_until(w.now.to_double() + 240.0, [&] {
+				for (auto id : w.find(1, true)) {
+					auto t = w.combat()->get_target(id);
+					if (t and tc0 and *t == *tc0) {
+						return true;
+					}
+				}
+				return w.combat()->get_match_status().result.over;
+			});
+			check(reached, "wave reaches and attacks the town center of player 0");
 
 			bool over = w.advance_until(opt.limit, [&] { return w.combat()->get_match_status().result.over; });
 			auto match = w.combat()->get_match_status();
@@ -435,6 +451,19 @@ int main(int argc, char **argv) {
 				w.loop->create_event("game.send_command", w.commander, w.state, w.now, params);
 				bool defended = w.advance_until(w.now.to_double() + 90.0, [&] { return ai->get_status().defenses > 0; });
 				check(defended, "AI defends against knights near its base (t=" + std::to_string(w.now.to_double()) + " s)");
+				// XR fork W4: soldiers among its villagers: the AI rings the town bell, home army defensive
+				bool bell = w.advance_until(w.now.to_double() + 60.0, [&] { return ai->get_status().bells > 0; });
+				check(bell, "AI rings the town bell when knights reach its villagers");
+				size_t inside = 0;
+				w.advance_until(w.now.to_double() + 30.0, [&] {
+					inside = 0;
+					for (const auto &[id, e] : w.state->get_game_entities()) {
+						inside += w.combat()->garrisoned_in(id).has_value() ? 1 : 0;
+					}
+					return inside > 0;
+				});
+				std::cout << "  town bell: " << inside << " villagers in buildings" << std::endl;
+				check(inside > 0, "AI villagers garrisoned by the town bell");
 			}
 			bool over = w.advance_until(opt.limit, [&] { return w.combat()->get_match_status().result.over; });
 			auto match = w.combat()->get_match_status();

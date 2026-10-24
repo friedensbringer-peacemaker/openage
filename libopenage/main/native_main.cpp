@@ -128,6 +128,7 @@
 #include "gamestate/map_generator.h"
 #include "gamestate/map_settings.h"
 #include "gamestate/combat/combat_state.h"
+#include "gamestate/combat/skirmish.h"
 #include "gamestate/combat/stats.h"
 #include "gamestate/component/api/harvestable.h"
 #include "gamestate/component/internal/command_queue.h"
@@ -207,6 +208,8 @@ struct native_args {
 	bool replay_tech = false;
 	// vision (XR fork): fog of war and minimap replay
 	bool replay_vision = false;
+	// XR fork W4: combat replay (formation, stance, town bell, garrison arrows, projectiles)
+	bool replay_war = false;
 	// save games (XR fork): slot directory, file to load, headless save/load check
 	std::string save_dir{};
 	std::string load_file{};
@@ -244,7 +247,7 @@ void usage(const char *argv0) {
 	             " [--ai-first-attack <s>] [--ai-attack-size <n>] [--sim-speed <x>] [--capture-at <s1,s2,...>]"
 	             " [--ui | --no-ui] [--ui-demo <what@s,...>] [--replay-ui]"
 	             " [--ui-style aoe|classic] [--ui-quest] [--replay-aoe] [--replay-markers] [--replay-tech]"
-	             " [--civ <name|random>] [--ai-civ <name|random>] [--replay-vision] [--vision normal|explored|all]"
+	             " [--civ <name|random>] [--ai-civ <name|random>] [--replay-vision] [--replay-war] [--vision normal|explored|all]"
 	             " [--save-dir <dir>] [--load <file>] [--save-check <dir> [--save-check-seconds <s>]]\n";
 }
 
@@ -465,6 +468,11 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		}
 		else if (arg == "--replay-vision") {
 			args.replay_vision = true;
+			args.ui = true;
+			args.ui_style = "aoe";
+		}
+		else if (arg == "--replay-war") {
+			args.replay_war = true;
 			args.ui = true;
 			args.ui_style = "aoe";
 		}
@@ -1842,6 +1850,186 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> vision_replay_steps(
 }
 
 /**
+ * Input replay of the combat of round W4 (--replay-war, XR fork; with --map random
+ * --map-skirmish, a computer opponent with an early first wave): the own army is selected
+ * with a drag and gets the formation "Linie" (Q); the camera jumps to the own town centre and
+ * the army walks in front of it in its formation (-w1), takes the stance "Defensiv" (D, -w2);
+ * the town centre is selected and rings the town bell (B): the villagers run inside (-w3), the
+ * selection panel shows the garrison and the arrows (-w4); the wave of the computer arrives, the
+ * town centre shoots its garrison arrows and the armies fight (projectiles in flight, -w5a ...
+ * -w5f, -w7). Captures <png stem>-w1 ... -w7.
+ */
+std::vector<openage::renderer::opengl::TestFrameSink::Step> war_replay_steps(const native_args &args,
+                                                                              openage::gamestate::MapSettings &map_settings,
+                                                                              double start,
+                                                                              const std::string &capture_file) {
+	using namespace openage;
+	using renderer::opengl::TestFrameSink;
+	using E = renderer::SinkInputEvent;
+
+	const auto map = gamestate::generate_map(map_settings);
+	const gamestate::Heightmap heights{map.width, map.height, map.corners};
+	const auto layout_army = gamestate::combat::skirmish_layout(map);
+	const auto tc = map.starts.at(0);
+	if (not map_settings.view) {
+		gamestate::MapView v;
+		v.ne = layout_army.placed ? layout_army.center_ne : tc[0];
+		v.se = layout_army.placed ? layout_army.center_se : tc[1];
+		v.zoom = 1.3f;
+		map_settings.view = v;
+	}
+	const gamestate::MapView view = *map_settings.view;
+	const int width = static_cast<int>(args.width);
+	const int height = static_cast<int>(args.height);
+	// pixel of a tile seen by a camera that looks at (cne, cse) (the minimap jump keeps height and zoom)
+	auto pixel_at = [&](double cne, double cse, double ne, double se, double up) {
+		auto camera = std::make_shared<renderer::camera::Camera>(nullptr, util::Vector2s{args.width, args.height});
+		camera->look_at_coord(coord::scene3{10.0, 10.0, 0});
+		camera->move_to(Eigen::Vector3f{0.0f, view.height, 0.0f});
+		camera->look_at_coord(coord::scene3{cne, cse, 0});
+		camera->set_zoom(view.zoom);
+		const Eigen::Matrix4f matrix = camera->get_projection_matrix() * camera->get_view_matrix();
+		double ground = heights.is_flat() ? 0.0 : heights.at(ne, se);
+		coord::phys3 pos{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{ground + up}};
+		auto w = pos.to_scene3().to_world_space();
+		Eigen::Vector4f clip = matrix * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+		int x = static_cast<int>(std::lround((clip.x() + 1.0) * 0.5 * width));
+		int y = static_cast<int>(std::lround(height - (clip.y() + 1.0) * 0.5 * height));
+		return std::pair{x, y};
+	};
+	agesxr::AoeUi layout;
+	layout.resize(width, height);
+	const auto mm = layout.minimapRect();
+	auto minimap_pixel = [&](double ne, double se) {
+		agesxr::MinimapGeom g;
+		g.cx = static_cast<float>(mm.cx());
+		g.cy = static_cast<float>(mm.cy());
+		g.hw = static_cast<float>(mm.w()) * 0.5f;
+		g.hh = static_cast<float>(mm.h()) * 0.5f;
+		float u, v, x, y;
+		agesxr::minimapTileToFrac(static_cast<float>(ne), static_cast<float>(se), static_cast<int>(map.width),
+		                          static_cast<int>(map.height), u, v);
+		g.toPixel(u, v, x, y);
+		return std::pair{static_cast<int>(std::lround(x - 0.5f)), static_cast<int>(std::lround(y - 0.5f))};
+	};
+
+	std::vector<TestFrameSink::Step> steps;
+	auto add = [&](double at, int type, int x, int y, int button, int buttons, int key = 0, int modifiers = 0) {
+		TestFrameSink::Step step;
+		step.at = start + at;
+		step.what = TestFrameSink::Step::kind::input;
+		step.event.type = type;
+		step.event.x = x;
+		step.event.y = y;
+		step.event.button = button;
+		step.event.buttons = buttons;
+		step.event.key = key;
+		step.event.modifiers = modifiers;
+		steps.push_back(step);
+	};
+	auto click = [&](double t, std::pair<int, int> p, int button) {
+		add(t, E::kMouseMove, p.first, p.second, 0, 0);
+		add(t + 0.1, E::kMouseDown, p.first, p.second, button, button);
+		add(t + 0.2, E::kMouseUp, p.first, p.second, button, 0);
+	};
+	auto capture = [&](double t, const char *suffix) {
+		const std::filesystem::path png{capture_file};
+		TestFrameSink::Step shot;
+		shot.at = start + t;
+		shot.what = TestFrameSink::Step::kind::capture;
+		shot.file = suffix == nullptr ? capture_file
+		                              : (png.parent_path() / (png.stem().string() + suffix + png.extension().string())).string();
+		steps.push_back(shot);
+	};
+	auto key = [&](double t, int code) {
+		add(t, E::kKeyDown, 0, 0, 0, 0, code);
+		add(t + 0.05, E::kKeyUp, 0, 0, 0, 0, code);
+	};
+
+	capture(0.6, "-sync-0");
+	if (not layout_army.placed) {
+		log::log(WARN << "war replay: no skirmish armies on this map");
+		capture(2.0, nullptr);
+		return steps;
+	}
+	// 1. own army: drag a box around it (screen rectangle of its units with a margin)
+	int x0 = width, y0 = height, x1 = 0, y1 = 0;
+	double own_ne = 0.0, own_se = 0.0, enemy_ne = 0.0, enemy_se = 0.0;
+	int own = 0, enemy = 0;
+	for (const auto &u : layout_army.units) {
+		if (u.owner == 0) {
+			auto p = pixel_at(view.ne, view.se, u.ne, u.se, 0.5);
+			x0 = std::min(x0, p.first);
+			y0 = std::min(y0, p.second);
+			x1 = std::max(x1, p.first);
+			y1 = std::max(y1, p.second);
+			own_ne += u.ne;
+			own_se += u.se;
+			own += 1;
+		}
+		else {
+			enemy_ne += u.ne;
+			enemy_se += u.se;
+			enemy += 1;
+		}
+	}
+	own_ne /= std::max(1, own);
+	own_se /= std::max(1, own);
+	enemy_ne /= std::max(1, enemy);
+	enemy_se /= std::max(1, enemy);
+	x0 = std::max(5, x0 - 30);
+	y0 = std::max(layout.topBarPx() + 5, y0 - 40);
+	x1 = std::min(width - 5, x1 + 30);
+	y1 = std::min(layout.barRect().y0 - 5, y1 + 20);
+	log::log(INFO << "war replay: own army box (" << x0 << ", " << y0 << ") - (" << x1 << ", " << y1 << "), enemy at tile ("
+	              << enemy_ne << ", " << enemy_se << ")");
+	add(1.0, E::kMouseMove, x0, y0, 0, 0);
+	add(1.1, E::kMouseDown, x0, y0, E::kLeftButton, E::kLeftButton);
+	add(1.4, E::kMouseMove, (x0 + x1) / 2, (y0 + y1) / 2, 0, E::kLeftButton);
+	add(1.7, E::kMouseMove, x1, y1, 0, E::kLeftButton);
+	add(1.9, E::kMouseUp, x1, y1, E::kLeftButton, 0);
+	capture(2.8, "-sync-1");
+	// 2. formation "Linie" (Q); the camera jumps to the own town centre and the army moves in front
+	//    of it (towards the enemy) in its formation – the computer's wave will come there
+	key(3.2, 'Q');
+	capture(4.0, "-sync-2");
+	click(4.5, minimap_pixel(tc[0], tc[1]), E::kLeftButton);
+	capture(6.0, "-sync-3");
+	const double dn = enemy_ne - tc[0], ds = enemy_se - tc[1];
+	const double dl = std::max(1e-6, std::hypot(dn, ds));
+	std::pair<int, int> front{width / 2, height / 3};
+	for (double reach : {6.0, 5.0, 4.0, 7.0}) {
+		auto p = pixel_at(tc[0], tc[1], tc[0] + dn / dl * reach, tc[1] + ds / dl * reach, 0.0);
+		if (p.first > 80 and p.first < width - 80 and p.second > layout.topBarPx() + 80 and p.second < layout.barRect().y0 - 80) {
+			front = p;
+			break;
+		}
+	}
+	log::log(INFO << "war replay: formation destination at pixel (" << front.first << ", " << front.second << ")");
+	click(6.5, front, E::kRightButton);
+	capture(32.0, "-w1-formation");
+	// 3. stance "Defensiv" (D): the button stays pressed
+	key(32.5, 'D');
+	capture(33.5, "-w2-stellung");
+	// 4. select the town centre, town bell (B): the villagers run inside
+	auto tcp = pixel_at(tc[0], tc[1], tc[0], tc[1], 1.5);
+	click(34.0, tcp, E::kLeftButton);
+	capture(35.5, "-sync-4");
+	key(36.0, 'B');
+	capture(39.0, "-w3-glocke");
+	capture(43.0, "-w4-garnison");
+	// 5. the wave of the computer at the town centre: garrison arrows, fight with projectiles (several
+	//    captures: the fight lasts some 20 s and software GL moves the timing)
+	const char *fight[] = {"-w5a-pfeile", "-w5b-pfeile", "-w5c-pfeile", "-w5d-pfeile", "-w5e-pfeile", "-w5f-pfeile"};
+	for (int i = 0; i < 6; ++i) {
+		capture(46.0 + 4.0 * i, fight[i]);
+	}
+	capture(80.0, "-w7-kampf");
+	capture(81.0, nullptr);
+	return steps;
+}
+
+/**
  * Input replay of the ground markers and the placement ghost (--replay-markers,
  * XR fork; with --map random): selects a villager (ellipse + health bar), all
  * villagers (double click), the town centre (footprint diamond), starts a house
@@ -2601,6 +2789,9 @@ bool egl_sink_check(const native_args &args,
 	else if (args.replay_vision and not args.stop_in_resize) {
 		steps = vision_replay_steps(args, map_settings, start, png.string());
 	}
+	else if (args.replay_war and not args.stop_in_resize) {
+		steps = war_replay_steps(args, map_settings, start, png.string());
+	}
 	else if (args.replay_markers and not args.stop_in_resize) {
 		steps = markers_replay_steps(args, map_settings, start, png.string());
 	}
@@ -2683,7 +2874,7 @@ bool egl_sink_check(const native_args &args,
 	std::atomic<bool> prod_driver_stop{false};
 	std::thread prod_driver;
 	if (args.replay_prod or args.replay_ui or args.replay_aoe or args.replay_markers or args.replay_tech
-	    or args.replay_vision) {
+	    or args.replay_vision or args.replay_war) {
 		// the UI replay only logs the snapshots (no house on water)
 		auto water = args.replay_prod ? prod_targets.water : std::nullopt;
 		prod_driver = std::thread{[&prod_driver_stop, production = engine->get_production(), water]() {

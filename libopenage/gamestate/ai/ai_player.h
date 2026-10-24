@@ -52,6 +52,9 @@ struct AiStatus {
 	std::optional<double> first_attack{};
 	/// defence starts (threat seen after a quiet period)
 	size_t defenses = 0;
+	/// XR fork W4: attack moves of wave units, town bells rung
+	size_t attack_moves = 0;
+	size_t bells = 0;
 	/// production wishes passed to the production port
 	size_t production_requests = 0;
 	/// of those, accepted (0 with the stub)
@@ -178,6 +181,11 @@ private:
 	/// order an attack (cooldown per unit), true if ordered
 	bool order_attack(const std::shared_ptr<GameState> &state, const Seen &unit, const Seen &target,
 	                  const time::time_t &time);
+	/// XR fork W4: walk to a point and attack everything on the way (cooldown per unit), true if ordered
+	bool order_attack_move(const std::shared_ptr<GameState> &state, const Seen &unit, double ne, double se,
+	                       const time::time_t &time);
+	/// XR fork W4: stances – home army defensive, wave units aggressive
+	void set_stances(const std::shared_ptr<GameState> &state, const World &world);
 	/// candidates for choose_objective()/choose_unit_target() seen from a point
 	std::vector<TargetCandidate> candidates(const World &world, double ne, double se) const;
 	const Seen *find_enemy(const World &world, entity_id_t id) const;
@@ -209,6 +217,8 @@ private:
 	size_t waves = 0;
 	double last_wave = 0.0;
 	bool defending = false;
+	/// XR fork W4: town center whose bell this player rang (villagers in the buildings)
+	std::optional<entity_id_t> bell_tc{};
 	double last_threat = -1e30;
 	/// last logged decision per topic (log when it changes)
 	std::string last_attack_wait;

@@ -524,6 +524,8 @@ private:
 	void order_move(const std::shared_ptr<GameState> &state, Combatant &c, const Point &dest, const time::time_t &time,
 	                bool force = false);
 	void clear_order(Combatant &c);
+	/// a passable tile centre near p p for the unit (the point itself if passable)
+	Point passable_near(const std::shared_ptr<GameState> &state, const Combatant &c, const Point &p) const;
 	/// enter / leave buildings
 	bool accepts(const Combatant &building, const Combatant &unit, const time::time_t &time) const;
 	void enter(const std::shared_ptr<GameState> &state, Combatant &unit, Combatant &building, const time::time_t &time);
