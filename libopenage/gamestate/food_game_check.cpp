@@ -907,6 +907,8 @@ void check_save(const Options &opt) {
 	std::string v3 = text;
 	auto pos = v3.find("version = 4");
 	v3.replace(pos, 11, "version = 3");
+	// files before W3 have no herds key
+	v3.erase(v3.find("herds = 1"), 10);
 	save::SaveData old;
 	check(save::parse(v3, old, error) and not old.map.herds, "version 3 file parses, map without animals");
 }

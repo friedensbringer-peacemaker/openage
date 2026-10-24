@@ -1124,6 +1124,21 @@ void AiPlayer::food_economy(const std::shared_ptr<GameState> &state, const World
 	}
 
 	// 1. herding: own sheep walk to the town centre (spec 02 §2.4), wild food near home counts
+	bool has_tc = false;
+	for (const auto &b : world.buildings) {
+		has_tc = has_tc or (b.town_center and this->production->is_complete(state, b.id, time));
+	}
+	long land_grid = -1;
+	if (auto mods = state->get_mod_manager()) {
+		for (const auto &modpack : mods->get_load_order()) {
+			try {
+				land_grid = static_cast<long>(state->get_map()->get_grid_id(modpack + ".data.util.path_type.types.Land"));
+				break;
+			}
+			catch (std::exception &) {
+			}
+		}
+	}
 	size_t natural = 0;
 	size_t herded = 0;
 	for (const auto &[id, entity] : state->get_game_entities()) {
@@ -1161,6 +1176,13 @@ void AiPlayer::food_economy(const std::shared_ptr<GameState> &state, const World
 		const auto msize = state->get_map()->get_size();
 		const double hne = std::clamp(world.home_ne + dn / len * 3.0, 0.5, static_cast<double>(msize[0]) - 0.5);
 		const double hse = std::clamp(world.home_se + ds / len * 3.0, 0.5, static_cast<double>(msize[1]) - 0.5);
+		// only to a free land tile next to a standing town centre
+		if (not has_tc or land_grid < 0
+		    or not state->get_map()->is_passable(static_cast<path::grid_id_t>(land_grid),
+		                                         coord::tile{static_cast<coord::tile_t>(std::floor(hne)),
+		                                                     static_cast<coord::tile_t>(std::floor(hse))})) {
+			continue;
+		}
 		auto dest = state->get_map()->on_terrain(coord::phys3{coord::phys_t{hne}, coord::phys_t{hse}, coord::phys_t{0.0}});
 		queue->add_command(time, std::make_shared<component::command::MoveCommand>(dest));
 		this->last_herd[id] = now;

@@ -3,6 +3,7 @@
 #include "move.h"
 
 #include <compare>
+#include <stdexcept>
 #include <vector>
 
 #include <nyan/nyan.h>
@@ -72,7 +73,18 @@ std::vector<coord::phys3> find_path(const std::shared_ptr<path::Pathfinder> &pat
 		end_tile,
 		start_time,
 	};
-	auto tile_path = pathfinder->get_path(request);
+	// XR fork W3: the flow field walk of the pathfinder can leave its field (out-of-range access) right
+	// after tiles changed (a building destroyed next to the target, seen in openage-ai-check);
+	// treat that like "no path" instead of ending the simulation
+	path::Path tile_path;
+	try {
+		tile_path = pathfinder->get_path(request);
+	}
+	catch (std::out_of_range &err) {
+		log::log(WARN << "Path not found: pathfinder left its flow field from " << start_tile << " to " << end_tile
+		              << " (" << err.what() << ")");
+		return {};
+	}
 
 	if (tile_path.status != path::PathResult::FOUND) {
 		// No path found

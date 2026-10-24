@@ -358,6 +358,7 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 	std::string section;
 	bool has_map = false;
 	bool has_type = false;
+	bool has_herds = false;
 	size_t line_no = 0;
 	auto fail = [&](const std::string &what) {
 		error = "Spielstand beschädigt (Zeile " + std::to_string(line_no) + ": " + what + ")";
@@ -511,6 +512,7 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 					return fail("herds");
 				}
 				m.herds = h != 0;
+				has_herds = true;
 			}
 			else if (key == "ai_seed") {
 				if (not(v >> m.ai.seed)) {
@@ -684,7 +686,7 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 		error = "Keine Spielstand-Datei (Kopfzeile fehlt)";
 		return false;
 	}
-	if (d.version < 4) {
+	if (d.version < 4 and not has_herds) {
 		// XR fork W3: the map of older saves had no animals (same generated objects as then)
 		d.map.herds = false;
 	}

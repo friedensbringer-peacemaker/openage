@@ -64,6 +64,10 @@ SaveData sample(uint32_t seed, size_t entities) {
 		SavedPlayer sp;
 		sp.id = p;
 		sp.resources = {200.0 + p, 150.25, 100.0 / 3.0, 0.0};
+		// XR fork W3: farm reseeds of the mill
+		for (uint64_t r = 0; r < p; ++r) {
+			sp.reseeds.push_back({0.0, 60.0 + static_cast<double>(r), 0.0, 0.0});
+		}
 		d.players.push_back(sp);
 	}
 	for (size_t i = 0; i < entities; ++i) {
@@ -82,6 +86,7 @@ SaveData sample(uint32_t seed, size_t entities) {
 		}
 		if (i % 4 == 1) {
 			e.harvest = 99.5 - i;
+			e.dead = i % 8 == 1;
 		}
 		if (i % 5 == 2) {
 			e.carried = 7.5;
@@ -192,6 +197,16 @@ void check_roundtrip() {
 	      "ai settings");
 	CHECK(back.map.type == map_type_t::RANDOM and back.map.seed == 4 and back.map.size == 64, "map");
 	CHECK(std::fabs(back.game_time - d.game_time) < 1e-12, "game time exact");
+	// XR fork W3 (version 4): animals on the map, carcasses, reseeds
+	CHECK(back.version == 4 and back.map.herds, "version 4 with herds");
+	CHECK(back.entities[1].dead and not back.entities[5].dead, "carcass flag");
+	CHECK(back.players[2].reseeds.size() == 2 and back.players[2].reseeds[1][1] == 61.0 and back.players[0].reseeds.empty(),
+	      "reseeds per player");
+	SaveData old;
+	CHECK(parse("[save]\nversion = 3\n[map]\ntype = random\n", old, error) and not old.map.herds, "version 3: no herds");
+	CHECK(parse("[save]\nversion = 4\n[map]\ntype = random\n", old, error) and old.map.herds, "version 4 default: herds");
+	CHECK(parse("[save]\nversion = 3\n[map]\ntype = random\nherds = 1\n", old, error) and old.map.herds,
+	      "explicit herds kept");
 }
 
 void check_damaged() {
