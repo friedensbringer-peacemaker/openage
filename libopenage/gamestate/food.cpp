@@ -508,7 +508,8 @@ const FoodState::FieldTerrain &FoodState::terrain_of(const std::shared_ptr<GameS
 }
 
 void FoodState::show_terrain(const std::shared_ptr<GameState> &state, Field &field, int stage, const time::time_t &time) {
-	if (field.shown == stage) {
+	// fishing traps stand on water: the ground does not change
+	if (field.shown == stage or field.kind == source_t::TRAP) {
 		return;
 	}
 	auto entity = find_entity(state, field.id);

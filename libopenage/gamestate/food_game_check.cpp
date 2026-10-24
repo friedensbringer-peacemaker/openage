@@ -769,7 +769,7 @@ void check_fishing(const Options &opt) {
 		return;
 	}
 	auto dp = w.position(dock);
-	check(ends_with(w.terrain_at(dp.ne.to_double(), dp.se.to_double()), "Water")
+	check(w.terrain_at(dp.ne.to_double(), dp.se.to_double()).find(".Water") != std::string::npos
 	          or ends_with(w.terrain_at(dp.ne.to_double(), dp.se.to_double()), "Shallows"),
 	      "dock stands on water: " + w.terrain_at(dp.ne.to_double(), dp.se.to_double()));
 	check(w.advance_until(180.0, [&]() { return prod::is_finished(dock); }), "dock built");
@@ -805,7 +805,9 @@ void check_fishing(const Options &opt) {
 	w.gather_from(ship, fish);
 	check(w.advance_until(240.0, [&]() { return w.resource(0, resource_t::FOOD) > food0 + 10.0; }),
 	      "fish dropped at the dock (+" + std::to_string(w.resource(0, resource_t::FOOD) - food0) + " food)");
-	// fishing trap on water, built by the ship
+	// fishing trap on water, built by the ship (the data unlocks it in the Feudal Age: test grant)
+	w.production->grant_research(0, "FeudalAge");
+	w.advance(1.0);
 	w.select({ship});
 	snap = w.production->snapshot();
 	check(w.option(snap, "FishingTrap") != nullptr, "the ship builds fishing traps");

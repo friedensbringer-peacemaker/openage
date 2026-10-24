@@ -20,6 +20,7 @@
 #include "gamestate/api/animation.h"
 #include "gamestate/api/property.h"
 #include "gamestate/api/types.h"
+#include "gamestate/component/api/builder.h"
 #include "gamestate/component/api/drop_site.h"
 #include "gamestate/component/api/gather.h"
 #include "gamestate/component/api/harvestable.h"
@@ -679,6 +680,11 @@ const time::time_t Gather::gather_command(const std::shared_ptr<gamestate::GameE
 		return time::time_t::from_int(0);
 	}
 
+	// XR fork W3: a gather order ends a build job (the unit is no free builder any more otherwise)
+	if (entity->has_component(component::component_t::BUILDER)) {
+		std::dynamic_pointer_cast<component::Builder>(entity->get_component(component::component_t::BUILDER))->get_job() =
+			component::Builder::Job{};
+	}
 	auto &job = gather->get_job();
 	// XR fork W3: a new order lets the old field go
 	if (job.target and *job.target != target->get_id() and state->get_food()) {

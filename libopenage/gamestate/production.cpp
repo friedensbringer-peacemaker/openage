@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <exception>
 #include <limits>
@@ -16,6 +17,8 @@
 
 #include "log/log.h"
 #include "log/message.h"
+
+#include "assets/mod_manager.h"
 
 #include "coord/phys.h"
 #include "coord/scene.h"
@@ -292,7 +295,12 @@ std::string label_of_entity(const std::shared_ptr<GameEntity> &entity) {
 
 /// true for units (they count for the population)
 bool is_unit(const std::shared_ptr<GameEntity> &entity) {
-	return entity->has_component(component::component_t::MOVE);
+	if (not entity->has_component(component::component_t::MOVE)) {
+		return false;
+	}
+	// XR fork W3: herdables and game are no population (and do not block foundations)
+	auto h = component_of<component::Harvestable>(entity, component::component_t::HARVESTABLE);
+	return h == nullptr or not food::is_animal(h->kind);
 }
 
 /// complete building (or one without construction)
@@ -1087,6 +1095,23 @@ void Production::reseed_for(player_id_t player) {
 	this->push(std::move(request));
 }
 
+void Production::grant_resources(player_id_t player, double amount) {
+	Request request;
+	request.kind = Request::kind_t::TEST_RESOURCES;
+	request.for_player = player;
+	request.pos = coord::phys3{coord::phys_t{amount}, coord::phys_t{0.0}, coord::phys_t{0.0}};
+	this->push(std::move(request));
+}
+
+void Production::test_spawn(player_id_t player, const std::string &name, double ne, double se) {
+	Request request;
+	request.kind = Request::kind_t::TEST_SPAWN;
+	request.for_player = player;
+	request.id = name;
+	request.pos = coord::phys3{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{0.0}};
+	this->push(std::move(request));
+}
+
 void Production::train(const std::string &id) {
 	Request request;
 	request.kind = Request::kind_t::TRAIN;
@@ -1696,6 +1721,66 @@ void Production::update(const std::shared_ptr<GameState> &state,
 				break;
 			}
 			status("Feld eingereiht (" + std::to_string(food_state->reseeds(owner)) + " in der Mühle)", status_t::info);
+		} break;
+
+		case Request::kind_t::TEST_RESOURCES: {
+			// XR fork W3, test option of the replays
+			const auto owner = request.for_player.value_or(player_id);
+			if (state->has_player(owner)) {
+				auto &stock = state->get_player(owner)->get_resources();
+				for (size_t i = 0; i < RESOURCE_COUNT; ++i) {
+					stock.add(static_cast<resource_t>(i), request.pos.ne.to_double());
+				}
+				log::log(INFO << "Production: test grant of " << request.pos.ne.to_double() << " of every resource for player "
+				              << owner);
+			}
+		} break;
+
+		case Request::kind_t::TEST_SPAWN: {
+			// XR fork W3, test option of the replays: a finished entity at a tile
+			const auto owner = request.for_player.value_or(player_id);
+			std::string snake;
+			for (char c : request.id) {
+				if (std::isupper(static_cast<unsigned char>(c)) and not snake.empty()) {
+					snake += '_';
+				}
+				snake += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			}
+			std::shared_ptr<GameEntity> spawned;
+			for (const auto &modpack : state->get_mod_manager()->get_load_order()) {
+				const auto fqon = modpack + ".data.game_entity.generic." + snake + "." + snake + "." + request.id;
+				try {
+					state->get_db_view()->get_object(fqon);
+				}
+				catch (std::exception &) {
+					continue;
+				}
+				spawned = factory->add_game_entity(loop, state, owner, fqon);
+				break;
+			}
+			if (spawned == nullptr) {
+				log::log(WARN << "Production: test spawn of " << request.id << ": no such game entity");
+				break;
+			}
+			auto map = state->get_map();
+			auto pos = std::dynamic_pointer_cast<component::Position>(spawned->get_component(component::component_t::POSITION));
+			pos->set_position(now, map->on_terrain(request.pos));
+			pos->set_angle(now, coord::phys_angle_t::from_int(315));
+			std::dynamic_pointer_cast<component::Ownership>(spawned->get_component(component::component_t::OWNERSHIP))
+				->set_owner(now, owner);
+			std::dynamic_pointer_cast<component::Activity>(spawned->get_component(component::component_t::ACTIVITY))->init(now);
+			spawned->get_manager()->run_activity_system(now);
+			state->add_game_entity(spawned);
+			if (auto constructable = component_of<ConstructableComp>(spawned, component::component_t::CONSTRUCTABLE)) {
+				if (not is_field_name(request.id)) {
+					for (const auto &t : building_tiles(request.pos.ne.to_double(), request.pos.se.to_double(), constructable->radius)) {
+						map->block_tile(coord::tile{t.ne, t.se}, now);
+					}
+				}
+				prod::complete_building(spawned, now);
+			}
+			log::log(INFO << "Production: test spawn of " << request.id << " (entity " << spawned->get_id() << ") for player "
+			              << owner << " at tile " << tile_str(request.pos));
 		} break;
 
 		case Request::kind_t::CANCEL:

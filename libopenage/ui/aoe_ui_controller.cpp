@@ -61,6 +61,7 @@ agesxr::HudProdState prod_to_hud(const gamestate::prod::Snapshot &s) {
 	p.selectionCount = static_cast<int>(s.selection_count);
 	p.selectionLabel = s.selection_label;
 	p.construction = s.construction ? *s.construction : -1.0;
+	p.selectionResource = s.selection_resource;
 	for (const auto &o : s.options) {
 		agesxr::HudProdOption h;
 		h.code = o.code;

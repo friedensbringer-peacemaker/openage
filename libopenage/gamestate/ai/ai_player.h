@@ -222,6 +222,9 @@ private:
 	/// XR fork W3: last herding order per own herdable, last reseed request (simulation seconds)
 	std::unordered_map<entity_id_t, double> last_herd;
 	double last_reseed = -100.0;
+	/// XR fork W3: last resource a villager was sent to; resources villagers could not reach (time)
+	std::unordered_map<entity_id_t, entity_id_t> last_spot;
+	std::unordered_map<entity_id_t, double> bad_spots;
 	/// villagers that fell idle again shortly after a gather order (no path): longer cooldown
 	std::unordered_map<entity_id_t, size_t> quick_idle;
 	/// last builder assignment per foundation (simulation seconds) and the assignments so far

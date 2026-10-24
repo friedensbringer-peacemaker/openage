@@ -434,7 +434,7 @@ struct FoodPlan {
 /**
  * Food plan of the AI (deterministic): a mill once 5 villagers exist (also one of the two
  * Dark Age buildings for the Feudal Age), farms when the wild food near home runs out (or
- * a few beside it from 12 villagers on), one new farm per decision; reseeds at the mill
+ * two to six beside it from 8 villagers on), one new farm per decision; reseeds at the mill
  * for the farms it has (at most 3 queued), wood permitting.
  */
 inline FoodPlan plan_food(const FoodView &v) {
@@ -449,8 +449,9 @@ inline FoodPlan plan_food(const FoodView &v) {
 	if (v.natural_food <= 2) {
 		plan.farm_target = std::clamp<size_t>(v.villagers / 2, 3, 10);
 	}
-	else if (v.villagers >= 12) {
-		plan.farm_target = 2;
+	else if (v.villagers >= 8) {
+		// farms besides the wild food from 8 villagers on, one more for every two villagers (at most 6)
+		plan.farm_target = std::min<size_t>(6, 2 + (v.villagers - 8) / 2);
 	}
 	plan.build_farm = v.farms + v.farms_planned < plan.farm_target and v.farms_planned == 0
 	                  and affordable(v.stock, COST_FARM);

@@ -77,6 +77,7 @@ struct HudProdState {
     int selectionCount = 0;
     std::string selectionLabel;             // deutscher Name der ersten gewählten Entity
     double construction = -1.0;             // Baufortschritt eines gewählten Fundaments 0 … 1, < 0 = keiner
+    std::string selectionResource;          // W3: Vorrat der ersten Auswahl („Feld – Nahrung 175“), leer = keiner
     std::vector<HudProdOption> options;     // was die Auswahl ausbilden/bauen kann
     bool queue = false;                     // gewähltes Gebäude hat eine Warteschlange
     std::vector<std::string> queueItems;    // deutsche Namen, erstes = in Arbeit

@@ -618,6 +618,10 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 		}
 		if (last != this->last_order.end() and now - last->second < cooldown + 15.0) {
 			fails += 1;
+			// XR fork W3: idle again soon after the order: its resource is not reachable, leave it for a while
+			if (auto spot = this->last_spot.find(v.id); spot != this->last_spot.end()) {
+				this->bad_spots[spot->second] = now;
+			}
 		}
 		else {
 			fails = 0;
@@ -672,6 +676,9 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 		else if (not this->neutral.contains(owner)) {
 			continue;
 		}
+		if (auto bad = this->bad_spots.find(id); bad != this->bad_spots.end() and now - bad->second < 120.0) {
+			continue;
+		}
 		if (source != food::source_t::OTHER and not econ::can_gather_from(sample, entity)) {
 			continue;
 		}
@@ -719,6 +726,7 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 			entity->get_component(component::component_t::COMMANDQUEUE));
 		queue->add_command(time, std::make_shared<component::command::GatherCommand>(best->id));
 		this->last_order[v->id] = now;
+		this->last_spot[v->id] = best->id;
 		workers[static_cast<size_t>(*kind)] += 1;
 		ordered[static_cast<size_t>(*kind)] += 1;
 		assigned[best->id] += 1;
@@ -1057,9 +1065,11 @@ void AiPlayer::produce(const std::shared_ptr<GameState> &state, const World &wor
 		const bool feudal_locked = rv.age == tech::DARK_AGE
 		                           and rv.villagers >= tech::AiResearchParams{}.feudal_villagers
 		                           and std::find(rv.offered.begin(), rv.offered.end(), "FeudalAge") == rv.offered.end();
+		// XR fork W3: the mill comes early now; a lumber camp is the second building unless there is one
 		bool has_camp = false;
 		for (const auto &b : world.buildings) {
-			has_camp = has_camp or b.name == "LumberCamp" or b.name == "Mill" or b.name == "MiningCamp";
+			has_camp = has_camp or b.name == "LumberCamp" or b.name == "MiningCamp" or b.name == "Barracks"
+			           or b.name == "Dock";
 		}
 		auto last_camp = this->last_build.find("LumberCamp");
 		if (feudal_locked and not has_camp and stock[static_cast<size_t>(resource_t::WOOD)] >= 100.0
@@ -1129,7 +1139,8 @@ void AiPlayer::food_economy(const std::shared_ptr<GameState> &state, const World
 		const bool wild = (h->kind == food::source_t::OTHER or h->kind == food::source_t::PREY
 		                   or h->kind == food::source_t::HERDABLE)
 		                  and (this->neutral.contains(owner) or owner == this->player);
-		if (wild and d <= FOOD_NEAR) {
+		auto bad = this->bad_spots.find(id);
+		if (wild and d <= FOOD_NEAR and not(bad != this->bad_spots.end() and now - bad->second < 120.0)) {
 			natural += 1;
 		}
 		if (h->kind != food::source_t::HERDABLE or h->dead or owner != this->player or combat->is_dead(id) or d <= 4.0) {
@@ -1218,6 +1229,7 @@ void AiPlayer::food_economy(const std::shared_ptr<GameState> &state, const World
 		              << view.farms << ")" << (done ? "" : " [not done]") << ", t=" << fmt1(now) << " s");
 	}
 	std::erase_if(this->last_herd, [&](const auto &entry) { return now - entry.second > 60.0; });
+	std::erase_if(this->bad_spots, [&](const auto &entry) { return now - entry.second > 120.0; });
 }
 
 // ---------------------------------------------------------------- report

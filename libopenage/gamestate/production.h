@@ -390,6 +390,15 @@ public:
 	/// queue a farm reseed for \p player (XR fork W3, needs a finished mill of the player)
 	void reseed_for(player_id_t player);
 
+	/// test option (XR fork W3, openage-native --replay-food): \p amount of every resource for \p player
+	void grant_resources(player_id_t player, double amount);
+
+	/**
+	 * Test option (XR fork W3, replays): a finished game entity of \p player at a tile, e.g. "Mill",
+	 * "Dock", "FishingShip", "Villager", "Deer" (nyan object hd_base…generic.<snake>.<snake>.<name>).
+	 */
+	void test_spawn(player_id_t player, const std::string &name, double ne, double se);
+
 	/**
 	 * Test option (XR fork W1, openage-native --replay-tech): p player gets the technology at once,
 	 * without costs and conditions, as if it had been researched (patches, refresh, message).
@@ -443,6 +452,9 @@ private:
 			GRANT_RESEARCH,
 			/// XR fork W3: queue a farm reseed at the mill
 			RESEED,
+			/// XR fork W3 test options (replays): resources, a finished entity at a tile
+			TEST_RESOURCES,
+			TEST_SPAWN,
 		};
 		kind_t kind = kind_t::TRAIN;
 		std::string id;

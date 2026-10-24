@@ -281,6 +281,9 @@ inline HudIcon aoeIconFor(int code, const std::string& hint) {
     if (hint == "wall") return HudIcon::Wall;
     if (hint == "tech") return HudIcon::Tech;
     if (hint == "age") return HudIcon::AgeUp;
+    // W3: Farm, Fischreuse, „Feld neu einsäen“ (Nahrungssymbol), Hafen (Gebäude), Schiffe (Hammer)
+    if (hint == "farm" || hint == "trap") return HudIcon::Food;
+    if (hint == "dock") return HudIcon::House;
     return HudIcon::Hammer;
 }
 

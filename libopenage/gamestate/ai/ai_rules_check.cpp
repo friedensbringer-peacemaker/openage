@@ -287,6 +287,45 @@ int main() {
 		check(same and differ, "rng deterministic per seed");
 	}
 
+	// ---- XR fork W3: food plan (mill, farms, reseeds), sweep
+	for (size_t vil = 0; vil <= 30; ++vil) {
+		for (size_t mills = 0; mills <= 1; ++mills) {
+			for (size_t planned = 0; planned <= 1; ++planned) {
+				for (size_t farms = 0; farms <= 12; ++farms) {
+					for (size_t natural : {0u, 2u, 3u, 18u}) {
+						for (double wood : {0.0, 59.0, 60.0, 100.0, 159.0, 220.0, 1000.0}) {
+							for (size_t reseeds = 0; reseeds <= 4; ++reseeds) {
+								FoodView v;
+								v.villagers = vil;
+								v.mills = mills;
+								v.mills_planned = planned;
+								v.farms = farms;
+								v.farms_planned = planned;
+								v.natural_food = natural;
+								v.reseeds = reseeds;
+								v.stock = {0.0, wood, 0.0, 0.0};
+								auto plan = plan_food(v);
+								const std::string what = "food plan v" + std::to_string(vil) + " m" + std::to_string(mills)
+								                         + " f" + std::to_string(farms) + " n" + std::to_string(natural);
+								check(plan.build_mill == (mills + planned == 0 and vil >= 5 and wood >= 100.0), what + ": mill");
+								if (mills == 0) {
+									check(not plan.build_farm and not plan.reseed, what + ": no farm without a mill");
+									continue;
+								}
+								check(not plan.build_farm or (farms + planned < plan.farm_target and planned == 0 and wood >= 60.0),
+								      what + ": farm only below the target, one at a time, affordable");
+								check(plan.farm_target <= 10, what + ": at most 10 farms");
+								check((natural <= 2) ? plan.farm_target >= 3 : (vil < 8 ? plan.farm_target == 0 : plan.farm_target >= 2),
+								      what + ": farm target follows the wild food");
+								check(not plan.reseed or (farms >= 2 and reseeds < 3 and reseeds < farms), what + ": reseeds limited");
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	std::cout << "ai rules check: " << checks << " checks, " << failures << " failures" << std::endl;
 	return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
