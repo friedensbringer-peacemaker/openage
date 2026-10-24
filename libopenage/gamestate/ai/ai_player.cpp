@@ -659,6 +659,28 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 	std::array<size_t, GATHER_KINDS> workers{};
 	std::unordered_map<entity_id_t, size_t> assigned;
 	std::vector<const Seen *> idle;
+	// XR fork W4: enemy buildings that shoot (town centres have a base arrow, towers) – no gathering in their range
+	struct Danger {
+		double ne, se, reach;
+	};
+	std::vector<Danger> danger;
+	for (const auto &e : world.enemies) {
+		if (not e.building) {
+			continue;
+		}
+		if (auto stats = combat->get_stats(e.id); stats and stats->shoots_arrows() and stats->can_attack) {
+			danger.push_back({e.ne, e.se, e.radius + stats->max_range + 1.5});
+		}
+	}
+	auto in_danger = [&](double ne, double se) {
+		for (const auto &d : danger) {
+			if (dist(d.ne, d.se, ne, se) < d.reach) {
+				return true;
+			}
+		}
+		return false;
+	};
+
 	for (const auto &v : world.villagers) {
 		auto entity = state->get_game_entity(v.id);
 		if (not entity->has_component(component::component_t::GATHER)) {
@@ -667,6 +689,15 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 		auto gather = std::dynamic_pointer_cast<component::Gather>(
 			entity->get_component(component::component_t::GATHER));
 		const auto &job = gather->get_job();
+		if (combat->is_fleeing(v.id)) {
+			continue;
+		}
+		// XR fork W4: a job in the range of an enemy town centre or tower: choose another resource
+		if (job.phase != component::Gather::phase_t::NONE and job.target
+		    and in_danger(job.target_pos.ne.to_double(), job.target_pos.se.to_double())) {
+			idle.push_back(&v);
+			continue;
+		}
 		if (job.phase != component::Gather::phase_t::NONE) {
 			auto kind = gather_kind(job.resource);
 			if (kind) {
@@ -733,6 +764,9 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 		auto position = std::dynamic_pointer_cast<component::Position>(
 			entity->get_component(component::component_t::POSITION));
 		auto pos = position->get_positions().get(time);
+		if (in_danger(pos.ne.to_double(), pos.se.to_double())) {
+			continue;
+		}
 		spots[static_cast<size_t>(*kind)].push_back({id, pos.ne.to_double(), pos.se.to_double()});
 	}
 	std::array<bool, GATHER_KINDS> available{};

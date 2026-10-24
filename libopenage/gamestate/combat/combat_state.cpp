@@ -1800,11 +1800,14 @@ void CombatState::attacked(const std::shared_ptr<GameState> &state, Combatant &v
 	if (victim.stance == stance_t::DEFENSIVE and victim.post) {
 		post = victim.post;
 	}
-	const Point dest = flee_point(pos, from, victim.stats->speed, angle(this->rng), post);
+	const Point dest = this->passable_near(state, victim, flee_point(pos, from, victim.stats->speed, angle(this->rng), post));
 	if (not victim.fleeing) {
 		this->remember_job(victim);
+	}
+	if (this->allow_hit_log(time)) {
 		log::log(INFO << "Combat: " << describe(victim.entity, *victim.stats, this->owner_of(victim.entity, time))
-		              << " flees from " << from.size() << " attacker(s) at t=" << now);
+		              << " flees from " << from.size() << " attacker(s) at (" << pos.x << ", " << pos.y << ") to ("
+		              << dest.x << ", " << dest.y << ") at t=" << now);
 	}
 	victim.fleeing = true;
 	victim.flee_ordered = now;
