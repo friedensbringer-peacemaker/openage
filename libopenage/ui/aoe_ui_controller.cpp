@@ -221,6 +221,11 @@ void AoeUiController::poll(double now) {
 	    and this->autosave.due(sample.gameSeconds)) {
 		this->save_slot(gamestate::save::AUTOSAVE_SLOT, "autosave");
 	}
+	// XR fork W4: the delete confirmation runs out after 3 s
+	if (this->delete_armed_at >= 0.0 and now - this->delete_armed_at > 3.0) {
+		this->delete_armed_at = -1.0;
+		this->feed.setDeleteArmed(false);
+	}
 	this->feed.fill(sample, now);
 
 	auto &model = this->aoe_ui.model();
@@ -404,8 +409,27 @@ bool AoeUiController::on_event(const renderer::WindowEvent &ev, double now) {
 				this->ui_click = true;
 				return true;
 			}
+			// XR fork W4: the target of patrol, guard, follow, attack move, garrison
+			if (this->pending_target) {
+				const auto type = *this->pending_target;
+				this->pending_target.reset();
+				log::log(INFO << "UI: " << this->pending_label << " target at pixel (" << x << ", " << y << ")");
+				if (this->hooks.send_order) {
+					this->hooks.send_order(type, x, y, 0);
+				}
+				this->last_poll = -1.0;
+				this->ui_click = true;
+				return true;
+			}
 			this->left_held = true;
 			return false;
+		}
+		if (ev.button == mouse_button::RightButton and this->pending_target) {
+			// right click ends the target choice
+			log::log(INFO << "UI: " << this->pending_label << " cancelled");
+			this->pending_target.reset();
+			this->right_held = false;
+			return true;
 		}
 		if (ev.button == mouse_button::RightButton) {
 			// right click on the minimap: the selection moves there (XR fork, vision)
@@ -504,6 +528,26 @@ bool AoeUiController::on_event(const renderer::WindowEvent &ev, double now) {
 			else {
 				this->load_slot(gamestate::save::QUICK_SLOT, "F9");
 			}
+			this->swallowed_keys.push_back(k);
+			return true;
+		}
+		// XR fork W4: Entf = delete, Tab = attack move (keys of the command grid)
+		if ((k == key::Key_Delete or k == key::Key_Tab) and not modal) {
+			const auto result = ui.onKey(k == key::Key_Delete ? agesxr::kAoeKeyDelete : agesxr::kAoeKeyTab, now);
+			if (result.action != agesxr::AoeUi::Action::kNone) {
+				// the keyboard asks no question (the Quest button does)
+				if (k == key::Key_Delete) {
+					this->delete_armed_at = now;
+				}
+				this->handle(result, now);
+				this->swallowed_keys.push_back(k);
+				return true;
+			}
+			return false;
+		}
+		if (k == key::Key_Escape and this->pending_target and not modal) {
+			log::log(INFO << "UI: " << this->pending_label << " cancelled (Esc)");
+			this->pending_target.reset();
 			this->swallowed_keys.push_back(k);
 			return true;
 		}
@@ -667,6 +711,9 @@ void AoeUiController::production_command(int code, const std::string &label) {
 		this->last_poll = -1.0;
 		return;
 	}
+	if (this->combat_command(code, label)) {
+		return;
+	}
 	if (not this->hooks.production) {
 		return;
 	}
@@ -681,6 +728,81 @@ void AoeUiController::production_command(int code, const std::string &label) {
 		this->hooks.production->command(code);
 	}
 	this->last_poll = -1.0;  // show the result at once
+}
+
+bool AoeUiController::combat_command(int code, const std::string &label) {
+	using agesxr::kAoeCmdFormation0;
+	using agesxr::kAoeCmdStance0;
+	const double now = this->last_now;
+	auto order = [&](ui_command_t type, int arg) {
+		if (this->hooks.send_order) {
+			this->hooks.send_order(type, 0, 0, arg);
+		}
+		this->last_poll = -1.0;
+	};
+	auto target = [&](ui_command_t type, const char *what) {
+		this->pending_target = type;
+		this->pending_label = what;
+		const std::string hint = std::string{what} + ": Ziel auf der Karte wählen (Rechtsklick bricht ab)";
+		agesxr::aoePushMessage(this->aoe_ui.model(), hint, 0, now);
+		agesxr::aoePushMessage(this->feed.model(), hint, 0, now);
+		log::log(INFO << "UI: " << what << " – waiting for a target");
+	};
+	if (code == agesxr::kAoeCmdPatrol) {
+		target(ui_command_t::PATROL, "Patrouille");
+	}
+	else if (code == agesxr::kAoeCmdGuard) {
+		target(ui_command_t::GUARD, "Wachen");
+	}
+	else if (code == agesxr::kAoeCmdFollow) {
+		target(ui_command_t::FOLLOW, "Folgen");
+	}
+	else if (code == agesxr::kAoeCmdAttackMove) {
+		target(ui_command_t::ATTACK_MOVE, "Angriffsbewegung");
+	}
+	else if (code == agesxr::kAoeCmdGarrison) {
+		target(ui_command_t::GARRISON, "Garnison");
+	}
+	else if (code == agesxr::kAoeCmdHalt) {
+		log::log(INFO << "UI: halt");
+		order(ui_command_t::STOP, 0);
+	}
+	else if (code >= kAoeCmdStance0 and code < kAoeCmdStance0 + agesxr::kAoeStanceCount) {
+		log::log(INFO << "UI: stance '" << label << "'");
+		order(ui_command_t::STANCE, code - kAoeCmdStance0);
+	}
+	else if (code >= kAoeCmdFormation0 and code < kAoeCmdFormation0 + agesxr::kAoeFormationCount) {
+		log::log(INFO << "UI: formation '" << label << "'");
+		order(ui_command_t::FORMATION, code - kAoeCmdFormation0 + 1);
+	}
+	else if (code == agesxr::kAoeCmdUnload) {
+		log::log(INFO << "UI: ungarrison all");
+		order(ui_command_t::UNGARRISON, 0);
+	}
+	else if (code == agesxr::kAoeCmdBell) {
+		const bool ringing = this->info.first and this->info.first->bell;
+		log::log(INFO << "UI: town bell " << (ringing ? "off (back to work)" : "on"));
+		order(ui_command_t::BELL, ringing ? 0 : 1);
+	}
+	else if (code == agesxr::kAoeCmdDelete) {
+		// on the Quest a second press within 3 s confirms (no keyboard, the trigger is quick)
+		if (this->aoe_ui.menu().quest and this->delete_armed_at < 0.0) {
+			this->delete_armed_at = now;
+			this->feed.setDeleteArmed(true);
+			agesxr::aoePushMessage(this->feed.model(), "Löschen: noch einmal drücken zum Bestätigen", 1, now);
+			log::log(INFO << "UI: delete armed (3 s)");
+			this->last_poll = -1.0;
+			return true;
+		}
+		this->delete_armed_at = -1.0;
+		this->feed.setDeleteArmed(false);
+		log::log(INFO << "UI: delete the selection");
+		order(ui_command_t::KILL, 0);
+	}
+	else {
+		return false;
+	}
+	return true;
 }
 
 void AoeUiController::handle(const agesxr::AoeUi::Result &result, double now) {

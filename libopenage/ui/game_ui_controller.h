@@ -42,6 +42,20 @@ enum class ui_command_t {
 	GATHER,
 	/// attack the enemy under the cursor (nothing without one)
 	ATTACK,
+
+	// XR fork W4 (combat, docs/aoe2-spec 06 §6.1/6.3): at the pixel ...
+	PATROL,
+	GUARD,
+	FOLLOW,
+	ATTACK_MOVE,
+	GARRISON,
+	// ... and without a target (the pixel is ignored; argument: stance, formation, bell on/off)
+	STOP,
+	STANCE,
+	FORMATION,
+	KILL,
+	UNGARRISON,
+	BELL,
 };
 
 /**
@@ -57,6 +71,8 @@ struct UiHooks {
 	std::shared_ptr<time::Clock> clock{};
 	/// send a command of the context menu for the selection at a window pixel
 	std::function<void(ui_command_t type, int x, int y)> send_command{};
+	/// XR fork W4: a combat command with an argument (stance, formation, bell on/off)
+	std::function<void(ui_command_t type, int x, int y, int arg)> send_order{};
 	/// restart the engine with other map settings (game menu "Neue Karte")
 	std::function<void(const gamestate::MapSettings &settings)> restart{};
 	/// quit the game (game menu "Beenden", confirmed)

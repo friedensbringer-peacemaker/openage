@@ -738,8 +738,9 @@ AoeUi::Result AoeUi::onKey(int qtKey, double now) {
         return r;
     }
     if (mMenu.open || mBoard.open || mContext.open) return r;
-    if (qtKey >= 'A' && qtKey <= 'Z') {
-        const int cell = aoeCellOfHotkey(static_cast<char>(qtKey));
+    if ((qtKey >= 'A' && qtKey <= 'Z') || qtKey == kAoeKeyDelete || qtKey == kAoeKeyTab) {
+        // W4: eigene Tasten der Felder (Stellungen A/D/N/O, Formationen Q/W/E/F, Entf, Tab) vor den Rasterplätzen
+        const int cell = aoeCellOfKey(mModel, static_cast<char>(qtKey));
         if (cell < 0) return r;
         const Rect g = gridRect(cell);
         return clickHit({Hit::kGrid, cell}, g.cx(), g.cy(), now);
@@ -1136,13 +1137,14 @@ void AoeUi::drawGrid() {
             if (mFocusMode && mFocus == h) mSkin->drawFocus(*mCanvas, r, s);
             continue;
         }
-        const SkinState st = stateOf(h, c.enabled);
+        SkinState st = stateOf(h, c.enabled);
+        if (c.active && st == SkinState::kNormal) st = SkinState::kPressed;  // W4: gewählte Stellung/Formation
         mSkin->drawButton(*mCanvas, SkinButton::kCommand, r, st, s);
         const int iconCy = mMenu.labels ? r.y0 + px(32) : r.cy();
         mSkin->drawIcon(*mCanvas, c.icon, r.cx(), iconCy, static_cast<float>(kIconScaleBtn) * s * 0.7f, st);
         if (mMenu.hotkeys) {
-            const char hk[2] = {aoeHotkey(i), 0};
-            textIn(hk, r4(r.x1 - px(22), r.y0 + px(2), r.x1 - px(4), r.y0 + px(20)), kPxHotkey * s,
+            const std::string hk = aoeKeyText(aoeKeyOf(mModel, i));
+            textIn(hk.c_str(), r4(r.x1 - px(hk.size() > 1 ? 40 : 22), r.y0 + px(2), r.x1 - px(4), r.y0 + px(20)), kPxHotkey * s,
                    st == SkinState::kDisabled ? kDim : kGoldLight, true, true, kAlignRight);
         }
         if (mMenu.labels) {
@@ -1323,13 +1325,14 @@ void AoeUi::drawSelection() {
         textIn("Warteschlange", r4(lx(kQueueX0), labelY - px(12), lx(kQueueX0) + px(300), labelY + px(12)), kPxHeading * s, ink, true, false, kAlignLeft);
         drawSlotRow(sel.queue, kAoeQueueShown, 0, 0, Hit::kQueue, sel.queueProgress, true, lx(kGarrisonX0) - px(8));
     }
-    // Garnison (S3: Platzhalter ausgegraut)
+    // Garnison (W4): Belegung, Pfeile je Salve, Porträts der Insassen
     if (sel.garrisonMax > 0) {
-        char buf[32];
-        std::snprintf(buf, sizeof(buf), "Garnison %d/%d", sel.garrison, sel.garrisonMax);
-        textIn(buf, r4(lx(kGarrisonX0), labelY - px(12), lx(kGarrisonX0) + px(300), labelY + px(12)), kPxHeading * s, kDim, true, false, kAlignLeft);
-        std::vector<AoeSlot> empty;
-        drawSlotRow(empty, kGarrisonVisible, 0, 0, Hit::kGarrison, -1.0f, false, textX1);
+        char buf[64];
+        if (sel.arrows > 0) std::snprintf(buf, sizeof(buf), "Garnison %d/%d · Pfeile %d", sel.garrison, sel.garrisonMax, sel.arrows);
+        else std::snprintf(buf, sizeof(buf), "Garnison %d/%d", sel.garrison, sel.garrisonMax);
+        textIn(buf, r4(lx(kGarrisonX0), labelY - px(12), lx(kGarrisonX0) + px(300), labelY + px(12)), kPxHeading * s,
+               sel.garrison > 0 ? ink : kDim, true, false, kAlignLeft);
+        drawSlotRow(sel.garrisonUnits, kGarrisonVisible, 0, 0, Hit::kGarrison, -1.0f, sel.garrison > 0, textX1);
     }
 }
 

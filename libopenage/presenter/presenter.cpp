@@ -184,6 +184,9 @@ void Presenter::init_ui(const renderer::window_settings &window_settings) {
 	hooks.send_command = [this](ui::ui_command_t type, int x, int y) {
 		this->send_ui_command(type, x, y);
 	};
+	hooks.send_order = [this](ui::ui_command_t type, int x, int y, int arg) {
+		this->send_ui_command(type, x, y, arg);
+	};
 	hooks.restart = this->ui_restart;
 	hooks.quit = this->ui_quit;
 	hooks.save_slot = this->ui_save_slot;
@@ -264,7 +267,7 @@ void Presenter::init_ui(const renderer::window_settings &window_settings) {
 	this->render_passes.push_back(this->ui_renderer->get_render_pass());
 }
 
-void Presenter::send_ui_command(ui::ui_command_t type, int x, int y) {
+void Presenter::send_ui_command(ui::ui_command_t type, int x, int y, int arg) {
 	auto controller = this->controller_slot->get();
 	if (not this->simulation or not controller or not this->camera or not this->time_loop) {
 		return;
@@ -277,7 +280,7 @@ void Presenter::send_ui_command(ui::ui_command_t type, int x, int y) {
 	if (auto state = game->get_state()) {
 		if (auto combat = state->get_combat()) {
 			controller->prune_selected([&combat](gamestate::entity_id_t id) {
-				return combat->was_removed(id);
+				return combat->was_removed(id) or combat->is_hidden(id);
 			});
 		}
 	}
@@ -296,6 +299,40 @@ void Presenter::send_ui_command(ui::ui_command_t type, int x, int y) {
 	case ui::ui_command_t::ATTACK:
 		command = command_t::ATTACK;
 		break;
+	// XR fork W4
+	case ui::ui_command_t::PATROL:
+		command = command_t::PATROL;
+		break;
+	case ui::ui_command_t::GUARD:
+		command = command_t::GUARD;
+		break;
+	case ui::ui_command_t::FOLLOW:
+		command = command_t::FOLLOW;
+		break;
+	case ui::ui_command_t::ATTACK_MOVE:
+		command = command_t::ATTACK_MOVE;
+		break;
+	case ui::ui_command_t::GARRISON:
+		command = command_t::GARRISON;
+		break;
+	case ui::ui_command_t::STOP:
+		command = command_t::STOP;
+		break;
+	case ui::ui_command_t::STANCE:
+		command = command_t::STANCE;
+		break;
+	case ui::ui_command_t::FORMATION:
+		command = command_t::FORMATION;
+		break;
+	case ui::ui_command_t::KILL:
+		command = command_t::KILL;
+		break;
+	case ui::ui_command_t::UNGARRISON:
+		command = command_t::UNGARRISON;
+		break;
+	case ui::ui_command_t::BELL:
+		command = command_t::BELL;
+		break;
 	default:
 		break;
 	}
@@ -310,6 +347,7 @@ void Presenter::send_ui_command(ui::ui_command_t type, int x, int y) {
 		{"camera_matrix", cam_matrix},
 		{"pick_ndc", Eigen::Vector2f{mouse.to_viewport(this->camera).to_ndc_space(this->camera)}},
 		{"plain", plain},
+		{"combat_arg", arg},
 	};
 	this->simulation->get_event_loop()->create_event(
 		"game.send_command",
@@ -323,10 +361,12 @@ void Presenter::send_ui_command(ui::ui_command_t type, int x, int y) {
 
 void Presenter::apply_vision() {
 	std::shared_ptr<gamestate::vision::VisionState> vision;
+	std::shared_ptr<gamestate::combat::CombatState> combat;
 	if (this->simulation) {
 		if (auto game = this->simulation->get_game()) {
 			if (auto state = game->get_state()) {
 				vision = state->get_vision();
+				combat = state->get_combat();
 			}
 		}
 	}
@@ -336,22 +376,36 @@ void Presenter::apply_vision() {
 		}
 	}
 	auto snapshot = vision ? vision->snapshot() : nullptr;
-	if (snapshot == this->vision_shown) {
+	// XR fork W4: units in a garrison are not drawn and cannot be clicked
+	uint64_t hidden_version = 0;
+	auto hidden = combat ? combat->hidden_entities(hidden_version) : nullptr;
+	if (snapshot == this->vision_shown and hidden_version == this->hidden_shown) {
 		return;
 	}
+	const bool fog_changed = snapshot != this->vision_shown;
 	this->vision_shown = snapshot;
-	if (not snapshot) {
-		this->terrain_renderer->set_fog(nullptr, 0, 0, 0);
+	this->hidden_shown = hidden_version;
+	if (fog_changed) {
+		if (snapshot) {
+			this->terrain_renderer->set_fog(snapshot->tiles.get(), snapshot->ne_size, snapshot->se_size,
+			                                snapshot->tiles_version);
+		}
+		else {
+			this->terrain_renderer->set_fog(nullptr, 0, 0, 0);
+		}
+	}
+	const bool any_hidden = hidden and not hidden->empty();
+	if ((not snapshot or snapshot->all_normal()) and not any_hidden) {
 		this->world_renderer->set_visibility({});
 		return;
 	}
-	this->terrain_renderer->set_fog(snapshot->tiles.get(), snapshot->ne_size, snapshot->se_size, snapshot->tiles_version);
-	if (snapshot->all_normal()) {
-		this->world_renderer->set_visibility({});
-	}
-	else {
-		this->world_renderer->set_visibility([snapshot](uint32_t id) { return snapshot->display_of(id); });
-	}
+	const bool fog = snapshot and not snapshot->all_normal();
+	this->world_renderer->set_visibility([snapshot, hidden, fog](uint32_t id) -> uint8_t {
+		if (hidden and hidden->contains(id)) {
+			return 2;
+		}
+		return fog ? snapshot->display_of(id) : uint8_t{0};
+	});
 }
 
 void Presenter::minimap_jump(float u, float v) {
@@ -380,7 +434,7 @@ void Presenter::minimap_command(float u, float v) {
 	}
 	if (auto combat = game->get_state()->get_combat()) {
 		controller->prune_selected([&combat](gamestate::entity_id_t id) {
-			return combat->was_removed(id);
+			return combat->was_removed(id) or combat->is_hidden(id);
 		});
 	}
 	if (controller->get_selected().empty()) {
@@ -964,6 +1018,61 @@ void Presenter::update_selection_markers() {
 		}
 	}
 	this->hud_renderer->set_rally_flag(flag);
+
+	// XR fork W4: projectiles in flight (positions at the simulation time, arc of the data)
+	{
+		std::vector<renderer::hud::ColorBatch> shots;
+		if (combat and this->time_loop) {
+			uint64_t version = 0;
+			auto flying = combat->get_projectiles(version);
+			const double now = this->time_loop->get_clock()->get_time().to_double();
+			const Eigen::Matrix4f m = this->camera->get_projection_matrix() * this->camera->get_view_matrix();
+			const auto &vp = this->camera->get_viewport_size();
+			const float px_x = 2.0f / static_cast<float>(std::max<size_t>(vp[0], 1));
+			const float px_y = 2.0f / static_cast<float>(std::max<size_t>(vp[1], 1));
+			renderer::hud::ColorBatch shaft{Eigen::Vector4f{0.20f, 0.13f, 0.06f, 0.95f}, {}};
+			renderer::hud::ColorBatch tip{Eigen::Vector4f{0.85f, 0.85f, 0.80f, 1.0f}, {}};
+			auto project = [&](const gamestate::combat::Point3 &p) {
+				coord::phys3 pos{coord::phys_t{p.ne}, coord::phys_t{p.se}, coord::phys_t{p.up}};
+				auto w = pos.to_scene3().to_world_space();
+				Eigen::Vector4f clip = m * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+				const float cw = clip.w() != 0.0f ? clip.w() : 1.0f;
+				return Eigen::Vector2f{clip.x() / cw, clip.y() / cw};
+			};
+			for (const auto &p : flying) {
+				const double t = now - p.launched;
+				if (t < 0.0 or t > p.flight.duration) {
+					continue;
+				}
+				// shaft of about 0.45 tiles along the flight direction
+				const double back = std::max(0.0, t - 0.45 / std::max(1.0, std::hypot(p.flight.to.ne - p.flight.from.ne,
+				                                                                       p.flight.to.se - p.flight.from.se)
+				                                                            / p.flight.duration));
+				const auto head = project(gamestate::combat::flight_at(p.flight, t));
+				const auto tail = project(gamestate::combat::flight_at(p.flight, back));
+				Eigen::Vector2f d = head - tail;
+				const Eigen::Vector2f px{d.x() / px_x, d.y() / px_y};
+				const float len = px.norm();
+				Eigen::Vector2f n = len > 1e-3f ? Eigen::Vector2f{-px.y() / len * px_x, px.x() / len * px_y}
+				                                : Eigen::Vector2f{px_x, 0.0f};
+				shaft.quad(tail - n, tail + n, head + n, head - n);
+				tip.rect(head.x() - 1.5f * px_x, head.y() - 1.5f * px_y, head.x() + 1.5f * px_x, head.y() + 1.5f * px_y);
+			}
+			if (not shaft.verts.empty()) {
+				const size_t drawn = shaft.verts.size() / 12;
+				this->projectile_frames += 1;
+				this->projectile_max = std::max(this->projectile_max, drawn);
+				if (this->now() - this->projectile_log_at >= 10.0) {
+					this->projectile_log_at = this->now();
+					log::log(INFO << "Presenter: projectiles in flight drawn in " << this->projectile_frames
+					              << " frames, at most " << this->projectile_max << " at once");
+				}
+				shots.push_back(std::move(shaft));
+				shots.push_back(std::move(tip));
+			}
+		}
+		this->hud_renderer->set_extra_batches(std::move(shots));
+	}
 
 	// ground markers (ground pass, under the sprites)
 	const Eigen::Matrix4f view_proj = this->camera->get_projection_matrix() * this->camera->get_view_matrix();

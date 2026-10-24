@@ -186,7 +186,8 @@ HudInfo Engine::query_hud(uint64_t player) const {
 		auto selected = controller->get_selected_copy();
 		info.selected.reserve(selected.size());
 		for (auto id : selected) {
-			if (combat and combat->was_removed(id)) {
+			// removed (died) or garrisoned in a building (XR fork W4): not in the selection
+			if (combat and (combat->was_removed(id) or combat->is_hidden(id))) {
 				continue;
 			}
 			info.selected.push_back(id);
@@ -230,6 +231,27 @@ HudInfo Engine::query_hud(uint64_t player) const {
 					first.health = health.front().health;
 					first.max_health = health.front().max_health;
 					first.alive = health.front().alive;
+				}
+				// XR fork W4: stance, formation, order, garrison, bell
+				if (auto stats = combat->get_stats_snapshot(first.id)) {
+					first.military = stats->military();
+					first.town_center = stats->town_center;
+				}
+				if (auto ci = combat->get_info(first.id)) {
+					first.stances = ci->stances;
+					first.formations = ci->formations;
+					first.stance = static_cast<int>(ci->stance);
+					first.formation = static_cast<int>(ci->formation);
+					first.order = static_cast<int>(ci->order);
+					first.garrison = static_cast<int>(ci->occupants.size());
+					first.garrison_max = ci->capacity;
+					first.garrison_names = ci->occupants;
+					first.arrows = ci->arrows;
+					first.bell = ci->bell;
+				}
+				for (auto id : info.selected) {
+					auto s = combat->get_stats_snapshot(id);
+					info.military_selected += s and s->military() ? 1 : 0;
 				}
 			}
 			info.first = first;

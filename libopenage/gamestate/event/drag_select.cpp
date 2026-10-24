@@ -190,7 +190,7 @@ void DragSelectHandler::invoke(openage::event::EventLoop & /* loop */,
 	auto selected = select::next_selection(current, current_foreign, hits, hits_foreign, additive, click);
 	std::erase_if(selected, [&](entity_id_t id) {
 		auto entity = entity_of(id);
-		return not entity or combat->was_removed(id);
+		return not entity or combat->was_removed(id) or combat->is_hidden(id);
 	});
 
 	// Select the units

@@ -10,6 +10,7 @@
 
 #include <eigen3/Eigen/Dense>
 
+#include "renderer/stages/hud/color_batches.h"
 #include "util/path.h"
 
 namespace openage {
@@ -115,6 +116,12 @@ public:
 	void set_rally_flag(std::optional<Eigen::Vector2f> ndc);
 
 	/**
+	 * Extra triangles drawn with the health bars (XR fork W4: projectiles in flight),
+	 * until the next call. Call in the render thread.
+	 */
+	void set_extra_batches(std::vector<ColorBatch> &&batches);
+
+	/**
 	 * Update the render entities and render positions.
 	 */
 	void update();
@@ -181,6 +188,8 @@ private:
 	/// marked on the ground, see GroundMarkerStage)
 	std::unique_ptr<ColorBatches> marker_batches;
 	std::optional<Eigen::Vector2f> rally_flag{};
+	/// XR fork W4: projectiles in flight
+	std::vector<ColorBatch> extra_batches{};
 
 	/**
 	 * Draw the selection frames (XR fork), part of update().

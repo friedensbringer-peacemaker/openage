@@ -5,7 +5,7 @@
 //
 // Belegung des Befehlsrasters (Spec §1.2): Zeile 1–2 = Angebot der Engine (Ausbilden 101–199, Bauen 201–299, Forschen
 // 301–499, W1) in der Reihenfolge der Engine, bei mehr als 10 Einträgen Seiten zu 9 + „Seite n/m“; Zeile 3 = feste Aktionen (aoeFixedRow: Angriff · Halt · Garnison · Alle raus ·
-// Abbrechen; die ersten vier bis S3 gesperrt mit Grund).
+// Abbrechen); W4: Militär, Dorfbewohner und Gebäude belegen das Raster mit Kampfbefehlen (aoeCombatGrid).
 #pragma once
 
 #include <engine/hud_info.h>
@@ -31,6 +31,7 @@ public:
         mPageKey.clear();
         mModel = AoeModel{};
         mMatch = HudMatch::RUNNING;
+        mDeleteArmed = false;
     }
 
     void fill(const HudSample& s, double now) {
@@ -94,7 +95,30 @@ public:
                 m.grid[static_cast<size_t>(kAoeOptionCells - 1)] = c;
             }
         }
-        aoeFixedRow(m, game && p.valid && p.queue && !p.queueItems.empty(), game && p.valid && !p.placement.empty());
+        const bool cancelTraining = game && p.valid && p.queue && !p.queueItems.empty();
+        const bool cancelPlacement = game && p.valid && !p.placement.empty();
+        aoeFixedRow(m, cancelTraining, cancelPlacement);
+        // W4: Befehle der Einheiten und Gebäude (Stellungen, Formationen, Patrouille, Garnison, Glocke)
+        if (game && s.info.first && !s.info.first->neutral_object && s.info.first->alive) {
+            const auto& e = *s.info.first;
+            AoeCombat c;
+            c.military = e.military;
+            c.militaryCount = static_cast<int>(s.info.military_selected);
+            c.stances = e.stances;
+            c.formations = e.formations;
+            c.stance = e.stance;
+            c.formation = e.formation;
+            c.villager = e.villager;
+            c.building = e.building && !e.unit;
+            c.townCenter = e.town_center;
+            c.bell = e.bell;
+            c.garrison = e.garrison;
+            c.garrisonMax = e.garrison_max;
+            c.deleteArmed = mDeleteArmed;
+            if (aoeCombatGrid(m, c, cancelTraining, cancelPlacement) && c.military && !c.villager && !c.building) {
+                m.tips.assign(static_cast<size_t>(kAoeGridCells), std::string{});
+            }
+        }
 
         m.selection = game ? selectionOf(s) : AoeSelection{};
         // Bestellungen aller eigenen Gebäude (0.6.0-xr.0.11), Restzeit auf ganze Sekunden (weniger Neuzeichnen)
@@ -155,6 +179,10 @@ public:
         return 0;
     }
 
+    // W4: „Löschen“ wartet auf die Bestätigung (Quest: zweiter Druck löscht), wirkt beim nächsten fill().
+    void setDeleteArmed(bool armed) { mDeleteArmed = armed; }
+    bool deleteArmed() const { return mDeleteArmed; }
+
     // W1: nächste Seite des Befehlsrasters (Knopf kAoeCmdPageNext); wirkt beim nächsten fill().
     void nextPage() { mPage = mPages > 1 ? (mPage + 1) % mPages : 0; }
     int page() const { return mPage; }
@@ -207,7 +235,18 @@ private:
             }
             if (sel.count == 1) {
                 sel.stats = statsLine(e);
-                sel.garrisonMax = e.building ? garrisonCapacity(e.name) : 0;
+                // W4: Plätze und Insassen aus der Engine (Daten), sonst die bekannten Plätze
+                sel.garrisonMax = e.building ? (e.garrison_max > 0 ? e.garrison_max : garrisonCapacity(e.name)) : 0;
+                sel.garrison = e.garrison;
+                sel.arrows = e.building ? e.arrows : 0;
+                for (const auto& name : e.garrison_names) {
+                    openage::engine::HudEntity g;
+                    g.name = name;
+                    g.unit = true;
+                    g.villager = name.rfind("Villager", 0) == 0;
+                    const auto gn = HudFeed::unitName(g);
+                    sel.garrisonUnits.push_back({gn.first, aoeIconForName(gn.first, false, g.villager, name.find("Archer") != std::string::npos, false)});
+                }
             }
         }
         if (p.valid && !p.selectionLabel.empty() && sel.count == 1) sel.name = p.selectionLabel;
@@ -260,6 +299,7 @@ private:
     uint64_t mLastSeq = 0;
     int mPage = 0, mPages = 1;   // W1: Seite des Befehlsrasters
     std::string mPageKey;        // Auswahl, für die die Seite gilt (neue Auswahl = Seite 1)
+    bool mDeleteArmed = false;   // W4: Löschen-Rückfrage (Quest)
     HudMatch mMatch = HudMatch::RUNNING;
 };
 

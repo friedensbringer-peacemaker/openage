@@ -29,6 +29,20 @@ constexpr int kAoeCmdGarrison = 932;         // Garnison (S3)
 constexpr int kAoeCmdUnload = 933;           // Alle ausladen (S3)
 constexpr int kAoeCmdBack = 940;             // Zurück aus einem Untermenü (Feld 4,2)
 constexpr int kAoeCmdPageNext = 941;         // W1: nächste Seite der Befehle (mehr als 10 Einträge)
+// W4 Kampf (docs/aoe2-spec 06 §6.1–6.4, 08 §8.1/8.2): Befehle der Einheiten und Gebäude
+constexpr int kAoeCmdPatrol = 950;           // Patrouille (Z), Ziel auf der Karte
+constexpr int kAoeCmdGuard = 951;            // Wachen (X), Ziel: eigene Einheit/Gebäude
+constexpr int kAoeCmdFollow = 952;           // Folgen (C), Ziel: Einheit
+constexpr int kAoeCmdAttackMove = 953;       // Angriffsbewegung (Tab), Ziel auf der Karte
+constexpr int kAoeCmdDelete = 954;           // Löschen (Entf), auf der Quest mit Rückfrage
+constexpr int kAoeCmdStance0 = 955;          // + combat::stance_t: Aggressiv (A), Defensiv (D), Stellung halten (N), Kein Angriff (O)
+constexpr int kAoeStanceCount = 4;
+constexpr int kAoeCmdFormation0 = 960;       // + combat::formation_t − 1: Linie (Q), Kasten (W), Gestaffelt (E), Flanke (F)
+constexpr int kAoeFormationCount = 4;
+constexpr int kAoeCmdBell = 965;             // Dorfzentrum: Stadtglocke / Zurück an die Arbeit (B)
+// Sondertasten der Hotkeys (AoeCommand::hotkey): Entf und Tab
+constexpr char kAoeKeyDelete = 0x7f;
+constexpr char kAoeKeyTab = 0x09;
 // Rückkanal-IDs (UiFeedback) der Warteschlangenfelder
 constexpr int kAoeCmdQueueBase = 1000;
 
@@ -55,8 +69,11 @@ struct AoeCommand {
     std::string label;   // Kurztext unter dem Symbol („Dorfbewohner“, „Haus“)
     bool enabled = true;
     std::string reason;  // Sperrgrund („nicht genug Holz (30)“), Zeile im Auswahlfeld
+    char hotkey = 0;     // W4: eigene Taste (Buchstabe, kAoeKeyDelete, kAoeKeyTab); 0 = Taste des Rasterplatzes
+    bool active = false; // W4: gewählter Zustand (Stellung, Formation, Glocke läutet) – gedrückt gezeichnet
     bool operator==(const AoeCommand& o) const {
-        return id == o.id && icon == o.icon && label == o.label && enabled == o.enabled && reason == o.reason;
+        return id == o.id && icon == o.icon && label == o.label && enabled == o.enabled && reason == o.reason &&
+               hotkey == o.hotkey && active == o.active;
     }
     bool operator!=(const AoeCommand& o) const { return !(*this == o); }
 };
@@ -110,7 +127,9 @@ struct AoeSelection {
     std::string stats;             // „Angriff 3 · Rüstung 0/0 · Reichw. 0“ (leer = keine Zeile)
     std::vector<AoeSlot> queue;    // Aufträge, erstes in Arbeit (alle; gezeigt werden kAoeQueueShown + „+n“)
     float queueProgress = 0.0f;
-    int garrison = 0, garrisonMax = 0;  // Garnison (S3: Felder, bis dahin ausgegraut)
+    int garrison = 0, garrisonMax = 0;  // Garnison (W4: belegt, Felder mit den Insassen)
+    std::vector<AoeSlot> garrisonUnits; // W4: Insassen (Porträts)
+    int arrows = 0;                     // W4: Pfeile je Salve (Gebäude mit Pfeilen), 0 = keine Zeile
     std::vector<AoeSlot> units;    // Mehrfachauswahl: Porträts (gezeigt kAoeMultiShown + „+n“)
     std::string blocked;           // Sperrgrund-Zeile („Haus: nicht genug Holz (30)“)
     bool multi() const { return count > 1 && !units.empty(); }
@@ -118,6 +137,7 @@ struct AoeSelection {
         return count == o.count && name == o.name && icon == o.icon && hp == o.hp && hpMax == o.hpMax &&
                progress == o.progress && detail == o.detail && stats == o.stats && queue == o.queue &&
                queueProgress == o.queueProgress && garrison == o.garrison && garrisonMax == o.garrisonMax &&
+               garrisonUnits == o.garrisonUnits && arrows == o.arrows &&
                units == o.units && blocked == o.blocked;
     }
     bool operator!=(const AoeSelection& o) const { return !(*this == o); }
@@ -303,17 +323,124 @@ inline HudIcon aoeIconForName(const std::string& name, bool building, bool villa
     return HudIcon::Sword;
 }
 
-// Zeile 3 des Rasters: feste Aktionen (Angriff · Halt · Garnison · Alle ausladen · Abbrechen).
+// Abbrechen-Feld (Platz 14): Bauplatz verlassen, letzten Auftrag abbrechen oder gesperrt.
+inline AoeCommand aoeCancelCell(bool cancelTraining, bool cancelPlacement) {
+    if (cancelPlacement) return {kAoeCmdCancelPlacement, HudIcon::Cancel, "Abbrechen", true, ""};
+    if (cancelTraining) return {kAoeCmdCancelTraining, HudIcon::Cancel, "Abbrechen", true, ""};
+    return {kAoeCmdCancelTraining, HudIcon::Cancel, "Abbrechen", false, "nichts abzubrechen"};
+}
+
+// Zeile 3 des Rasters ohne passende Auswahl: feste Aktionen gesperrt (Angriffsbewegung · Halt · Garnison ·
+// Alle raus) und Abbrechen. W4: mit Einheiten oder Gebäuden belegt aoeCombatGrid() die Felder.
 inline void aoeFixedRow(AoeModel& m, bool cancelTraining, bool cancelPlacement) {
     if (m.grid.size() < static_cast<size_t>(kAoeGridCells)) m.grid.resize(static_cast<size_t>(kAoeGridCells));
     const int base = 10;
-    m.grid[base + 0] = {kAoeCmdAttack, HudIcon::Sword, "Angriff", false, "kommt mit S3"};
-    m.grid[base + 1] = {kAoeCmdHalt, HudIcon::Halt, "Halt", false, "kommt mit S3"};
-    m.grid[base + 2] = {kAoeCmdGarrison, HudIcon::Garrison, "Garnison", false, "kommt mit S3"};
-    m.grid[base + 3] = {kAoeCmdUnload, HudIcon::Unload, "Alle raus", false, "kommt mit S3"};
-    if (cancelPlacement) m.grid[base + 4] = {kAoeCmdCancelPlacement, HudIcon::Cancel, "Abbrechen", true, ""};
-    else if (cancelTraining) m.grid[base + 4] = {kAoeCmdCancelTraining, HudIcon::Cancel, "Abbrechen", true, ""};
-    else m.grid[base + 4] = {kAoeCmdCancelTraining, HudIcon::Cancel, "Abbrechen", false, "nichts abzubrechen"};
+    m.grid[base + 0] = {kAoeCmdAttackMove, HudIcon::Sword, "Angriffsbew.", false, "nur für Militäreinheiten"};
+    m.grid[base + 1] = {kAoeCmdHalt, HudIcon::Halt, "Halt", false, "keine Einheit gewählt"};
+    m.grid[base + 2] = {kAoeCmdGarrison, HudIcon::Garrison, "Garnison", false, "keine Einheit gewählt"};
+    m.grid[base + 3] = {kAoeCmdUnload, HudIcon::Unload, "Alle raus", false, "kein Gebäude mit Garnison"};
+    m.grid[base + 4] = aoeCancelCell(cancelTraining, cancelPlacement);
+}
+
+// W4: Kampfzustand der Auswahl für das Befehlsraster (aus HudEntity, native/app/aoe_feed.h).
+struct AoeCombat {
+    bool military = false;      // erste Auswahl ist eine Militäreinheit
+    int militaryCount = 0;      // Militäreinheiten in der Auswahl (Formationen ab 2)
+    bool stances = false, formations = false;
+    int stance = 0;             // combat::stance_t: 0 aggressiv, 1 defensiv, 2 Stellung halten, 3 kein Angriff
+    int formation = 0;          // combat::formation_t: 0 keine, 1 Linie, 2 Kasten, 3 gestaffelt, 4 Flanke
+    bool villager = false;
+    bool building = false;
+    bool townCenter = false;
+    bool bell = false;          // Glocke läutet
+    int garrison = 0, garrisonMax = 0;
+    bool deleteArmed = false;   // Quest: „Löschen“ wartet auf die Bestätigung
+};
+
+// Befehlsraster der Einheiten/Gebäude (Spec 08 §8.1, Tasten des klassischen Profils §8.2):
+//   Militär: Patrouille Z · Wachen X · Folgen C · Löschen Entf · Garnison G / Aggressiv A · Defensiv D ·
+//            Stellung halten N · Kein Angriff O · Halt S / Linie Q · Kasten W · Gestaffelt E · Flanke F ·
+//            Angriffsbewegung Tab (Formationen ab zwei Militäreinheiten)
+//   Dorfbewohner: Zeilen 1–2 = Bauen (Engine), Zeile 3: Garnison G · Halt S · Löschen Entf · – · Abbrechen
+//   Gebäude: Zeilen 1–2 = Ausbilden/Forschen, Zeile 3: Glocke B (Dorfzentrum) · – · Löschen Entf ·
+//            Alle raus · Abbrechen
+// true = das Raster wurde belegt (sonst bleibt aoeFixedRow).
+inline bool aoeCombatGrid(AoeModel& m, const AoeCombat& c, bool cancelTraining, bool cancelPlacement) {
+    if (m.grid.size() < static_cast<size_t>(kAoeGridCells)) m.grid.resize(static_cast<size_t>(kAoeGridCells));
+    const AoeCommand del = c.deleteArmed ? AoeCommand{kAoeCmdDelete, HudIcon::Cancel, "Sicher?", true, "", kAoeKeyDelete, true}
+                                         : AoeCommand{kAoeCmdDelete, HudIcon::Cancel, "Löschen", true, "", kAoeKeyDelete};
+    if (c.military && !c.building && !c.villager) {
+        m.grid.assign(static_cast<size_t>(kAoeGridCells), AoeCommand{});
+        m.grid[0] = {kAoeCmdPatrol, HudIcon::Next, "Patrouille", true, "", 'Z'};
+        m.grid[1] = {kAoeCmdGuard, HudIcon::Tower, "Wachen", true, "", 'X'};
+        m.grid[2] = {kAoeCmdFollow, HudIcon::Horse, "Folgen", true, "", 'C'};
+        m.grid[3] = del;
+        m.grid[4] = {kAoeCmdGarrison, HudIcon::Garrison, "Garnison", true, "", 'G'};
+        static const char* const kStanceLabels[kAoeStanceCount] = {"Aggressiv", "Defensiv", "Halten", "Kein Angriff"};
+        static const char kStanceKeys[kAoeStanceCount] = {'A', 'D', 'N', 'O'};
+        static const HudIcon kStanceIcons[kAoeStanceCount] = {HudIcon::Sword, HudIcon::Wall, HudIcon::Halt, HudIcon::Stop};
+        for (int i = 0; i < kAoeStanceCount; ++i) {
+            AoeCommand s{kAoeCmdStance0 + i, kStanceIcons[i], kStanceLabels[i], c.stances, c.stances ? "" : "keine Stellungen",
+                         kStanceKeys[i], c.stances && c.stance == i};
+            m.grid[static_cast<size_t>(5 + i)] = s;
+        }
+        m.grid[9] = {kAoeCmdHalt, HudIcon::Halt, "Halt", true, "", 'S'};
+        static const char* const kFormationLabels[kAoeFormationCount] = {"Linie", "Kasten", "Gestaffelt", "Flanke"};
+        static const char kFormationKeys[kAoeFormationCount] = {'Q', 'W', 'E', 'F'};
+        const bool formations = c.formations && c.militaryCount >= 2;
+        for (int i = 0; i < kAoeFormationCount; ++i) {
+            AoeCommand f{kAoeCmdFormation0 + i, HudIcon::Emblem, kFormationLabels[i], formations,
+                         formations ? "" : "nur mit mehreren Militäreinheiten", kFormationKeys[i],
+                         formations && c.formation == i + 1};
+            m.grid[static_cast<size_t>(10 + i)] = f;
+        }
+        m.grid[14] = {kAoeCmdAttackMove, HudIcon::Sword, "Angriffsbew.", true, "", kAoeKeyTab};
+        return true;
+    }
+    if (c.villager) {
+        m.grid[10] = {kAoeCmdGarrison, HudIcon::Garrison, "Garnison", true, "", 'G'};
+        m.grid[11] = {kAoeCmdHalt, HudIcon::Halt, "Halt", true, "", 'S'};
+        m.grid[12] = del;
+        m.grid[13] = AoeCommand{};
+        m.grid[14] = aoeCancelCell(cancelTraining, cancelPlacement);
+        return true;
+    }
+    if (c.building) {
+        if (c.townCenter) {
+            m.grid[10] = c.bell ? AoeCommand{kAoeCmdBell, HudIcon::Villager, "Zur Arbeit", true, "", 'B', true}
+                                : AoeCommand{kAoeCmdBell, HudIcon::Age, "Stadtglocke", true, "", 'B'};
+        }
+        else {
+            m.grid[10] = AoeCommand{};
+        }
+        m.grid[11] = AoeCommand{};
+        m.grid[12] = del;
+        m.grid[13] = c.garrisonMax > 0 ? AoeCommand{kAoeCmdUnload, HudIcon::Unload, "Alle raus", c.garrison > 0,
+                                                    c.garrison > 0 ? "" : "niemand in der Garnison"}
+                                       : AoeCommand{};
+        m.grid[14] = aoeCancelCell(cancelTraining, cancelPlacement);
+        return true;
+    }
+    return false;
+}
+
+// W4: Taste eines Feldes (eigene Taste, sonst die des Rasterplatzes) und ihr Text („Entf“, „Tab“, „Q“).
+inline char aoeKeyOf(const AoeModel& m, int cell) {
+    const char own = m.cell(cell).hotkey;
+    return own != 0 ? own : aoeHotkey(cell);
+}
+inline std::string aoeKeyText(char key) {
+    if (key == kAoeKeyDelete) return "Entf";
+    if (key == kAoeKeyTab) return "Tab";
+    return key == 0 ? std::string{} : std::string(1, key);
+}
+// W4: Feld zu einer Taste – eigene Tasten zuerst, dann die Plätze, deren Taste kein anderes Feld beansprucht.
+inline int aoeCellOfKey(const AoeModel& m, char key) {
+    for (int i = 0; i < kAoeGridCells; ++i)
+        if (m.cell(i).id != 0 && m.cell(i).hotkey == key) return i;
+    const int cell = aoeCellOfHotkey(key);
+    if (cell < 0 || m.cell(cell).hotkey != 0) return -1;
+    return cell;
 }
 
 // Meldung anhängen (älteste fällt heraus); gleiche Meldung hintereinander nur einmal.

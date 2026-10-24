@@ -52,6 +52,25 @@ struct HudEntity {
 	double range = 0.0;
 	/// mounted unit (cavalry icon)
 	bool mounted = false;
+
+	// ---- XR fork W4 (combat: stances, formations, garrison, town bell)
+	/// military unit (command grid with stances, patrol, guard, follow)
+	bool military = false;
+	/// chooses stances / formations (data abilities)
+	bool stances = false;
+	bool formations = false;
+	/// combat::stance_t, combat::formation_t, combat::order_t as numbers
+	int stance = 0;
+	int formation = 0;
+	int order = 0;
+	/// building: garrison places, occupants (short nyan names), arrows of the next volley
+	int garrison = 0;
+	int garrison_max = 0;
+	std::vector<std::string> garrison_names{};
+	int arrows = 0;
+	/// town center and its bell
+	bool town_center = false;
+	bool bell = false;
 };
 
 /**
@@ -80,6 +99,8 @@ struct HudInfo {
 	/// multiple selection; at most MAX_SELECTED_NAMES)
 	std::vector<std::string> selected_names{};
 	static constexpr size_t MAX_SELECTED_NAMES = 24;
+	/// XR fork W4: military units in the selection (formations need two)
+	size_t military_selected = 0;
 	/// match state of the player
 	hud_match_t match = hud_match_t::RUNNING;
 	/// simulation time (s) when the match was decided (only if match != RUNNING)

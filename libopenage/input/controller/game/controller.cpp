@@ -206,7 +206,7 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 		if (auto game = simulation->get_game()) {
 			auto combat = game->get_state()->get_combat();
 			controller->prune_selected([&combat](gamestate::entity_id_t id) {
-				return combat->was_removed(id);
+				return combat->was_removed(id) or combat->is_hidden(id);
 			});
 		}
 		log::log(INFO << "Input: right click at pixel (" << args.mouse.x << ", " << args.mouse.y

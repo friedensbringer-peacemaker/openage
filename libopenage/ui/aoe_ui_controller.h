@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -131,6 +132,8 @@ private:
 	void handle(const agesxr::AoeUi::Result &result, double now);
 	void open_menu(bool open, double now);
 	void production_command(int code, const std::string &label);
+	/// XR fork W4: commands of units and buildings (stances, formations, patrol, garrison, bell, delete)
+	bool combat_command(int code, const std::string &label);
 	std::string map_info() const;
 	gamestate::MapSettings menu_map_settings() const;
 	void show_board(bool good, const std::string &headline, const std::vector<std::string> &lines);
@@ -168,6 +171,10 @@ private:
 	// left click on the interface (its release is swallowed as well)
 	bool ui_click = false;
 	bool left_held = false;
+	// XR fork W4: a command waits for its target (next left click on the map), delete confirmation
+	std::optional<ui_command_t> pending_target{};
+	std::string pending_label{};
+	double delete_armed_at = -1.0;
 	// keys whose press we consumed (their release is consumed too)
 	std::vector<int> swallowed_keys{};
 	// redraw statistics (log every 10 s)

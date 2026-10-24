@@ -291,7 +291,7 @@ protected:
 	 * Command of the context menu for the selection at a window pixel (XR fork):
 	 * sent like the right click of the game controller.
 	 */
-	void send_ui_command(ui::ui_command_t type, int x, int y);
+	void send_ui_command(ui::ui_command_t type, int x, int y, int arg = 0);
 
 	/**
 	 * Wall clock seconds since the presenter started (steady).
@@ -435,6 +435,12 @@ protected:
 	 */
 	void apply_vision();
 	std::shared_ptr<const gamestate::vision::Snapshot> vision_shown;
+	/// XR fork W4: version of the garrisoned (hidden) entities shown
+	uint64_t hidden_shown = 0;
+	/// XR fork W4: statistics of the projectiles drawn (log every 10 s)
+	size_t projectile_frames = 0;
+	size_t projectile_max = 0;
+	double projectile_log_at = -100.0;
 
 	/**
 	 * Minimap (XR fork): jump the camera to a point of the map, give the
