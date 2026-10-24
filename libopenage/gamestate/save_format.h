@@ -46,10 +46,11 @@ namespace openage::gamestate::save {
  */
 
 /// 1: 0.6.0-xr.0.11; 2: XR fork W1 (civilisations, researched technologies, research in queues);
-/// 3: XR fork W2 (vision mode of the map, explored tiles per player).
+/// 3: XR fork W2 (vision mode of the map, explored tiles per player);
+/// 4: XR fork W4 (stance, formation, patrol/guard/follow/attack move, garrison, town bell per entity).
 /// Older versions still load (missing fields: no civilisation, nothing researched, vision
-/// NORMAL with nothing explored).
-constexpr int FORMAT_VERSION = 3;
+/// NORMAL with nothing explored, aggressive stance, no garrison).
+constexpr int FORMAT_VERSION = 4;
 
 /// slots 1..SLOT_COUNT are chosen by the player, slot 0 is the autosave,
 /// QUICK_SLOT the quick save (F5/F9)
@@ -120,6 +121,24 @@ struct SavedEntity {
 	uint64_t order_target = 0;
 	double order_ne = 0.0;
 	double order_se = 0.0;
+	/// XR fork W4 (version 4): stance and formation ("" = aggressive / none), names of
+	/// gamestate/combat/behavior.h
+	std::string stance{};
+	std::string formation{};
+	/// order of round W4: "patrol" (two points), "attack_move" (one point), "guard"/"follow" (entity)
+	std::string combat_order{};
+	std::vector<std::array<double, 2>> combat_route{};
+	uint64_t combat_entity = 0;
+	/// garrisoned in this building; entered with the town bell (then where it came from and
+	/// its job: "gather"/"build" + entity)
+	std::optional<uint64_t> garrison{};
+	bool garrison_bell = false;
+	double bell_ne = 0.0;
+	double bell_se = 0.0;
+	std::string resume{};
+	uint64_t resume_entity = 0;
+	/// town center: the bell rings
+	bool bell = false;
 };
 
 /// whole save game
@@ -319,6 +338,31 @@ inline std::string serialize(const SaveData &d) {
 		if (not e.order.empty()) {
 			out << "order = " << e.order << " " << e.order_target << " " << fmt_double(e.order_ne) << " "
 			    << fmt_double(e.order_se) << "\n";
+		}
+		// XR fork W4 (version 4)
+		if (not e.stance.empty()) {
+			out << "stance = " << e.stance << "\n";
+		}
+		if (not e.formation.empty()) {
+			out << "formation = " << e.formation << "\n";
+		}
+		if (not e.combat_order.empty()) {
+			out << "combat_order = " << e.combat_order << " " << e.combat_entity;
+			for (const auto &p : e.combat_route) {
+				out << " " << fmt_double(p[0]) << " " << fmt_double(p[1]);
+			}
+			out << "\n";
+		}
+		if (e.garrison) {
+			out << "garrison = " << *e.garrison;
+			if (e.garrison_bell) {
+				out << " bell " << fmt_double(e.bell_ne) << " " << fmt_double(e.bell_se) << " "
+				    << (e.resume.empty() ? std::string{"none"} : e.resume) << " " << e.resume_entity;
+			}
+			out << "\n";
+		}
+		if (e.bell) {
+			out << "bell = 1\n";
 		}
 	}
 	if (not d.removed.empty()) {
@@ -634,6 +678,60 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 					return fail("Befehl");
 				}
 			}
+			// XR fork W4 (version 4)
+			else if (key == "stance") {
+				e.stance = value;
+				if (e.stance != "aggressive" and e.stance != "defensive" and e.stance != "stand_ground"
+				    and e.stance != "no_attack") {
+					return fail("Stellung");
+				}
+			}
+			else if (key == "formation") {
+				e.formation = value;
+				if (e.formation != "none" and e.formation != "line" and e.formation != "box"
+				    and e.formation != "staggered" and e.formation != "flank") {
+					return fail("Formation");
+				}
+			}
+			else if (key == "combat_order") {
+				if (not(v >> e.combat_order >> e.combat_entity)
+				    or (e.combat_order != "patrol" and e.combat_order != "attack_move" and e.combat_order != "guard"
+				        and e.combat_order != "follow")) {
+					return fail("Kampfbefehl");
+				}
+				double ne = 0.0, se = 0.0;
+				while (v >> ne >> se) {
+					if (not std::isfinite(ne) or not std::isfinite(se)) {
+						return fail("Kampfbefehl");
+					}
+					e.combat_route.push_back({ne, se});
+				}
+			}
+			else if (key == "garrison") {
+				uint64_t building = 0;
+				if (not(v >> building)) {
+					return fail("Garnison");
+				}
+				e.garrison = building;
+				std::string word;
+				if (v >> word) {
+					if (word != "bell" or not(v >> e.bell_ne >> e.bell_se >> e.resume >> e.resume_entity)
+					    or (e.resume != "none" and e.resume != "gather" and e.resume != "build")) {
+						return fail("Garnison");
+					}
+					e.garrison_bell = true;
+					if (e.resume == "none") {
+						e.resume.clear();
+					}
+				}
+			}
+			else if (key == "bell") {
+				int b = 0;
+				if (not(v >> b)) {
+					return fail("Glocke");
+				}
+				e.bell = b != 0;
+			}
 		}
 		else if (section == "removed") {
 			if (key == "ids") {
@@ -728,6 +826,25 @@ inline SaveData canonical(const SaveData &d, bool with_orders = false) {
 				}
 			}
 		}
+		// XR fork W4: garrison building, guarded entity, job of the bell (new ids as well)
+		auto remap = [&](uint64_t id) {
+			for (const auto &[from, to] : id_map) {
+				if (id == from) {
+					return to;
+				}
+			}
+			return id;
+		};
+		if (e.garrison) {
+			e.garrison = remap(*e.garrison);
+		}
+		e.combat_entity = remap(e.combat_entity);
+		e.resume_entity = remap(e.resume_entity);
+		for (auto &p : e.combat_route) {
+			p = {round6(p[0]), round6(p[1])};
+		}
+		e.bell_ne = round6(e.bell_ne);
+		e.bell_se = round6(e.bell_se);
 	}
 	return c;
 }

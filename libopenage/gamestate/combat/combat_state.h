@@ -118,6 +118,9 @@ struct SavedCombat {
 	std::optional<entity_id_t> inside{};
 	bool by_bell = false;
 	Point bell_from{};
+	/// job before the town bell
+	std::optional<entity_id_t> resume_gather{};
+	std::optional<entity_id_t> resume_build{};
 	/// town center: the bell rings
 	bool bell = false;
 };

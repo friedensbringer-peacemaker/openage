@@ -2073,6 +2073,8 @@ std::optional<SavedCombat> CombatState::save_entity(entity_id_t id) const {
 	s.inside = c->inside;
 	s.by_bell = c->by_bell;
 	s.bell_from = c->bell_from;
+	s.resume_gather = c->resume_gather;
+	s.resume_build = c->resume_build;
 	s.bell = c->bell;
 	if (s.stance == stance_t::AGGRESSIVE and s.formation == formation_t::NONE and s.order == order_t::NONE
 	    and not s.inside and not s.bell) {
@@ -2098,6 +2100,8 @@ void CombatState::load_entity(const std::shared_ptr<GameState> &state, entity_id
 		if (auto *b = this->find(*saved.inside); b and this->accepts(*b, *c, time)) {
 			c->by_bell = saved.by_bell;
 			c->bell_from = saved.bell_from;
+			c->resume_gather = saved.resume_gather;
+			c->resume_build = saved.resume_build;
 			this->enter(state, *c, *b, time);
 		}
 		else {

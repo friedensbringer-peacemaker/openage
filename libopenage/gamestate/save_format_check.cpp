@@ -129,6 +129,38 @@ SaveData sample(uint32_t seed, size_t entities) {
 		default:
 			break;
 		}
+		// XR fork W4 (version 4): stance, formation, orders, garrison, bell
+		switch ((i + seed) % 6) {
+		case 0:
+			e.stance = "defensive";
+			e.combat_order = "patrol";
+			e.combat_route = {{3.5, 4.25}, {9.0, 10.5}};
+			break;
+		case 1:
+			e.stance = "stand_ground";
+			e.formation = "staggered";
+			e.combat_order = "guard";
+			e.combat_entity = 43;
+			break;
+		case 2:
+			e.garrison = 44;
+			break;
+		case 3:
+			e.garrison = 45;
+			e.garrison_bell = true;
+			e.bell_ne = 7.25;
+			e.bell_se = 8.5;
+			e.resume = "gather";
+			e.resume_entity = 46;
+			break;
+		case 4:
+			e.bell = true;
+			e.combat_order = "attack_move";
+			e.combat_route = {{1.5, 2.5}};
+			break;
+		default:
+			break;
+		}
 		d.entities.push_back(e);
 	}
 	for (size_t i = 0; i < entities / 3; ++i) {
@@ -192,6 +224,48 @@ void check_roundtrip() {
 	      "ai settings");
 	CHECK(back.map.type == map_type_t::RANDOM and back.map.seed == 4 and back.map.size == 64, "map");
 	CHECK(std::fabs(back.game_time - d.game_time) < 1e-12, "game time exact");
+	// XR fork W4: one of each kind
+	size_t w4 = 0;
+	for (size_t i = 0; i < back.entities.size(); ++i) {
+		const auto &a = back.entities[i];
+		const auto &b = d.entities[i];
+		CHECK(a.stance == b.stance and a.formation == b.formation and a.combat_order == b.combat_order
+		          and a.combat_route == b.combat_route and a.combat_entity == b.combat_entity and a.garrison == b.garrison
+		          and a.garrison_bell == b.garrison_bell and a.bell_ne == b.bell_ne and a.resume == b.resume
+		          and a.resume_entity == b.resume_entity and a.bell == b.bell,
+		      "W4 fields of entity %zu", i);
+		w4 += a.stance.empty() and not a.garrison and not a.bell ? 0 : 1;
+	}
+	CHECK(w4 >= 6, "W4 fields present (%zu)", w4);
+	const std::string head = "[save]\nversion = 4\n[map]\ntype = random\n[entity]\nfqon = x\n";
+	CHECK(not parse(head + "stance = brave\n", back, error), "bad stance rejected");
+	CHECK(not parse(head + "garrison = 3 bell 1 2 eat 4\n", back, error), "bad bell job rejected");
+	CHECK(not parse(head + "combat_order = dance 0\n", back, error), "bad combat order rejected");
+	CHECK(parse(head + "stance = defensive\ngarrison = 0\n", back, error) and back.entities.back().garrison
+	          and *back.entities.back().garrison == 0,
+	      "garrison in entity 0 (the first town center): %s", error.c_str());
+	{
+		// version 3 files (no W4 keys) load with the defaults
+		SaveData v3 = sample(5, 4);
+		v3.version = 3;
+		for (auto &e3 : v3.entities) {
+			e3.stance.clear();
+			e3.formation.clear();
+			e3.combat_order.clear();
+			e3.combat_route.clear();
+			e3.combat_entity = 0;
+			e3.garrison.reset();
+			e3.garrison_bell = false;
+			e3.bell_ne = e3.bell_se = 0.0;
+			e3.resume.clear();
+			e3.resume_entity = 0;
+			e3.bell = false;
+		}
+		SaveData r3;
+		CHECK(parse(serialize(v3), r3, error) and r3.version == 3 and r3.entities.size() == 4
+		          and r3.entities[0].stance.empty() and not r3.entities[0].garrison,
+		      "version 3 loads with defaults: %s", error.c_str());
+	}
 }
 
 void check_damaged() {

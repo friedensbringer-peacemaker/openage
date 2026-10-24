@@ -278,6 +278,42 @@ SaveData capture(const std::shared_ptr<GameState> &state,
 				e.order_target = *target;
 			}
 		}
+		// XR fork W4 (version 4): stance, formation, orders, garrison, town bell
+		if (combat != nullptr) {
+			if (auto saved = combat->save_entity(id)) {
+				changed = true;
+				if (saved->stance != combat::stance_t::AGGRESSIVE) {
+					e.stance = combat::to_string(saved->stance);
+				}
+				if (saved->formation != combat::formation_t::NONE) {
+					e.formation = combat::to_string(saved->formation);
+				}
+				if (saved->order != combat::order_t::NONE) {
+					e.combat_order = combat::to_string(saved->order);
+					e.combat_entity = saved->order_entity.value_or(0);
+					for (const auto &p : saved->route) {
+						e.combat_route.push_back({p.x, p.y});
+					}
+				}
+				if (saved->inside) {
+					e.garrison = *saved->inside;
+					e.garrison_bell = saved->by_bell;
+					e.bell_ne = saved->bell_from.x;
+					e.bell_se = saved->bell_from.y;
+					if (saved->resume_build) {
+						e.resume = "build";
+						e.resume_entity = *saved->resume_build;
+					}
+					else if (saved->resume_gather) {
+						e.resume = "gather";
+						e.resume_entity = *saved->resume_gather;
+					}
+					// inside a building: no job of its own until it comes out
+					e.order.clear();
+				}
+				e.bell = saved->bell;
+			}
+		}
 		// walking somewhere (last keyframe of the position curve lies in the future)
 		if (e.order.empty() and entity->has_component(component::component_t::MOVE)) {
 			const auto &frames = position->get_positions().get_container();
@@ -538,9 +574,52 @@ RestoreResult restore(const SaveData &data,
 		}
 	}
 
+	// XR fork W4 (version 4): stances, formations, garrison, bell, orders of round W4 (all entities exist)
+	size_t garrisoned = 0;
+	if (combat != nullptr) {
+		auto mapped = [&](uint64_t id) {
+			auto it = id_map.find(id);
+			return it != id_map.end() ? it->second : id;
+		};
+		for (auto &[e, entity] : restored) {
+			if (e->stance.empty() and e->formation.empty() and e->combat_order.empty() and not e->garrison and not e->bell) {
+				continue;
+			}
+			combat::SavedCombat s;
+			s.stance = combat::stance_from_string(e->stance).value_or(combat::stance_t::AGGRESSIVE);
+			s.formation = combat::formation_from_string(e->formation).value_or(combat::formation_t::NONE);
+			if (not e->combat_order.empty()) {
+				s.order = combat::order_from_string(e->combat_order).value_or(combat::order_t::NONE);
+				if (s.order == combat::order_t::GUARD or s.order == combat::order_t::FOLLOW) {
+					s.order_entity = mapped(e->combat_entity);
+				}
+				for (const auto &p : e->combat_route) {
+					s.route.push_back({p[0], p[1]});
+				}
+			}
+			if (e->garrison) {
+				s.inside = mapped(*e->garrison);
+				s.by_bell = e->garrison_bell;
+				s.bell_from = {e->bell_ne, e->bell_se};
+				if (e->resume == "build") {
+					s.resume_build = mapped(e->resume_entity);
+				}
+				else if (e->resume == "gather") {
+					s.resume_gather = mapped(e->resume_entity);
+				}
+			}
+			s.bell = e->bell;
+			combat->load_entity(state, entity->get_id(), s, time);
+			garrisoned += combat->garrisoned_in(entity->get_id()) ? 1 : 0;
+		}
+	}
+	if (garrisoned > 0) {
+		log::log(INFO << "Load: " << garrisoned << " units back in their buildings");
+	}
+
 	// orders (all entities exist now)
 	for (auto &[e, entity] : restored) {
-		if (e->order.empty()) {
+		if (e->order.empty() or (combat != nullptr and combat->garrisoned_in(entity->get_id()))) {
 			continue;
 		}
 		auto queue = component_of<component::CommandQueue>(entity, component::component_t::COMMANDQUEUE);
