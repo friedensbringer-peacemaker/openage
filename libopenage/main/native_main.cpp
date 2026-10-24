@@ -1989,10 +1989,13 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> war_replay_steps(con
 	add(1.7, E::kMouseMove, x1, y1, 0, E::kLeftButton);
 	add(1.9, E::kMouseUp, x1, y1, E::kLeftButton, 0);
 	capture(2.8, "-sync-1");
+	// the selection reaches the interface with its next poll: a few frames before the key
+	add(3.0, E::kMouseMove, x1 - 20, y1 - 20, 0, 0);
+	capture(3.4, "-sync-1b");
 	// 2. formation "Linie" (Q); the camera jumps to the own town centre and the army moves in front
 	//    of it (towards the enemy) in its formation – the computer's wave will come there
-	key(3.2, 'Q');
-	capture(4.0, "-sync-2");
+	key(3.8, 'Q');
+	capture(4.2, "-sync-2");
 	click(4.5, minimap_pixel(tc[0], tc[1]), E::kLeftButton);
 	capture(6.0, "-sync-3");
 	const double dn = enemy_ne - tc[0], ds = enemy_se - tc[1];
@@ -2015,17 +2018,19 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> war_replay_steps(con
 	auto tcp = pixel_at(tc[0], tc[1], tc[0], tc[1], 1.5);
 	click(34.0, tcp, E::kLeftButton);
 	capture(35.5, "-sync-4");
-	key(36.0, 'B');
-	capture(39.0, "-w3-glocke");
-	capture(43.0, "-w4-garnison");
+	add(35.8, E::kMouseMove, tcp.first + 30, tcp.second + 30, 0, 0);
+	capture(36.2, "-sync-4b");
+	key(36.6, 'B');
+	capture(40.0, "-w3-glocke");
+	capture(46.0, "-w4-garnison");
 	// 5. the wave of the computer at the town centre: garrison arrows, fight with projectiles (several
 	//    captures: the fight lasts some 20 s and software GL moves the timing)
 	const char *fight[] = {"-w5a-pfeile", "-w5b-pfeile", "-w5c-pfeile", "-w5d-pfeile", "-w5e-pfeile", "-w5f-pfeile"};
 	for (int i = 0; i < 6; ++i) {
-		capture(46.0 + 4.0 * i, fight[i]);
+		capture(150.0 + 8.0 * i, fight[i]);
 	}
-	capture(80.0, "-w7-kampf");
-	capture(81.0, nullptr);
+	capture(205.0, "-w7-kampf");
+	capture(206.0, nullptr);
 	return steps;
 }
 

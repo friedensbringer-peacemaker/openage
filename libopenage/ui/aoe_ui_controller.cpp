@@ -533,6 +533,10 @@ bool AoeUiController::on_event(const renderer::WindowEvent &ev, double now) {
 		}
 		// XR fork W4: Entf = delete, Tab = attack move (keys of the command grid)
 		if ((k == key::Key_Delete or k == key::Key_Tab) and not modal) {
+			if (now - this->last_poll > 0.05) {
+				this->last_poll = now;
+				this->poll(now);
+			}
 			const auto result = ui.onKey(k == key::Key_Delete ? agesxr::kAoeKeyDelete : agesxr::kAoeKeyTab, now);
 			if (result.action != agesxr::AoeUi::Action::kNone) {
 				// the keyboard asks no question (the Quest button does)
@@ -600,6 +604,11 @@ bool AoeUiController::on_event(const renderer::WindowEvent &ev, double now) {
 			}
 		}
 		else if (k >= 'A' and k <= 'Z' and not modal and not (ev.modifiers & modifier::ControlModifier)) {
+			// XR fork W4: the grid follows the current selection (a key right after a selection)
+			if (now - this->last_poll > 0.05) {
+				this->last_poll = now;
+				this->poll(now);
+			}
 			const auto result = ui.onKey(k, now);
 			if (result.action != agesxr::AoeUi::Action::kNone) {
 				this->handle(result, now);

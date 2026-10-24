@@ -2002,6 +2002,18 @@ void CombatState::scan(const std::shared_ptr<GameState> &state, const time::time
 
 	for (auto id : ids) {
 		auto c = this->find(id);
+		// units attacking a building look for a better target (06 §6.2: typically an attacking unit)
+		if (c and not c->dead and c->target and c->stats->movable and not c->stats->villager) {
+			const auto *t = this->find(*c->target);
+			if (t and t->stats->building) {
+				if (auto better = this->choose_target(*c, time)) {
+					log::log(INFO << "Combat: " << describe(c->entity, *c->stats, this->owner_of(c->entity, time))
+					              << " leaves the building for a unit");
+					this->engage(state, *c, *better, false, time);
+				}
+			}
+			continue;
+		}
 		if (not c or c->dead or c->target or c->inside or c->entering or not c->stats->can_attack or c->stats->villager) {
 			continue;
 		}
