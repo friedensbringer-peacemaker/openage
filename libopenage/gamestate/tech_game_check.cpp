@@ -536,12 +536,8 @@ void check_ai(const Options &opt) {
 	World w{opt, base};
 	check(w.techs()->find(0) and w.techs()->find(1) and w.techs()->find(0)->civ != w.techs()->find(1)->civ,
 	      "random civilisations differ");
-	// XR fork W4: the town centre shoots one arrow without a garrison (data); on the small map the computer's
-	// last food lies next to the passive player's town centre – without farms (W3) it would starve there.
-	// The passive player keeps its villagers, its town centre is removed for this research check.
-	for (const auto &tc : w.of(0, "TownCenter")) {
-		w.state->get_combat()->kill(w.state, tc->get_id(), w.now);
-	}
+	// XR fork W4 + W3: the town centre shoots one arrow without a garrison (data); the computer avoids its
+	// range and lives on farms (W3), so the passive player keeps its town centre.
 	const std::string loom = "hd_base.data.tech.generic.loom.loom.Loom";
 	const std::string wheel = "hd_base.data.tech.generic.wheel_barrow.wheel_barrow.WheelBarrow";
 	double t_loom = -1.0, t_feudal = -1.0, t_wheel = -1.0;
