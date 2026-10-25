@@ -24,7 +24,7 @@
  *  T5. Civilisations: Britons (player 0) and Japanese (player 1): civ recorded,
  *      castle of the Britons trains longbowmen (game_setup patch), the town
  *      centres show different architecture, a fixed and a random choice.
- *  T6. Save game (version 4 since W4) with civilisation, technologies and a queued
+ *  T6. Save game (version 5 since W3 + W4) with civilisation, technologies and a queued
  *      research; loading applies them again (villager health, age); a version 1
  *      file still loads.
  *  T7. Computer opponent: researches Loom and the Feudal Age (builds the second
@@ -296,8 +296,10 @@ void check_research(const Options &opt) {
 	check(w.option(snap, "House") != nullptr and w.option(snap, "Mill") != nullptr, "villager builds house and mill");
 	check(w.option(snap, "ArcheryRange") == nullptr and w.option(snap, "Blacksmith") == nullptr,
 	      "archery range, blacksmith hidden in the Dark Age");
-	check(w.option(snap, "Farm") == nullptr and w.option(snap, "Dock") == nullptr and w.option(snap, "Market") == nullptr,
-	      "farm, dock, market hidden (no mechanic)");
+	// XR fork W3: the dock has its mechanic now, the farm waits for a mill, the market for W7
+	check(w.option(snap, "Farm") == nullptr and w.option(snap, "Market") == nullptr,
+	      "farm hidden without a mill, market hidden (no mechanic)");
+	check(w.option(snap, "Dock") != nullptr, "dock offered (W3)");
 	auto house = w.spawn(0, ge("house", "House"), 6.0, -6.0);
 	w.advance(0.5);
 	const auto house_anim = house->get_animation_path();
@@ -401,14 +403,14 @@ void check_research(const Options &opt) {
 	w.advance(1.0);
 	auto data = save::capture(w.state, base, w.game->get_generated_entity_range(), w.now, "tech check");
 	const auto text = save::serialize(data);
-	check(text.find("version = 4") != std::string::npos and text.find("vision = ") != std::string::npos
+	check(text.find("version = 5") != std::string::npos and text.find("vision = ") != std::string::npos
 	          and text.find("civ = Britons") != std::string::npos
 	          and text.find("tech = hd_base.data.tech.generic.loom.loom.Loom") != std::string::npos
 	          and text.find(" research\n") != std::string::npos and text.find("civs = Britons Franks") != std::string::npos,
 	      "save text with civilisation, techs and the queued research");
 	save::SaveData parsed;
 	std::string error;
-	check(save::parse(text, parsed, error), "parse version 4 (W4) " + error);
+	check(save::parse(text, parsed, error), "parse version 5 " + error);
 	MapSettings loaded_map = parsed.map;
 	World l{opt, loaded_map};
 	auto result = save::restore(parsed, l.state, l.loop, l.factory, l.production, l.game->get_generated_entity_range(), l.now);
@@ -430,7 +432,7 @@ void check_research(const Options &opt) {
 	check(queued, "queued research survives loading");
 	// version 1: no civilisation and techs, still loads (version 2: the same without vision)
 	std::string v1 = text;
-	v1.replace(v1.find("version = 4"), 11, "version = 1");
+	v1.replace(v1.find("version = 5"), 11, "version = 1");
 	save::SaveData old;
 	check(save::parse(v1, old, error), "version 1 file parses");
 }
@@ -516,7 +518,7 @@ void check_civ_vision(const Options &opt) {
 	      "civilisation, techs, vision and explored tiles survive save -> load -> save");
 	// version 2 (W1, before the vision fields) still loads: vision normal, nothing explored
 	std::string v2 = text;
-	v2.replace(v2.find("version = 4"), 11, "version = 2");
+	v2.replace(v2.find("version = 5"), 11, "version = 2");
 	v2.replace(v2.find("vision = normal\n"), 16, "");
 	save::SaveData old;
 	check(save::parse(v2, old, error) and old.map.vision == vision_mode_t::NORMAL and old.players.at(0).civ == "Britons",

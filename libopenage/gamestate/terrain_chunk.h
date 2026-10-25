@@ -88,6 +88,15 @@ public:
 	const TerrainTile &get_tile(const coord::tile &pos) const;
 
 	/**
+	 * Replace the terrain of a tile (XR fork W3: farms change the ground they cover).
+	 * Call render_update() afterwards.
+	 *
+	 * @param idx Index of the tile in the chunk.
+	 * @param tile New tile (the elevation is kept).
+	 */
+	void set_tile(size_t idx, const TerrainTile &tile);
+
+	/**
 	 * Update the render entity.
 	 *
 	 * @param time Simulation time of the update.

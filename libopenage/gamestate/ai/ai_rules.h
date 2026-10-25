@@ -400,6 +400,70 @@ inline std::vector<plan_t> plan_production(const EconomyView &e, const AiParams 
 	return plan;
 }
 
+// ---- XR fork W3: food economy of the AI (mill, farms, reseeds; herding and hunting in AiPlayer)
+
+constexpr std::array<double, 4> COST_MILL{0.0, 100.0, 0.0, 0.0};
+constexpr std::array<double, 4> COST_FARM{0.0, 60.0, 0.0, 0.0};
+
+/// food economy of the AI for plan_food()
+struct FoodView {
+	size_t villagers = 0;
+	size_t mills = 0;
+	/// mill foundations not finished yet
+	size_t mills_planned = 0;
+	size_t farms = 0;
+	size_t farms_planned = 0;
+	/// wild food sources near home (berries, deer, sheep, carcasses within FOOD_NEAR tiles)
+	size_t natural_food = 0;
+	size_t reseeds = 0;
+	/// food, wood, gold, stone
+	std::array<double, 4> stock{};
+};
+
+/// distance from home (tiles) within which wild food counts for plan_food()
+constexpr double FOOD_NEAR = 18.0;
+
+struct FoodPlan {
+	bool build_mill = false;
+	bool build_farm = false;
+	bool reseed = false;
+	/// farms the AI wants (for logs)
+	size_t farm_target = 0;
+};
+
+/**
+ * Food plan of the AI (deterministic): a mill once 5 villagers exist (also one of the two
+ * Dark Age buildings for the Feudal Age), farms when the wild food near home runs out (or
+ * two to six beside it from 8 villagers on), one new farm per decision; reseeds at the mill
+ * for the farms it has (at most 3 queued), wood permitting.
+ */
+inline FoodPlan plan_food(const FoodView &v) {
+	FoodPlan plan;
+	if (v.mills + v.mills_planned == 0 and v.villagers >= 5 and affordable(v.stock, COST_MILL)) {
+		plan.build_mill = true;
+		return plan;
+	}
+	if (v.mills == 0) {
+		return plan;
+	}
+	if (v.natural_food <= 2) {
+		plan.farm_target = std::clamp<size_t>(v.villagers / 2, 3, 10);
+	}
+	else if (v.villagers >= 8) {
+		// farms besides the wild food from 8 villagers on, one more for every two villagers (at most 6)
+		plan.farm_target = std::min<size_t>(6, 2 + (v.villagers - 8) / 2);
+	}
+	plan.build_farm = v.farms + v.farms_planned < plan.farm_target and v.farms_planned == 0
+	                  and affordable(v.stock, COST_FARM);
+	auto after_farm = v.stock;
+	if (plan.build_farm) {
+		after_farm[1] -= COST_FARM[1];
+	}
+	plan.reseed = v.farms >= 2 and v.reseeds < std::min<size_t>(v.farms, 3)
+	              and affordable(after_farm, std::array<double, 4>{0.0, COST_FARM[1] + 100.0, 0.0, 0.0});
+	return plan;
+}
+
 /**
  * Deterministic random numbers (SplitMix64) for tie breaks; same seed = same game.
  */

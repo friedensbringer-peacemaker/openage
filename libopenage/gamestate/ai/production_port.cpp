@@ -152,6 +152,11 @@ public:
 		return true;
 	}
 
+	bool reseed(const std::shared_ptr<GameState> & /* state */, player_id_t player, const time::time_t & /* time */) override {
+		this->production->reseed_for(player);
+		return true;
+	}
+
 private:
 	std::shared_ptr<prod::Production> production;
 };

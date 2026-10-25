@@ -93,7 +93,12 @@ void check_catalog() {
 	                            "Monastery", "SiegeWorkshop"}) {
 		check(prod::has_mechanic(offered), std::string{"offered "} + offered);
 	}
-	for (const char *hidden_name : {"Monk", "Ram", "Galley", "FishingShip", "TradeCart", "Market", "Dock", "Farm",
+	// XR fork W3: farms, docks, fishing ships and traps and the farm technologies have their mechanic
+	for (const char *w3 : {"FishingShip", "Dock", "Farm", "FishingTrap"}) {
+		check(prod::has_mechanic(w3), std::string{"offered (W3) "} + w3);
+	}
+	check(prod::has_mechanic("HorseCollar", true) and prod::has_mechanic("HeavyPlow", true), "farm technologies offered (W3)");
+	for (const char *hidden_name : {"Monk", "Ram", "Galley", "TransportShip", "TradeCart", "Market",
 	                                "PalisadeWall", "StoneWall", "Wonder"}) {
 		check(not prod::has_mechanic(hidden_name), std::string{"hidden "} + hidden_name);
 	}
@@ -106,7 +111,7 @@ void check_catalog() {
 	for (const char *t : {"GuardTower", "Keep", "HerbalMedicine"}) {
 		check(prod::has_mechanic(t, true), std::string{"W4: offered tech "} + t);
 	}
-	for (const char *t : {"HorseCollar", "Coinage", "Redemption", "CappedRam", "Careening"}) {
+	for (const char *t : {"Coinage", "Redemption", "CappedRam", "Careening"}) {
 		check(not prod::has_mechanic(t, true), std::string{"hidden tech "} + t);
 	}
 	// civilisations

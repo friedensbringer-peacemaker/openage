@@ -238,6 +238,9 @@ struct Snapshot {
 	std::string selection_label;
 	/// construction progress 0..1 of a selected foundation
 	std::optional<double> construction;
+	/// XR fork W3: resource left in the first selected entity (any owner), e.g. "Feld – Nahrung 175",
+	/// "Wild – Nahrung 120 (verdirbt)", "Holz 100"; empty if it has none
+	std::string selection_resource;
 
 	/// what the selection can train or build (sorted, at most one row of the HUD)
 	std::vector<Option> options;
@@ -288,6 +291,9 @@ struct PlacementPreview {
 	bool valid = false;
 	/// why not (placement_message), empty if valid
 	std::string reason;
+	/// XR fork W3 (docs/aoe2-spec 13): no picture of its own (farm, fishing trap): only a white
+	/// diamond outline of the footprint, red where it cannot be placed
+	bool outline_only = false;
 };
 
 /**
@@ -326,6 +332,14 @@ public:
 	 * paid now and refunded when it is cancelled.
 	 */
 	void research(const std::string &id);
+
+	/**
+	 * XR fork W3: mill command "Feld neu einsäen" (HUD code CMD_RESEED_FARM): the costs of a
+	 * farm are paid now, the reseed waits in the mill queue until a farm of the player runs
+	 * empty while its farmer is there (the farmer builds it again). A selected mill shows the
+	 * queued reseeds after its research items; cancel_training_at() of such an index refunds it.
+	 */
+	void reseed();
 
 	/// cancel the last queued unit of the selected building (costs are refunded)
 	void cancel_training();
@@ -372,6 +386,18 @@ public:
 
 	/// research a technology in a building of player (XR fork W1)
 	void research_for(player_id_t player, entity_id_t building, const std::string &id);
+
+	/// queue a farm reseed for \p player (XR fork W3, needs a finished mill of the player)
+	void reseed_for(player_id_t player);
+
+	/// test option (XR fork W3, openage-native --replay-food): \p amount of every resource for \p player
+	void grant_resources(player_id_t player, double amount);
+
+	/**
+	 * Test option (XR fork W3, replays): a finished game entity of \p player at a tile, e.g. "Mill",
+	 * "Dock", "FishingShip", "Villager", "Deer" (nyan object hd_base…generic.<snake>.<snake>.<name>).
+	 */
+	void test_spawn(player_id_t player, const std::string &name, double ne, double se);
 
 	/**
 	 * Test option (XR fork W1, openage-native --replay-tech): p player gets the technology at once,
@@ -424,6 +450,11 @@ private:
 			PLACE,
 			RESEARCH,
 			GRANT_RESEARCH,
+			/// XR fork W3: queue a farm reseed at the mill
+			RESEED,
+			/// XR fork W3 test options (replays): resources, a finished entity at a tile
+			TEST_RESOURCES,
+			TEST_SPAWN,
 		};
 		kind_t kind = kind_t::TRAIN;
 		std::string id;

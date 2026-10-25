@@ -33,6 +33,8 @@
 #include "gamestate/econ.h"
 #include "gamestate/econ_math.h"
 #include "gamestate/entity_factory.h"
+#include "gamestate/food.h"
+#include "gamestate/food_math.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/manager.h"
@@ -183,6 +185,10 @@ SaveData capture(const std::shared_ptr<GameState> &state,
 		if (auto vision = state->get_vision(); vision and vision->is_started() and vision->get_mode() != vision_mode_t::ALL) {
 			p.explored = vision->explored_text(id);
 		}
+		// XR fork W3: farm reseeds queued at the mill (costs paid)
+		if (auto food_state = state->get_food()) {
+			p.reseeds = food_state->reseed_costs(id);
+		}
 		d.players.push_back(p);
 	}
 	// the map is generated again with the civilisations that were played (random ones resolved)
@@ -203,7 +209,10 @@ SaveData capture(const std::shared_ptr<GameState> &state,
 	std::sort(entities.begin(), entities.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
 	std::unordered_set<entity_id_t> present;
 	for (const auto &[id, entity] : entities) {
-		if (combat != nullptr and combat->is_dead(id)) {
+		// XR fork W3: a carcass (dead animal with food) is saved, other dying entities as gone
+		auto carcass = component_of<component::Harvestable>(entity, component::component_t::HARVESTABLE);
+		const bool is_carcass = carcass != nullptr and carcass->dead and not carcass->is_depleted();
+		if (combat != nullptr and combat->is_dead(id) and not is_carcass) {
 			// dying: saved as gone
 			continue;
 		}
@@ -249,6 +258,15 @@ SaveData capture(const std::shared_ptr<GameState> &state,
 			e.harvest = harvestable->get_amount();
 			if (std::fabs(harvestable->get_amount() - harvestable->get_start_amount()) > 1e-9) {
 				changed = true;
+			}
+			// XR fork W3: animals walk, change owner and die: always stored
+			if (food::is_animal(harvestable->kind)) {
+				changed = true;
+				e.dead = harvestable->dead;
+				if (e.dead) {
+					// a carcass has no health (the entity is dead)
+					e.health.reset();
+				}
 			}
 		}
 		// gatherer: load and job
@@ -410,6 +428,10 @@ RestoreResult restore(const SaveData &data,
 			if (not p.explored.empty() and vision and not vision->set_explored_text(static_cast<player_id_t>(p.id), p.explored)) {
 				log::log(WARN << "Load: explored tiles of player " << p.id << " do not fit the map, dropped");
 			}
+			// XR fork W3: queued farm reseeds
+			if (auto food_state = state->get_food()) {
+				food_state->set_reseeds(static_cast<player_id_t>(p.id), p.reseeds);
+			}
 		}
 		else {
 			log::log(WARN << "Load: player " << p.id << " does not exist, resources dropped");
@@ -508,6 +530,15 @@ RestoreResult restore(const SaveData &data,
 		if (e->generated) {
 			position->set_position(time, pos);
 			position->set_angle(time, coord::phys_angle_t{e->angle});
+			// XR fork W3: herdables change their owner during the game
+			auto owner = component_of<component::Ownership>(entity, component::component_t::OWNERSHIP);
+			if (owner != nullptr and owner->get_owners().get(time) != static_cast<player_id_t>(e->owner)
+			    and state->has_player(static_cast<player_id_t>(e->owner))) {
+				owner->set_owner(time, static_cast<player_id_t>(e->owner));
+				if (not entity->get_animation_path().empty()) {
+					entity->render_update(time, entity->get_animation_path());
+				}
+			}
 		}
 		if (auto harvestable = component_of<component::Harvestable>(entity, component::component_t::HARVESTABLE)) {
 			if (e->harvest) {
@@ -521,10 +552,14 @@ RestoreResult restore(const SaveData &data,
 			}
 		}
 		auto constructable = component_of<component::Constructable>(entity, component::component_t::CONSTRUCTABLE);
+		auto spot = component_of<component::Harvestable>(entity, component::component_t::HARVESTABLE);
+		const bool field = spot != nullptr and food::is_field(spot->kind);
 		if (constructable != nullptr and not e->generated) {
-			// buildings block their tiles (generated ones already do)
-			for (const auto &tile : building_footprint(pos, constructable->radius)) {
-				map->block_tile(tile, time);
+			// buildings block their tiles (generated ones already do; XR fork W3: farms and traps never)
+			if (not field) {
+				for (const auto &tile : building_footprint(pos, constructable->radius)) {
+					map->block_tile(tile, time);
+				}
 			}
 			if (e->construction and *e->construction < 1.0) {
 				constructable->start_foundation(e->build_time);
@@ -544,6 +579,10 @@ RestoreResult restore(const SaveData &data,
 		}
 		if (e->health) {
 			set_health(state, entity, *e->health, time);
+		}
+		// XR fork W3: a carcass dies again (the food state keeps it with its saved food)
+		if (e->dead and combat != nullptr and spot != nullptr and not combat->is_dead(entity->get_id())) {
+			combat->kill(state, entity->get_id(), time);
 		}
 		if (auto queue = component_of<component::ProductionQueue>(entity, component::component_t::PRODUCTION_QUEUE)) {
 			for (const auto &q : e->queue) {

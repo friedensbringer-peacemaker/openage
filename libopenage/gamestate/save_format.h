@@ -47,10 +47,13 @@ namespace openage::gamestate::save {
 
 /// 1: 0.6.0-xr.0.11; 2: XR fork W1 (civilisations, researched technologies, research in queues);
 /// 3: XR fork W2 (vision mode of the map, explored tiles per player);
-/// 4: XR fork W4 (stance, formation, patrol/guard/follow/attack move, garrison, town bell per entity).
-/// Older versions still load (missing fields: no civilisation, nothing researched, vision
-/// NORMAL with nothing explored, aggressive stance, no garrison).
-constexpr int FORMAT_VERSION = 4;
+/// 4: two variants – XR fork W3 (animals on the map "herds", carcasses "dead", farm reseeds of the mill per
+///    player; the file has the key "herds") or XR fork W4 (stance, formation, patrol/guard/follow/attack move,
+///    garrison, town bell per entity; no "herds" key, the map had no animals);
+/// 5: W3 + W4 together (both sets of keys).
+/// Older versions still load (missing fields: no civilisation, nothing researched, vision NORMAL with nothing
+/// explored, aggressive stance, no garrison; maps without a "herds" key before 5 had no animals: herds off).
+constexpr int FORMAT_VERSION = 5;
 
 /// slots 1..SLOT_COUNT are chosen by the player, slot 0 is the autosave,
 /// QUICK_SLOT the quick save (F5/F9)
@@ -72,6 +75,8 @@ struct SavedPlayer {
 	std::vector<std::string> built{};
 	/// explored tiles (vision, version 3, VisionGrid::explored_text), empty = none stored
 	std::string explored{};
+	/// XR fork W3 (version 4): queued farm reseeds of the mill, each with the costs paid
+	std::vector<resource_amounts_t> reseeds{};
 };
 
 /// one entry of a training queue
@@ -104,6 +109,8 @@ struct SavedEntity {
 	std::optional<int64_t> health{};
 	/// remaining amount of a resource spot (Harvestable)
 	std::optional<double> harvest{};
+	/// XR fork W3 (version 4): a dead animal (carcass) whose food is gathered
+	bool dead = false;
 	/// carried resources of a gatherer
 	double carried = 0.0;
 	int carried_type = 0;
@@ -287,6 +294,7 @@ inline std::string serialize(const SaveData &d) {
 		out << "\n";
 	}
 	out << "vision = " << vision_mode_name(m.vision) << "\n";
+	out << "herds = " << (m.herds ? 1 : 0) << "\n";
 	for (const auto &p : d.players) {
 		out << "[player]\n";
 		out << "id = " << p.id << "\n";
@@ -303,6 +311,9 @@ inline std::string serialize(const SaveData &d) {
 		if (not p.explored.empty()) {
 			out << "explored = " << p.explored << "\n";
 		}
+		for (const auto &r : p.reseeds) {
+			out << "reseed = " << resources_text(r) << "\n";
+		}
 	}
 	for (const auto &e : d.entities) {
 		out << "[entity]\n";
@@ -317,6 +328,9 @@ inline std::string serialize(const SaveData &d) {
 		}
 		if (e.harvest) {
 			out << "harvest = " << fmt_double(*e.harvest) << "\n";
+		}
+		if (e.dead) {
+			out << "dead = 1\n";
 		}
 		if (e.carried > 0.0) {
 			out << "carried = " << e.carried_type << " " << fmt_double(e.carried) << "\n";
@@ -390,6 +404,7 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 	std::string section;
 	bool has_map = false;
 	bool has_type = false;
+	bool has_herds = false;
 	size_t line_no = 0;
 	auto fail = [&](const std::string &what) {
 		error = "Spielstand beschädigt (Zeile " + std::to_string(line_no) + ": " + what + ")";
@@ -537,6 +552,14 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 					return fail("Sicht");
 				}
 			}
+			else if (key == "herds") {
+				int h = 0;
+				if (not(v >> h)) {
+					return fail("herds");
+				}
+				m.herds = h != 0;
+				has_herds = true;
+			}
 			else if (key == "ai_seed") {
 				if (not(v >> m.ai.seed)) {
 					return fail("ai_seed");
@@ -578,6 +601,13 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 				if (not value.empty()) {
 					p.built.push_back(value);
 				}
+			}
+			else if (key == "reseed") {
+				resource_amounts_t r{};
+				if (not parse_resources(value, r)) {
+					return fail("Neusäen");
+				}
+				p.reseeds.push_back(r);
 			}
 		}
 		else if (section == "entity") {
@@ -626,6 +656,13 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 					return fail("Vorrat");
 				}
 				e.harvest = h;
+			}
+			else if (key == "dead") {
+				int dead = 0;
+				if (not(v >> dead)) {
+					return fail("dead");
+				}
+				e.dead = dead != 0;
 			}
 			else if (key == "carried") {
 				if (not(v >> e.carried_type >> e.carried) or not std::isfinite(e.carried)) {
@@ -748,6 +785,11 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 	if (d.version == 0) {
 		error = "Keine Spielstand-Datei (Kopfzeile fehlt)";
 		return false;
+	}
+	if (d.version < 5 and not has_herds) {
+		// XR fork W3: the map of older saves had no animals (same generated objects as then); a version 4 file
+		// without "herds" comes from the W4 branch (combat), whose maps had no animals either
+		d.map.herds = false;
 	}
 	if (not has_map or not has_type) {
 		error = "Spielstand beschädigt (Karte fehlt)";

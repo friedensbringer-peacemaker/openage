@@ -201,6 +201,16 @@ bool CombatState::is_enemy(const Combatant &a, const Combatant &b, const time::t
 	return owner_a != owner_b and not this->neutral.contains(owner_a) and not this->neutral.contains(owner_b);
 }
 
+bool CombatState::is_hunt(const Combatant &a, const Combatant &b, const time::time_t &time) const {
+	// XR fork W3: a player hunts an animal of gaia; a predator of gaia fights back against a player's entity
+	if (a.entity == b.entity or b.dead or not b.stats->attackable()) {
+		return false;
+	}
+	const bool a_gaia = this->neutral.contains(this->owner_of(a.entity, time));
+	const bool b_gaia = this->neutral.contains(this->owner_of(b.entity, time));
+	return (b.stats->animal and b_gaia and not a_gaia) or (a.stats->predator and a_gaia and not b_gaia);
+}
+
 coord::phys3 CombatState::position_of(const std::shared_ptr<GameEntity> &entity, const time::time_t &time) const {
 	auto pos = std::dynamic_pointer_cast<component::Position>(
 		entity->get_component(component::component_t::POSITION));
@@ -232,7 +242,8 @@ std::optional<entity_id_t> CombatState::nearest_enemy(const Combatant &self, dou
 	// XR fork (vision): only enemies the owner sees
 	const auto self_owner = this->vision ? this->owner_of(self.entity, time) : player_id_t{0};
 	for (const auto &[id, other] : this->combatants) {
-		if (not this->is_enemy(self, other, time)) {
+		// XR fork W3: herdables of other players are no target of auto attacks
+		if (other.stats->animal or not this->is_enemy(self, other, time)) {
 			continue;
 		}
 		if (this->vision) {
@@ -292,7 +303,7 @@ std::optional<entity_id_t> CombatState::choose_target(const Combatant &self, con
 			continue;
 		}
 		// buildings (and walls, gates, towers) are no automatic targets (06 §6.2)
-		if (other.stats->building) {
+		if (other.stats->building or other.stats->animal) {  // W3: herdables of other players are food
 			continue;
 		}
 		if (self.stats->unit_class == CLASS_SCOUT and other.stats->villager) {
@@ -472,7 +483,8 @@ bool CombatState::order_attack(const std::shared_ptr<GameState> &state,
                                const time::time_t &time) {
 	auto a = this->find(attacker);
 	auto t = this->find(target);
-	if (not a or not t or a->dead or a->inside or not a->stats->can_attack or not this->is_enemy(*a, *t, time)) {
+	if (not a or not t or a->dead or a->inside or not a->stats->can_attack
+	    or not(this->is_enemy(*a, *t, time) or this->is_hunt(*a, *t, time))) {
 		return false;
 	}
 	if (a->stats->movable) {
@@ -1428,7 +1440,7 @@ void CombatState::tick(const std::shared_ptr<GameState> &state, entity_id_t atta
 	}
 
 	auto t = this->find(*a->target);
-	if (not t or not this->is_enemy(*a, *t, time)) {
+	if (not t or not(this->is_enemy(*a, *t, time) or this->is_hunt(*a, *t, time))) {
 		// target died or changed sides: continue with the next enemy in sight (not villagers)
 		a->target.reset();
 		a->explicit_order = false;
@@ -1731,6 +1743,13 @@ void CombatState::apply_hit(const std::shared_ptr<GameState> &state,
 	this->threats[target_owner].add(time.to_double(),
 	                                category_of(attacker_stats.unit_class, attacker_stats.building, attacker_stats.villager));
 
+	// XR fork W3: the food state reacts to hits (a prey flees); the shooter of a projectile may be gone
+	if (auto *source = this->find(attacker_id)) {
+		for (const auto &handler : this->hit_handlers) {
+			handler(source->entity, target.entity, time);
+		}
+	}
+
 	if (health <= 0) {
 		this->die(state, target, time, describe(attacker_id, attacker_stats, attacker_owner));
 		return;
@@ -1756,6 +1775,7 @@ void CombatState::apply_hit(const std::shared_ptr<GameState> &state,
 		return;
 	}
 	if (not target.target and target.stats->can_attack and not target.stats->villager and target.order != order_t::FOLLOW
+	    and (not target.stats->animal or target.stats->predator)
 	    and (target.stats->movable or attacker_stats.ranged or target.stats->ranged)) {
 		if (target.stats->building) {
 			this->engage(state, target, attacker_id, false, time);
@@ -1871,6 +1891,16 @@ void CombatState::die(const std::shared_ptr<GameState> &state,
 	              << " at t=" << time.to_double());
 	this->set_health_snapshot(victim.entity->get_id(), 0, victim.stats->max_health, false);
 
+	// XR fork W3: a dead animal stays as a carcass (the food state removes it when it is empty)
+	bool keep = false;
+	for (const auto &handler : this->death_handlers) {
+		keep = handler(victim.entity, time) or keep;
+	}
+	if (keep) {
+		this->update_match(time);
+		return;
+	}
+
 	openage::event::EventHandler::param_map::map_t params{{"entity", victim.entity->get_id()}};
 	this->loop->create_event("game.combat_remove",
 	                         std::static_pointer_cast<CombatState>(state->get_combat()),
@@ -1897,6 +1927,46 @@ void CombatState::kill(const std::shared_ptr<GameState> &state,
 		c->entity->get_component(component::component_t::LIVE));
 	live->set_attribute(time, c->stats->health_attribute, 0);
 	this->die(state, *c, time, "");
+}
+
+// ---------------------------------------------------------------- XR fork W3: hunting
+
+CombatState::StrikeResult CombatState::strike(const std::shared_ptr<GameState> &state,
+                                              entity_id_t attacker,
+                                              entity_id_t target,
+                                              const time::time_t &time) {
+	StrikeResult result;
+	auto a = this->find(attacker);
+	auto t = this->find(target);
+	if (t == nullptr or t->dead) {
+		result.killed = true;
+		return result;
+	}
+	if (a == nullptr or a->dead or not a->stats->can_attack or not t->stats->attackable()) {
+		return result;
+	}
+	if (time < a->ready_at) {
+		result.ready_in = (a->ready_at - time).to_double();
+		return result;
+	}
+	a->ready_at = time + seconds(std::max(0.1, a->stats->reload_time));
+	if (not a->stats->attack_animation.empty()) {
+		a->entity->render_update(time, a->stats->attack_animation);
+	}
+	this->apply_hit(state, *a->stats, attacker, this->owner_of(a->entity, time), *t, 1.0, time);
+	result.struck = true;
+	result.killed = t->dead;
+	result.ready_in = std::max(0.1, a->stats->reload_time);
+	return result;
+}
+
+void CombatState::on_death(std::function<bool(const std::shared_ptr<GameEntity> &, const time::time_t &)> handler) {
+	this->death_handlers.push_back(std::move(handler));
+}
+
+void CombatState::on_hit(std::function<void(const std::shared_ptr<GameEntity> &, const std::shared_ptr<GameEntity> &,
+                                            const time::time_t &)> handler) {
+	this->hit_handlers.push_back(std::move(handler));
 }
 
 void CombatState::remove(const std::shared_ptr<GameState> &state, entity_id_t id, const time::time_t &time) {

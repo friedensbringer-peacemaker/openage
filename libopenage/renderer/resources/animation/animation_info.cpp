@@ -22,6 +22,10 @@ Animation2dInfo::Animation2dInfo(const float scalefactor,
 			auto &angle = layer.get_angle(i);
 			for (size_t j = 0; j < angle->get_frame_count(); ++j) {
 				auto &frame = angle->get_frame(j);
+				if (frame == nullptr) {
+					// XR fork W3: empty frame of a layer with fewer frames (mill, dock)
+					continue;
+				}
 				auto tex_idx = frame->get_texture_idx();
 				auto subtex_idx = frame->get_subtexture_idx();
 

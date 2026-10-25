@@ -23,9 +23,13 @@
 #include "gamestate/component/internal/command_queue.h"
 #include "gamestate/component/internal/commands/build.h"
 #include "gamestate/component/internal/commands/gather.h"
+#include "gamestate/component/internal/commands/move.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
 #include "gamestate/component/types.h"
+#include "gamestate/econ.h"
+#include "gamestate/food.h"
+#include "gamestate/food_math.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/map.h"
@@ -65,6 +69,14 @@ std::string fmt1(double v) {
 	out.precision(1);
 	out << v;
 	return out.str();
+}
+
+template <typename T>
+std::shared_ptr<T> component_of(const std::shared_ptr<GameEntity> &entity, component::component_t type) {
+	if (entity == nullptr or not entity->has_component(type)) {
+		return nullptr;
+	}
+	return std::dynamic_pointer_cast<T>(entity->get_component(type));
 }
 
 } // namespace
@@ -179,6 +191,7 @@ void AiPlayer::think(const std::shared_ptr<GameState> &state, const time::time_t
 	this->attack(state, world, time);
 	this->gather(state, world, time);
 	this->produce(state, world, time);
+	this->food_economy(state, world, time);
 	this->report(state, world, time);
 
 	{
@@ -200,8 +213,9 @@ AiPlayer::World AiPlayer::observe(const std::shared_ptr<GameState> &state, const
 	auto vision = state->get_vision();
 	for (const auto &[id, entity] : state->get_game_entities()) {
 		auto stats = combat->get_stats(id);
+		// XR fork W3: herdables of a player are food, no units of the army or targets;
 		// XR fork W4: units in a building (or on their way in) are neither seen nor given jobs
-		if (not stats or combat->is_dead(id) or not stats->attackable() or combat->garrisoned_in(id)
+		if (not stats or combat->is_dead(id) or not stats->attackable() or stats->animal or combat->garrisoned_in(id)
 		    or combat->entering(id)
 		    or not entity->has_component(component::component_t::OWNERSHIP)
 		    or not entity->has_component(component::component_t::POSITION)) {
@@ -728,6 +742,10 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 		}
 		if (last != this->last_order.end() and now - last->second < cooldown + 15.0) {
 			fails += 1;
+			// XR fork W3: idle again soon after the order: its resource is not reachable, leave it for a while
+			if (auto spot = this->last_spot.find(v.id); spot != this->last_spot.end()) {
+				this->bad_spots[spot->second] = now;
+			}
 		}
 		else {
 			fails = 0;
@@ -743,8 +761,12 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 		entity_id_t id;
 		double ne;
 		double se;
+		/// XR fork W3: a farm (one worker)
+		bool field = false;
 	};
 	std::array<std::vector<Spot>, GATHER_KINDS> spots;
+	// XR fork W3: one idle villager decides what villagers can gather (hunting, herding, farming)
+	const auto sample = state->get_game_entity(idle.front()->id);
 	for (const auto &[id, entity] : state->get_game_entities()) {
 		if (not entity->has_component(component::component_t::HARVESTABLE)
 		    or not entity->has_component(component::component_t::OWNERSHIP)) {
@@ -758,7 +780,30 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 		}
 		auto ownership = std::dynamic_pointer_cast<component::Ownership>(
 			entity->get_component(component::component_t::OWNERSHIP));
-		if (not this->neutral.contains(ownership->get_owners().get(time))) {
+		const auto owner = ownership->get_owners().get(time);
+		const auto source = harvestable->kind;
+		// XR fork W3: no boars (they fight back), fish and traps belong to ships; own free farms and
+		// own herdables count besides the resources of gaia
+		if (source == food::source_t::PREDATOR or source == food::source_t::FISH or source == food::source_t::TRAP) {
+			continue;
+		}
+		if (food::is_field(source)) {
+			if (owner != this->player or harvestable->worker) {
+				continue;
+			}
+		}
+		else if (source == food::source_t::HERDABLE) {
+			if (owner != this->player and not this->neutral.contains(owner)) {
+				continue;
+			}
+		}
+		else if (not this->neutral.contains(owner)) {
+			continue;
+		}
+		if (auto bad = this->bad_spots.find(id); bad != this->bad_spots.end() and now - bad->second < 120.0) {
+			continue;
+		}
+		if (source != food::source_t::OTHER and not econ::can_gather_from(sample, entity)) {
 			continue;
 		}
 		auto position = std::dynamic_pointer_cast<component::Position>(
@@ -767,7 +812,7 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 		if (in_danger(pos.ne.to_double(), pos.se.to_double())) {
 			continue;
 		}
-		spots[static_cast<size_t>(*kind)].push_back({id, pos.ne.to_double(), pos.se.to_double()});
+		spots[static_cast<size_t>(*kind)].push_back({id, pos.ne.to_double(), pos.se.to_double(), food::is_field(source)});
 	}
 	std::array<bool, GATHER_KINDS> available{};
 	for (size_t k = 0; k < GATHER_KINDS; ++k) {
@@ -787,6 +832,9 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 		const Spot *best = nullptr;
 		double best_score = 1e30;
 		for (const auto &spot : list) {
+			if (spot.field and assigned[spot.id] > 0) {
+				continue;
+			}
 			// near the villager and the base, spread over the spots
 			double score = dist(v->ne, v->se, spot.ne, spot.se)
 			               + (world.has_home ? 0.5 * dist(world.home_ne, world.home_se, spot.ne, spot.se) : 0.0)
@@ -805,6 +853,7 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 			entity->get_component(component::component_t::COMMANDQUEUE));
 		queue->add_command(time, std::make_shared<component::command::GatherCommand>(best->id));
 		this->last_order[v->id] = now;
+		this->last_spot[v->id] = best->id;
 		workers[static_cast<size_t>(*kind)] += 1;
 		ordered[static_cast<size_t>(*kind)] += 1;
 		assigned[best->id] += 1;
@@ -1143,9 +1192,11 @@ void AiPlayer::produce(const std::shared_ptr<GameState> &state, const World &wor
 		const bool feudal_locked = rv.age == tech::DARK_AGE
 		                           and rv.villagers >= tech::AiResearchParams{}.feudal_villagers
 		                           and std::find(rv.offered.begin(), rv.offered.end(), "FeudalAge") == rv.offered.end();
+		// XR fork W3: the mill comes early now; a lumber camp is the second building unless there is one
 		bool has_camp = false;
 		for (const auto &b : world.buildings) {
-			has_camp = has_camp or b.name == "LumberCamp" or b.name == "Mill" or b.name == "MiningCamp";
+			has_camp = has_camp or b.name == "LumberCamp" or b.name == "MiningCamp" or b.name == "Barracks"
+			           or b.name == "Dock";
 		}
 		auto last_camp = this->last_build.find("LumberCamp");
 		if (feudal_locked and not has_camp and stock[static_cast<size_t>(resource_t::WOOD)] >= 100.0
@@ -1187,6 +1238,148 @@ void AiPlayer::produce(const std::shared_ptr<GameState> &state, const World &wor
 		              << view.villagers << "/" << this->params.villager_target << ", t=" << fmt1(now) << " s");
 	}
 	this->last_plan = key.str();
+}
+
+// ---------------------------------------------------------------- food (XR fork W3)
+
+void AiPlayer::food_economy(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time) {
+	const double now = time.to_double();
+	auto combat = state->get_combat();
+	auto food_state = state->get_food();
+	if (food_state == nullptr or not world.has_home) {
+		return;
+	}
+
+	// 1. herding: own sheep walk to the town centre (spec 02 §2.4), wild food near home counts
+	bool has_tc = false;
+	for (const auto &b : world.buildings) {
+		has_tc = has_tc or (b.town_center and this->production->is_complete(state, b.id, time));
+	}
+	long land_grid = -1;
+	if (auto mods = state->get_mod_manager()) {
+		for (const auto &modpack : mods->get_load_order()) {
+			try {
+				land_grid = static_cast<long>(state->get_map()->get_grid_id(modpack + ".data.util.path_type.types.Land"));
+				break;
+			}
+			catch (std::exception &) {
+			}
+		}
+	}
+	size_t natural = 0;
+	size_t herded = 0;
+	for (const auto &[id, entity] : state->get_game_entities()) {
+		auto h = component_of<component::Harvestable>(entity, component::component_t::HARVESTABLE);
+		if (h == nullptr or h->is_depleted() or h->get_resource() != resource_t::FOOD) {
+			continue;
+		}
+		const auto pos = std::dynamic_pointer_cast<component::Position>(
+			entity->get_component(component::component_t::POSITION))->get_positions().get(time);
+		const double d = dist(pos.ne.to_double(), pos.se.to_double(), world.home_ne, world.home_se);
+		const auto owner = std::dynamic_pointer_cast<component::Ownership>(
+			entity->get_component(component::component_t::OWNERSHIP))->get_owners().get(time);
+		const bool wild = (h->kind == food::source_t::OTHER or h->kind == food::source_t::PREY
+		                   or h->kind == food::source_t::HERDABLE)
+		                  and (this->neutral.contains(owner) or owner == this->player);
+		auto bad = this->bad_spots.find(id);
+		if (wild and d <= FOOD_NEAR and not(bad != this->bad_spots.end() and now - bad->second < 120.0)) {
+			natural += 1;
+		}
+		if (h->kind != food::source_t::HERDABLE or h->dead or owner != this->player or combat->is_dead(id) or d <= 4.0) {
+			continue;
+		}
+		auto last = this->last_herd.find(id);
+		if (last != this->last_herd.end() and now - last->second < 8.0) {
+			continue;
+		}
+		auto queue = component_of<component::CommandQueue>(entity, component::component_t::COMMANDQUEUE);
+		if (queue == nullptr) {
+			continue;
+		}
+		// a spot 3 tiles from the town centre towards the animal
+		const double dn = pos.ne.to_double() - world.home_ne;
+		const double ds = pos.se.to_double() - world.home_se;
+		const double len = std::max(1e-6, std::hypot(dn, ds));
+		const auto msize = state->get_map()->get_size();
+		const double hne = std::clamp(world.home_ne + dn / len * 3.0, 0.5, static_cast<double>(msize[0]) - 0.5);
+		const double hse = std::clamp(world.home_se + ds / len * 3.0, 0.5, static_cast<double>(msize[1]) - 0.5);
+		// only to a free land tile next to a standing town centre
+		if (not has_tc or land_grid < 0
+		    or not state->get_map()->is_passable(static_cast<path::grid_id_t>(land_grid),
+		                                         coord::tile{static_cast<coord::tile_t>(std::floor(hne)),
+		                                                     static_cast<coord::tile_t>(std::floor(hse))})) {
+			continue;
+		}
+		auto dest = state->get_map()->on_terrain(coord::phys3{coord::phys_t{hne}, coord::phys_t{hse}, coord::phys_t{0.0}});
+		queue->add_command(time, std::make_shared<component::command::MoveCommand>(dest));
+		this->last_herd[id] = now;
+		herded += 1;
+	}
+	if (herded > 0 and this->gather_log.due(now)) {
+		log::log(INFO << "AI P" << this->player << ": herds " << herded << " sheep to the town centre, t=" << fmt1(now)
+		              << " s");
+	}
+
+	// 2. mill, farms, reseeds (ai_rules.h plan_food)
+	if (not this->production->enabled()) {
+		return;
+	}
+	FoodView view;
+	view.villagers = world.villagers.size();
+	view.natural_food = natural;
+	view.reseeds = food_state->reseeds(this->player);
+	for (const auto &b : world.buildings) {
+		const bool complete = this->production->is_complete(state, b.id, time);
+		if (b.name == "Mill") {
+			(complete ? view.mills : view.mills_planned) += 1;
+		}
+		else if (b.name == "Farm" and not food_state->is_decayed(b.id)) {
+			(complete ? view.farms : view.farms_planned) += 1;
+		}
+	}
+	auto stock = state->get_player(this->player)->get_resources().get();
+	for (size_t i = 0; i < view.stock.size(); ++i) {
+		view.stock[i] = stock[i];
+	}
+	auto plan = plan_food(view);
+	auto place = [&](const std::string &name, double side) {
+		auto last = this->last_build.find(name);
+		if (last != this->last_build.end() and now - last->second < 15.0) {
+			return;
+		}
+		this->last_build[name] = now;
+		auto spot = this->building_spot(state, world, side, time);
+		if (not spot) {
+			log::log(INFO << "AI P" << this->player << ": no spot for a " << name << ", t=" << fmt1(now) << " s");
+			return;
+		}
+		auto builders = this->free_builders(state, world, spot->first, spot->second, time);
+		if (builders.empty()) {
+			this->last_build.erase(name);
+			return;
+		}
+		coord::phys3 where{coord::phys_t{spot->first}, coord::phys_t{spot->second}, coord::phys_t{0}};
+		const bool done = this->production->build(state, this->player, name, {builders.front()->id}, where, time);
+		this->last_order[builders.front()->id] = now;
+		log::log(INFO << "AI P" << this->player << " builds a " << name << " at (" << fmt1(spot->first) << ", "
+		              << fmt1(spot->second) << ") by villager " << builders.front()->id << (done ? "" : " [not done]")
+		              << " (mills " << view.mills << ", farms " << view.farms << "+" << view.farms_planned << "/"
+		              << plan.farm_target << ", wild food near home " << natural << "), t=" << fmt1(now) << " s");
+	};
+	if (plan.build_mill) {
+		place("Mill", 2.0);
+	}
+	if (plan.build_farm) {
+		place("Farm", 3.0);
+	}
+	if (plan.reseed and now - this->last_reseed >= 10.0) {
+		this->last_reseed = now;
+		const bool done = this->production->reseed(state, this->player, time);
+		log::log(INFO << "AI P" << this->player << " queues a farm reseed (" << view.reseeds << " queued, farms "
+		              << view.farms << ")" << (done ? "" : " [not done]") << ", t=" << fmt1(now) << " s");
+	}
+	std::erase_if(this->last_herd, [&](const auto &entry) { return now - entry.second > 60.0; });
+	std::erase_if(this->bad_spots, [&](const auto &entry) { return now - entry.second > 120.0; });
 }
 
 // ---------------------------------------------------------------- report

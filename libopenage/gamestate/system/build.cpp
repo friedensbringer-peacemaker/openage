@@ -16,13 +16,17 @@
 #include "coord/tile.h"
 #include "gamestate/component/api/builder.h"
 #include "gamestate/component/api/constructable.h"
+#include "gamestate/component/api/gather.h"
 #include "gamestate/component/api/move.h"
 #include "gamestate/component/internal/command_queue.h"
 #include "gamestate/component/internal/commands/build.h"
+#include "gamestate/component/internal/commands/gather.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
 #include "gamestate/component/types.h"
+#include "gamestate/econ.h"
 #include "gamestate/econ_math.h"
+#include "gamestate/food.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/map.h"
@@ -228,6 +232,17 @@ const time::time_t Build::build_command(const std::shared_ptr<gamestate::GameEnt
 		return end_job(*builder);
 	}
 
+	// XR fork W3: a build order ends the gather job (otherwise the unit still counts as a gatherer
+	// and holds its farm after the building is done)
+	if (entity->has_component(component::component_t::GATHER)) {
+		auto gather = std::dynamic_pointer_cast<component::Gather>(entity->get_component(component::component_t::GATHER));
+		auto &gjob = gather->get_job();
+		if (gjob.target and state->get_food()) {
+			state->get_food()->release(find_entity(state, *gjob.target), entity->get_id());
+		}
+		gjob = component::Gather::Job{};
+	}
+
 	auto &job = builder->get_job();
 	job = BuilderComp::Job{};
 	job.target = target->get_id();
@@ -260,10 +275,27 @@ const time::time_t Build::build_step(const std::shared_ptr<gamestate::GameEntity
 			const double before = constructable->get_progress();
 			bool done = constructable->add_work(job.step);
 			prod::update_building_health(state, target, before, start_time);
+			auto food_state = state->get_food();
+			if (food_state) {
+				// XR fork W3: the ground of a farm shows the construction stages of the data
+				food_state->field_progress(state, target, start_time);
+			}
 			if (done) {
 				prod::complete_building(target, start_time);
 				log::log(INFO << "Build: unit " << entity->get_id() << " completes " << prod::entity_name(target)
 				              << " (entity " << target->get_id() << ")");
+				if (food_state) {
+					// XR fork W3: a finished farm gets its food; its builder farms it (spec 13 L33)
+					food_state->field_complete(state, target, start_time);
+					if (econ::can_gather_from(entity, target) and food_state->claim(target, entity->get_id())) {
+						auto queue = std::dynamic_pointer_cast<component::CommandQueue>(
+							entity->get_component(component::component_t::COMMANDQUEUE));
+						queue->add_command(start_time,
+						                   std::make_shared<component::command::GatherCommand>(target->get_id()));
+						log::log(INFO << "Build: unit " << entity->get_id() << " works the field "
+						              << target->get_id() << " it built");
+					}
+				}
 			}
 		}
 		job.step = 0.0;

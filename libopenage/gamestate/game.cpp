@@ -28,6 +28,7 @@
 #include "gamestate/component/internal/position.h"
 #include "gamestate/component/types.h"
 #include "gamestate/entity_factory.h"
+#include "gamestate/food.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/heightmap.h"
@@ -83,6 +84,8 @@ Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 	    and this->generate_random_map(event_loop, entity_factory, terrain_factory, map_settings, start_time)) {
 		// vision (XR fork): fog of war of the random map
 		this->start_vision(map_settings.vision, start_time);
+		// XR fork W3: herdables, hunting, carcasses, farms (gaia = the player after the starts)
+		this->state->get_food()->start(this->state, {static_cast<player_id_t>(this->start_count)}, start_time);
 		// ai (XR fork): computer opponent
 		this->start_ai(event_loop, map_settings, start_time);
 		return;
@@ -374,6 +377,9 @@ RandomMapObjects random_map_objects(const std::string &modpack) {
 	o(map_object_t::FISH_SHORE) = entity("shore_fish", "Shorefish");
 	// ocean_fish: its idle sprite declares angle 180 without frames (sprite parser throws), big_ocean_fish is consistent
 	o(map_object_t::FISH_OCEAN) = entity("big_ocean_fish", "BigOceanFish");
+	// XR fork W3: herdables and game
+	o(map_object_t::SHEEP) = entity("sheep", "Sheep");
+	o(map_object_t::BOAR) = entity("boar", "Boar");
 	return result;
 }
 

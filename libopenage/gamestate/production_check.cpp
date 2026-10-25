@@ -65,7 +65,11 @@ void check_known() {
 		check(std::string{entry.label}.size() > 2, std::string{"label "} + entry.name);
 	}
 	check(known("EagleWarrior") != nullptr and has_mechanic("EagleWarrior"), "eagle warrior in the catalog");
-	check(not has_mechanic("Monk") and not has_mechanic("Farm") and not has_mechanic("Dock"), "hidden entries");
+	check(not has_mechanic("Monk") and not has_mechanic("Market") and not has_mechanic("Galley"), "hidden entries");
+	// XR fork W3: farms, fishing traps, the dock and the fishing ship have their mechanic
+	check(has_mechanic("Farm") and has_mechanic("FishingTrap") and has_mechanic("Dock") and has_mechanic("FishingShip")
+	          and has_mechanic("HorseCollar", true),
+	      "W3 entries offered");
 	check(has_mechanic("SomethingNew"), "unknown entries are offered");
 	check(known(999) == nullptr, "unknown code");
 	check(label_of("Villager") == "Dorfbewohner", "label villager");

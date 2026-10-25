@@ -59,6 +59,9 @@ enum class map_object_t : uint8_t {
 	DEER,        ///< food (animal, gaia), not blocking
 	FISH_SHORE,  ///< food on water next to the shore
 	FISH_OCEAN,  ///< food on deep water (big ocean fish)
+	// XR fork W3 (food), appended: placed only with MapSettings::herds
+	SHEEP,       ///< herdable (gaia until a player sees it), not blocking
+	BOAR,        ///< game that fights back, not blocking
 	COUNT,
 };
 

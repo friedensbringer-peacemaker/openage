@@ -50,6 +50,12 @@ bool Harvestable::is_depleted() const {
 	return this->depleted or this->amount <= 0.0;
 }
 
+void Harvestable::refill(double amount) {
+	this->amount = amount < 0.0 ? 0.0 : amount;
+	this->start_amount = this->amount;
+	this->depleted = false;
+}
+
 void Harvestable::set_depleted() {
 	this->depleted = true;
 	this->amount = 0.0;

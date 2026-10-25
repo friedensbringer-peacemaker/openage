@@ -64,6 +64,10 @@ SaveData sample(uint32_t seed, size_t entities) {
 		SavedPlayer sp;
 		sp.id = p;
 		sp.resources = {200.0 + p, 150.25, 100.0 / 3.0, 0.0};
+		// XR fork W3: farm reseeds of the mill
+		for (uint64_t r = 0; r < p; ++r) {
+			sp.reseeds.push_back({0.0, 60.0 + static_cast<double>(r), 0.0, 0.0});
+		}
 		d.players.push_back(sp);
 	}
 	for (size_t i = 0; i < entities; ++i) {
@@ -82,6 +86,7 @@ SaveData sample(uint32_t seed, size_t entities) {
 		}
 		if (i % 4 == 1) {
 			e.harvest = 99.5 - i;
+			e.dead = i % 8 == 1;
 		}
 		if (i % 5 == 2) {
 			e.carried = 7.5;
@@ -129,7 +134,7 @@ SaveData sample(uint32_t seed, size_t entities) {
 		default:
 			break;
 		}
-		// XR fork W4 (version 4): stance, formation, orders, garrison, bell
+		// XR fork W4 (version 4 of W4, version 5): stance, formation, orders, garrison, bell
 		switch ((i + seed) % 6) {
 		case 0:
 			e.stance = "defensive";
@@ -266,6 +271,22 @@ void check_roundtrip() {
 		          and r3.entities[0].stance.empty() and not r3.entities[0].garrison,
 		      "version 3 loads with defaults: %s", error.c_str());
 	}
+	// XR fork W3 (version 4 of W3, version 5): animals on the map, carcasses, reseeds
+	CHECK(back.version == 5 and back.map.herds, "version 5 with herds");
+	CHECK(back.entities[1].dead and not back.entities[5].dead, "carcass flag");
+	CHECK(back.players[2].reseeds.size() == 2 and back.players[2].reseeds[1][1] == 61.0 and back.players[0].reseeds.empty(),
+	      "reseeds per player");
+	SaveData old;
+	CHECK(parse("[save]\nversion = 3\n[map]\ntype = random\n", old, error) and not old.map.herds, "version 3: no herds");
+	CHECK(parse("[save]\nversion = 5\n[map]\ntype = random\n", old, error) and old.map.herds, "version 5 default: herds");
+	CHECK(parse("[save]\nversion = 3\n[map]\ntype = random\nherds = 1\n", old, error) and old.map.herds,
+	      "explicit herds kept");
+	// version 4 exists twice: W3 (key herds) and W4 (no herds key, maps without animals)
+	CHECK(parse("[save]\nversion = 4\n[map]\ntype = random\nherds = 1\n", old, error) and old.map.herds,
+	      "version 4 of W3 (herds key): herds");
+	CHECK(parse("[save]\nversion = 4\n[map]\ntype = random\n[entity]\nfqon = x\nstance = defensive\n", old, error)
+	          and not old.map.herds and old.entities.back().stance == "defensive",
+	      "version 4 of W4 (no herds key): no herds, stance kept");
 }
 
 void check_damaged() {

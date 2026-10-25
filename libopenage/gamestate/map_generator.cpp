@@ -1423,6 +1423,74 @@ GeneratedMap generate_map(const MapSettings &settings) {
 		});
 	}
 
+	// --- XR fork W3: animals for food (herdables, game), placed last with an own random
+	// sequence, so that everything above stays the same as without them (85-biomes-check
+	// compares the grassland without herds against the generator before the presets)
+	if (settings.herds) {
+		Rng herd_rng{mix64(seed ^ 0x6865726473ull)};
+		std::vector<std::pair<long, long>> taken;
+		auto free_for_animal = [&](double x, double y) {
+			if (x < 1.0 or y < 1.0 or x > n - 1.0 or y > n - 1.0) {
+				return false;
+			}
+			auto tx = static_cast<long>(std::floor(x));
+			auto ty = static_cast<long>(std::floor(y));
+			if (not free_land(tx, ty)) {
+				return false;
+			}
+			for (const auto &o : map.objects) {
+				// not on villagers or other animals, at least one tile from the town centres
+				if (std::abs(o.ne - x) < 0.9 and std::abs(o.se - y) < 0.9) {
+					return false;
+				}
+				if (o.kind == map_object_t::TOWN_CENTER and std::abs(o.ne - x) < 3.0 and std::abs(o.se - y) < 3.0) {
+					return false;
+				}
+			}
+			return true;
+		};
+		// a group of animals around a point: up to count, each on a free tile near it
+		auto group = [&](map_object_t kind, double cx, double cy, size_t count) {
+			static constexpr double OFFS[6][2] = {{0.0, 0.0}, {1.1, 0.3}, {0.2, 1.2}, {-1.0, 0.5}, {0.6, -1.0}, {-0.6, -0.9}};
+			size_t placed = 0;
+			for (const auto &off : OFFS) {
+				if (placed >= count) {
+					break;
+				}
+				double x = cx + off[0];
+				double y = cy + off[1];
+				if (free_for_animal(x, y)) {
+					map.objects.push_back({kind, x, y, 40 * static_cast<int>(herd_rng.below(9)), gaia});
+					placed += 1;
+				}
+			}
+			return placed;
+		};
+		// somewhere in a ring around a start (16 directions from a random one)
+		auto around = [&](const std::array<double, 2> &s, map_object_t kind, double r0, double r1, size_t count, size_t min_count) {
+			for (int attempt = 0; attempt < 48; ++attempt) {
+				const auto &d = DIRS[herd_rng.below(16)];
+				const double r = r0 + (r1 - r0) * herd_rng.uniform();
+				if (group(kind, s[0] + d[0] * r, s[1] + d[1] * r, count) >= min_count) {
+					return true;
+				}
+			}
+			return false;
+		};
+		for (const auto &s : map.starts) {
+			// start sheep in sight of the town centre (spec 02 §2.4: they belong to the player who sees them)
+			around(s, map_object_t::SHEEP, 4.5, 6.0, 4, 3);
+			// two pairs of sheep further away, found while scouting
+			around(s, map_object_t::SHEEP, start_r + 4.0, start_r + 9.0, 2, 2);
+			around(s, map_object_t::SHEEP, start_r + 4.0, start_r + 9.0, 2, 2);
+			// a boar and a herd of deer at medium distance
+			around(s, map_object_t::BOAR, start_r + 3.0, start_r + 7.0, 1, 1);
+			if (not b.deer) {
+				around(s, map_object_t::DEER, start_r + 4.0, start_r + 8.0, 4, 3);
+			}
+		}
+	}
+
 	for (size_t i = 0; i < tile_count; ++i) {
 		if (blocked[i]) {
 			map.blocked.push_back(i);
@@ -1558,6 +1626,10 @@ const char *to_string(map_object_t object) {
 		return "shore_fish";
 	case map_object_t::FISH_OCEAN:
 		return "big_fish";
+	case map_object_t::SHEEP:
+		return "sheep";
+	case map_object_t::BOAR:
+		return "boar";
 	default:
 		return "?";
 	}

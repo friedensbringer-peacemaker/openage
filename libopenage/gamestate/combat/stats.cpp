@@ -179,6 +179,12 @@ void read_types(CombatStats &stats, const std::shared_ptr<nyan::View> &db_view, 
 		}
 		else if (name == "Herdable" or name == "AnimalPrey") {
 			stats.herdable = true;
+			stats.animal = true;
+		}
+		else if (name == "AnimalPredator") {
+			// XR fork W3: a boar is a unit of gaia that fights back when it is hunted
+			stats.animal = true;
+			stats.predator = true;
 		}
 	}
 }

@@ -68,6 +68,12 @@ public:
 	const std::vector<std::shared_ptr<TerrainRenderMesh>> &get_meshes() const;
 
 	/**
+	 * Meshes replaced by the last update (XR fork W3: a farm changed the terrain of a tile);
+	 * the render stage removes their renderables. Returns them once and forgets them.
+	 */
+	std::vector<std::shared_ptr<TerrainRenderMesh>> take_retired_meshes();
+
+	/**
 	 * Get the size of the chunk in tiles.
 	 *
 	 * @return Size of the chunk (in tiles).
@@ -112,6 +118,9 @@ private:
 	 * and a texture.
 	 */
 	std::vector<std::shared_ptr<TerrainRenderMesh>> meshes;
+
+	/// XR fork W3: meshes of the previous update whose renderables are still in the render pass
+	std::vector<std::shared_ptr<TerrainRenderMesh>> retired;
 
 	/**
 	 * Asset manager for central accessing and loading textures.

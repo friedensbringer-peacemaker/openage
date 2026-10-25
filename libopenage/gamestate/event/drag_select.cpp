@@ -14,6 +14,7 @@
 #include "coord/scene.h"
 #include "curve/discrete.h"
 #include "gamestate/combat/combat_state.h"
+#include "gamestate/component/api/harvestable.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
 #include "gamestate/game_entity.h"
@@ -75,8 +76,19 @@ void DragSelectHandler::invoke(openage::event::EventLoop & /* loop */,
 	};
 	// selectable and alive (dead entities play their death animation)
 	auto selectable = [&](const std::shared_ptr<GameEntity> &entity) {
-		return entity->has_component(component::component_t::SELECTABLE)
-		       and not combat->is_dead(entity->get_id());
+		if (not entity->has_component(component::component_t::SELECTABLE)) {
+			return false;
+		}
+		if (not combat->is_dead(entity->get_id())) {
+			return true;
+		}
+		// XR fork W3: a carcass with food left can be selected (its food shows in the panel)
+		if (entity->has_component(component::component_t::HARVESTABLE)) {
+			auto h = std::dynamic_pointer_cast<component::Harvestable>(
+				entity->get_component(component::component_t::HARVESTABLE));
+			return h->dead and not h->is_depleted();
+		}
+		return false;
 	};
 	auto own = [&](const std::shared_ptr<GameEntity> &entity) {
 		return owner_of(entity) == controlled_id;

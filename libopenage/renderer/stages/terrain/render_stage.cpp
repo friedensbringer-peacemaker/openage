@@ -2,6 +2,8 @@
 
 #include "render_stage.h"
 
+#include <unordered_set>
+
 #include "renderer/camera/camera.h"
 #include "renderer/opengl/context.h"
 #include "renderer/render_pass.h"
@@ -64,6 +66,24 @@ void TerrainRenderStage::add_render_entity(const std::shared_ptr<RenderEntity> e
 void TerrainRenderStage::update() {
 	this->model->fetch_updates();
 	auto current_time = this->clock->get_real_time();
+	// XR fork W3: a changed chunk (farm terrain) replaced its meshes: drop the old renderables
+	for (auto &chunk : this->model->get_chunks()) {
+		auto retired = chunk->take_retired_meshes();
+		if (retired.empty()) {
+			continue;
+		}
+		std::unordered_set<const renderer::UniformInput *> old;
+		for (auto &mesh : retired) {
+			if (mesh->get_uniforms()) {
+				old.insert(mesh->get_uniforms().get());
+			}
+		}
+		if (not old.empty()) {
+			this->render_pass->remove_renderables([&old](const Renderable &r) {
+				return r.uniform != nullptr and old.contains(r.uniform.get());
+			});
+		}
+	}
 	for (auto &chunk : this->model->get_chunks()) {
 		for (auto &mesh : chunk->get_meshes()) {
 			if (mesh->requires_renderable()) [[unlikely]] { /*probably doesn't happen that often?*/

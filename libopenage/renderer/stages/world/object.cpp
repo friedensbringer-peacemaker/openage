@@ -140,7 +140,17 @@ void WorldObject::update_uniforms(const time::time_t &time) {
 		}
 
 		// Index of texture and subtexture where the frame's pixels are located
-		auto &frame_info = angle->get_frame(frame_idx);
+		// XR fork W3: sprites whose layers have fewer frames than the animation (mill, dock) hold
+		// empty frames; such a layer shows its nearest earlier frame, or nothing
+		const std::shared_ptr<renderer::resources::FrameInfo> *frame_ptr = &angle->get_frame(frame_idx);
+		for (size_t back = frame_idx; *frame_ptr == nullptr and back > 0; --back) {
+			frame_ptr = &angle->get_frame(back - 1);
+		}
+		if (*frame_ptr == nullptr) {
+			layer_unifs->update(this->scale, 0.0f);
+			continue;
+		}
+		auto &frame_info = *frame_ptr;
 		auto tex_idx = frame_info->get_texture_idx();
 		auto subtex_idx = frame_info->get_subtexture_idx();
 

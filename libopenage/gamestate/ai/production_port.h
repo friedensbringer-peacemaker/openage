@@ -124,6 +124,13 @@ public:
 	                      const time::time_t & /* time */) {
 		return false;
 	}
+
+	/// XR fork W3: queue a farm reseed at a mill of the player (default: none, e.g. the stub)
+	virtual bool reseed(const std::shared_ptr<GameState> & /* state */,
+	                    player_id_t /* player */,
+	                    const time::time_t & /* time */) {
+		return false;
+	}
 };
 
 /**

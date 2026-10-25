@@ -40,6 +40,10 @@ namespace vision {
 class VisionState;
 }
 
+namespace food {
+class FoodState;
+}
+
 /**
  * State of the game.
  *
@@ -94,6 +98,11 @@ public:
 	 * Fog of war of the game (XR fork): line of sight, explored tiles, minimap view.
 	 */
 	const std::shared_ptr<vision::VisionState> &get_vision() const;
+
+	/**
+	 * Food economy of the game (XR fork W3): herdables, hunting, carcasses, farms, reseeding.
+	 */
+	const std::shared_ptr<food::FoodState> &get_food() const;
 
 	/**
 	 * Add a new player to the index.
@@ -193,6 +202,11 @@ private:
 	 * Fog of war (XR fork).
 	 */
 	std::shared_ptr<vision::VisionState> vision;
+
+	/**
+	 * Food economy (XR fork W3).
+	 */
+	std::shared_ptr<food::FoodState> food;
 };
 } // namespace gamestate
 } // namespace openage

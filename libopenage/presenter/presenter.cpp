@@ -1131,28 +1131,28 @@ void Presenter::update_placement_ghost(std::vector<renderer::hud::ColorBatch> &g
 		this->ghost_up = preview.anchor_up;
 	}
 	coord::phys3 anchor{coord::phys_t{ane}, coord::phys_t{ase}, coord::phys_t{this->ghost_up}};
-	// translucent; red (values above 1 brighten the red channel) where it cannot be placed
-	const Eigen::Vector4f tint = this->ghost_valid ? Eigen::Vector4f{1.0f, 1.0f, 1.0f, 0.6f}
-	                                               : Eigen::Vector4f{1.8f, 0.45f, 0.45f, 0.6f};
+	// XR fork W3 (docs/aoe2-spec 13 "Bauplatz-Vorschau"): the building as its full picture without a
+	// coloured outline, the whole picture tinted red where it cannot be placed (values above 1
+	// brighten the red channel); buildings without a picture of their own (farm, fishing trap)
+	// show only a white diamond outline of the footprint (red where invalid)
+	if (preview.outline_only or preview.animation.empty()) {
+		this->world_renderer->set_ghost({}, coord::phys3{0, 0, 0}, Eigen::Vector4f{1.0f, 1.0f, 1.0f, 1.0f});
+		const Eigen::Matrix4f view_proj = this->camera->get_projection_matrix() * this->camera->get_view_matrix();
+		const auto &viewport = this->camera->get_viewport_size();
+		const float px_x = 2.0f / static_cast<float>(std::max<size_t>(viewport[0], 1));
+		const float px_y = 2.0f / static_cast<float>(std::max<size_t>(viewport[1], 1));
+		const float half = 0.5f * static_cast<float>(gamestate::prod::footprint_side(preview.radius));
+		auto corners = footprint_ndc(view_proj, anchor.to_scene3().to_world_space(), half);
+		renderer::hud::ColorBatch edge{this->ghost_valid ? Eigen::Vector4f{1.0f, 1.0f, 1.0f, 0.95f}
+		                                                 : Eigen::Vector4f{1.0f, 0.2f, 0.2f, 0.95f},
+		                               {}};
+		edge.ring(corners, 2.0f * px_x, 2.0f * px_y);
+		ground.push_back(std::move(edge));
+		return;
+	}
+	const Eigen::Vector4f tint = this->ghost_valid ? Eigen::Vector4f{1.0f, 1.0f, 1.0f, 1.0f}
+	                                               : Eigen::Vector4f{1.9f, 0.35f, 0.35f, 1.0f};
 	this->world_renderer->set_ghost(preview.animation, anchor, tint);
-
-	// footprint: filled diamond with an outline, green = valid, red = not
-	const Eigen::Matrix4f view_proj = this->camera->get_projection_matrix() * this->camera->get_view_matrix();
-	const auto &viewport = this->camera->get_viewport_size();
-	const float px_x = 2.0f / static_cast<float>(std::max<size_t>(viewport[0], 1));
-	const float px_y = 2.0f / static_cast<float>(std::max<size_t>(viewport[1], 1));
-	const float half = 0.5f * static_cast<float>(gamestate::prod::footprint_side(preview.radius));
-	auto corners = footprint_ndc(view_proj, anchor.to_scene3().to_world_space(), half);
-	renderer::hud::ColorBatch fill{this->ghost_valid ? Eigen::Vector4f{0.2f, 0.85f, 0.2f, 0.30f}
-	                                                 : Eigen::Vector4f{0.9f, 0.15f, 0.15f, 0.40f},
-	                               {}};
-	fill.quad(corners[0], corners[1], corners[2], corners[3]);
-	renderer::hud::ColorBatch edge{this->ghost_valid ? Eigen::Vector4f{0.3f, 1.0f, 0.3f, 0.9f}
-	                                                 : Eigen::Vector4f{1.0f, 0.2f, 0.2f, 0.9f},
-	                               {}};
-	edge.ring(corners, 2.0f * px_x, 2.0f * px_y);
-	ground.push_back(std::move(fill));
-	ground.push_back(std::move(edge));
 }
 
 void Presenter::apply_map_view() {

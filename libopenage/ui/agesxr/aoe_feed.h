@@ -292,6 +292,8 @@ private:
             std::snprintf(buf, sizeof(buf), "Bau %d %%", static_cast<int>(std::lround(100.0 * f)));
             sel.detail = buf;
         }
+        // W3: Vorrat von Feld, Tier, Kadaver, Fisch (auch Gaia: Schaf, Hirsch, Baum, Mine)
+        if (sel.detail.empty() && p.valid && !p.selectionResource.empty()) sel.detail = p.selectionResource;
         return sel;
     }
 

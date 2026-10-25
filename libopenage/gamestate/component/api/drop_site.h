@@ -37,6 +37,8 @@ private:
 public:
 	/// hitbox radius in tiles (footprint for walking next to it)
 	double radius = 0.5;
+	/// XR fork W3: drop site of ships (dock); land units never use it, ships nothing else
+	bool water = false;
 };
 
 } // namespace openage::gamestate::component
