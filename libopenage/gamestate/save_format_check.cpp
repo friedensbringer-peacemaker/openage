@@ -242,6 +242,11 @@ void check_roundtrip() {
 		w4 += a.stance.empty() and not a.garrison and not a.bell ? 0 : 1;
 	}
 	CHECK(w4 >= 6, "W4 fields present (%zu)", w4);
+	// XR fork W3 (version 4 of W3, version 5): animals on the map, carcasses, reseeds
+	CHECK(back.version == 5 and back.map.herds, "version 5 with herds");
+	CHECK(back.entities[1].dead and not back.entities[5].dead, "carcass flag");
+	CHECK(back.players[2].reseeds.size() == 2 and back.players[2].reseeds[1][1] == 61.0 and back.players[0].reseeds.empty(),
+	      "reseeds per player");
 	const std::string head = "[save]\nversion = 4\n[map]\ntype = random\n[entity]\nfqon = x\n";
 	CHECK(not parse(head + "stance = brave\n", back, error), "bad stance rejected");
 	CHECK(not parse(head + "garrison = 3 bell 1 2 eat 4\n", back, error), "bad bell job rejected");
@@ -271,11 +276,6 @@ void check_roundtrip() {
 		          and r3.entities[0].stance.empty() and not r3.entities[0].garrison,
 		      "version 3 loads with defaults: %s", error.c_str());
 	}
-	// XR fork W3 (version 4 of W3, version 5): animals on the map, carcasses, reseeds
-	CHECK(back.version == 5 and back.map.herds, "version 5 with herds");
-	CHECK(back.entities[1].dead and not back.entities[5].dead, "carcass flag");
-	CHECK(back.players[2].reseeds.size() == 2 and back.players[2].reseeds[1][1] == 61.0 and back.players[0].reseeds.empty(),
-	      "reseeds per player");
 	SaveData old;
 	CHECK(parse("[save]\nversion = 3\n[map]\ntype = random\n", old, error) and not old.map.herds, "version 3: no herds");
 	CHECK(parse("[save]\nversion = 5\n[map]\ntype = random\n", old, error) and old.map.herds, "version 5 default: herds");
