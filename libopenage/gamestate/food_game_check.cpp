@@ -32,7 +32,7 @@
  *  F8. Fishing (coast map): a dock only next to the shore (not on land), fishing ship
  *      trained at the dock, it fishes and drops the food at the dock; a fishing trap on
  *      water, built by the ship and fished.
- *  F9. Save game version 4: converted sheep, a carcass, a farm, queued reseeds; save ->
+ *  F9. Save game version 5: converted sheep, a carcass, a farm, queued reseeds; save ->
  *      load -> save gives the same state; a version 3 file still loads (map without animals).
  *  F10. Computer opponent: builds a mill and farms, herds and hunts, reaches the Feudal
  *      Age (time printed; earlier than 18:40 of 0.6.0-xr.0.14).
@@ -864,8 +864,8 @@ void check_save(const Options &opt) {
 	check(sh->dead, "carcass for the save");
 	auto data = save::capture(w.state, w.settings, w.game->get_generated_entity_range(), w.now, "W3");
 	const auto text = save::serialize(data);
-	check(text.find("version = 4") != std::string::npos and text.find("herds = 1") != std::string::npos,
-	      "save version 4 with herds");
+	check(text.find("version = 5") != std::string::npos and text.find("herds = 1") != std::string::npos,
+	      "save version 5 with herds");
 	check(text.find("dead = 1") != std::string::npos, "carcass stored (dead)");
 	check(text.find("reseed = ") != std::string::npos, "reseeds stored");
 	save::SaveData parsed;
@@ -905,7 +905,7 @@ void check_save(const Options &opt) {
 	check(count_food(again_data) == count_food(a), "carcasses after save -> load -> save");
 	// version 3 file: no animals on its map
 	std::string v3 = text;
-	auto pos = v3.find("version = 4");
+	auto pos = v3.find("version = 5");
 	v3.replace(pos, 11, "version = 3");
 	// files before W3 have no herds key
 	v3.erase(v3.find("herds = 1"), 10);
