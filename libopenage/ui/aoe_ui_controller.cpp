@@ -773,6 +773,28 @@ bool AoeUiController::combat_command(int code, const std::string &label) {
 	else if (code == agesxr::kAoeCmdGarrison) {
 		target(ui_command_t::GARRISON, "Garnison");
 	}
+	// XR fork W6: monks, carriers, trebuchets
+	else if (code == agesxr::kAoeCmdConvert) {
+		target(ui_command_t::CONVERT, "Konvertieren");
+	}
+	else if (code == agesxr::kAoeCmdHeal) {
+		target(ui_command_t::HEAL, "Heilen");
+	}
+	else if (code == agesxr::kAoeCmdUnloadAt) {
+		target(ui_command_t::UNLOAD, "Entladen");
+	}
+	else if (code == agesxr::kAoeCmdUnloadHere) {
+		log::log(INFO << "UI: unload here");
+		order(ui_command_t::UNLOAD_HERE, 1);
+	}
+	else if (code == agesxr::kAoeCmdPack or code == agesxr::kAoeCmdUnpack) {
+		log::log(INFO << "UI: trebuchet " << (code == agesxr::kAoeCmdPack ? "pack" : "unpack"));
+		order(code == agesxr::kAoeCmdPack ? ui_command_t::PACK : ui_command_t::UNPACK, 0);
+	}
+	else if (code == agesxr::kAoeCmdDropRelic) {
+		log::log(INFO << "UI: drop relic");
+		order(ui_command_t::DROP_RELIC, 0);
+	}
 	else if (code == agesxr::kAoeCmdHalt) {
 		log::log(INFO << "UI: halt");
 		order(ui_command_t::STOP, 0);

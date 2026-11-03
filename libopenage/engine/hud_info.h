@@ -71,6 +71,26 @@ struct HudEntity {
 	/// town center and its bell
 	bool town_center = false;
 	bool bell = false;
+
+	// ---- XR fork W6 (monks, relics, carriers, trebuchets)
+	/// monk: converts (faith 0..100), heals; carries a relic
+	bool monk = false;
+	bool heals = false;
+	int faith = 0;
+	bool relic = false;
+	/// current special job ("Konvertiert", "Heilt", "Baut auf", …), empty if none
+	std::string special_job{};
+	/// monastery: relics inside, gold per second
+	int relics = 0;
+	double relic_gold = 0.0;
+	/// carrier (transport ship, ram): units on board / places; transport ship
+	int cargo = 0;
+	int cargo_max = 0;
+	bool transport = false;
+	/// trebuchet: can pack, is unpacked, packs or unpacks right now
+	bool packable = false;
+	bool unpacked = false;
+	bool packing = false;
 };
 
 /**

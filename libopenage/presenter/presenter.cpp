@@ -333,6 +333,29 @@ void Presenter::send_ui_command(ui::ui_command_t type, int x, int y, int arg) {
 	case ui::ui_command_t::BELL:
 		command = command_t::BELL;
 		break;
+	// XR fork W6
+	case ui::ui_command_t::CONVERT:
+		command = command_t::CONVERT;
+		break;
+	case ui::ui_command_t::HEAL:
+		command = command_t::HEAL;
+		break;
+	case ui::ui_command_t::UNLOAD:
+		command = command_t::UNLOAD;
+		break;
+	case ui::ui_command_t::UNLOAD_HERE:
+		command = command_t::UNLOAD;
+		arg = 1;
+		break;
+	case ui::ui_command_t::PACK:
+		command = command_t::PACK;
+		break;
+	case ui::ui_command_t::UNPACK:
+		command = command_t::UNPACK;
+		break;
+	case ui::ui_command_t::DROP_RELIC:
+		command = command_t::DROP_RELIC;
+		break;
 	default:
 		break;
 	}

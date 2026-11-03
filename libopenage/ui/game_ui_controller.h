@@ -56,6 +56,16 @@ enum class ui_command_t {
 	KILL,
 	UNGARRISON,
 	BELL,
+
+	// XR fork W6 (monks, carriers, trebuchets): at the pixel ...
+	CONVERT,
+	HEAL,
+	UNLOAD,
+	// ... and without a target
+	PACK,
+	UNPACK,
+	DROP_RELIC,
+	UNLOAD_HERE,
 };
 
 /**
