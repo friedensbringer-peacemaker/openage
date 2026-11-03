@@ -541,6 +541,13 @@ if(OPENAGE_NATIVE_ENTRY)
 		target_link_libraries(openage-food-game-check PRIVATE Qt6::Core Qt6::Gui)
 	endif()
 	# ---- end XR fork W3 ----
+
+	# ---- XR fork W5: buildings ----
+	# host test: build, repair and wall rules (dependency-free, parameter sweep)
+	add_executable(openage-building-check gamestate/building_check.cpp)
+	target_include_directories(openage-building-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-building-check COMMAND openage-building-check)
+	# ---- end XR fork W5 ----
 endif()
 
 # XR fork: the in-engine UI (libopenage/ui/agesxr) logs via __android_log_print
