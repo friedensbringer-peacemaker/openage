@@ -541,6 +541,13 @@ if(OPENAGE_NATIVE_ENTRY)
 		target_link_libraries(openage-food-game-check PRIVATE Qt6::Core Qt6::Gui)
 	endif()
 	# ---- end XR fork W3 ----
+
+	# ---- XR fork W6: special abilities (monks, healing, area damage) ----
+	# host test: conversion, faith, healing and splash rules (dependency-free, parameter sweep)
+	add_executable(openage-special-check gamestate/special_check.cpp)
+	target_include_directories(openage-special-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-special-check COMMAND openage-special-check)
+	# ---- end XR fork W6 ----
 endif()
 
 # XR fork: the in-engine UI (libopenage/ui/agesxr) logs via __android_log_print
