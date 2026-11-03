@@ -56,6 +56,11 @@ enum class ui_command_t {
 	KILL,
 	UNGARRISON,
 	BELL,
+
+	// XR fork W5 (docs/aoe2-spec 04 §4.4/4.5): repair the building at the pixel; lock/unlock the
+	// selected gates (argument 1/0)
+	REPAIR,
+	GATE_LOCK,
 };
 
 /**

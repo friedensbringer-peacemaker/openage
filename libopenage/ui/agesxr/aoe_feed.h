@@ -115,6 +115,8 @@ public:
             c.garrison = e.garrison;
             c.garrisonMax = e.garrison_max;
             c.deleteArmed = mDeleteArmed;
+            c.gate = e.gate;  // W5: Tor verriegeln/entriegeln
+            c.gateLocked = e.gate_locked;
             if (aoeCombatGrid(m, c, cancelTraining, cancelPlacement) && c.military && !c.villager && !c.building) {
                 m.tips.assign(static_cast<size_t>(kAoeGridCells), std::string{});
             }

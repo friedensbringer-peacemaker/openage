@@ -71,6 +71,11 @@ struct HudEntity {
 	/// town center and its bell
 	bool town_center = false;
 	bool bell = false;
+
+	// ---- XR fork W5 (buildings)
+	/// a gate and whether it is locked (command "Verriegeln"/"Entriegeln")
+	bool gate = false;
+	bool gate_locked = false;
 };
 
 /**

@@ -333,6 +333,13 @@ void Presenter::send_ui_command(ui::ui_command_t type, int x, int y, int arg) {
 	case ui::ui_command_t::BELL:
 		command = command_t::BELL;
 		break;
+	// XR fork W5
+	case ui::ui_command_t::REPAIR:
+		command = command_t::REPAIR;
+		break;
+	case ui::ui_command_t::GATE_LOCK:
+		command = command_t::GATE_LOCK;
+		break;
 	default:
 		break;
 	}
@@ -1124,8 +1131,38 @@ void Presenter::update_placement_ghost(std::vector<renderer::hud::ColorBatch> &g
 		this->world_renderer->set_ghost({}, coord::phys3{0, 0, 0}, Eigen::Vector4f{1.0f, 1.0f, 1.0f, 1.0f});
 		return;
 	}
+	const Eigen::Vector4f valid_tint{1.0f, 1.0f, 1.0f, 1.0f};
+	const Eigen::Vector4f invalid_tint{1.9f, 0.35f, 0.35f, 1.0f};
+	// XR fork W5 (docs/aoe2-spec 13 L31): wall drag – every segment as a full picture, red where it
+	// cannot be placed, the ground under it marked brightly
+	if (not preview.segments.empty()) {
+		const Eigen::Matrix4f view_proj = this->camera->get_projection_matrix() * this->camera->get_view_matrix();
+		const auto &viewport = this->camera->get_viewport_size();
+		const float px_x = 2.0f / static_cast<float>(std::max<size_t>(viewport[0], 1));
+		const float px_y = 2.0f / static_cast<float>(std::max<size_t>(viewport[1], 1));
+		std::vector<renderer::world::WorldRenderStage::Ghost> ghosts;
+		renderer::hud::ColorBatch good{Eigen::Vector4f{1.0f, 1.0f, 1.0f, 0.85f}, {}};
+		renderer::hud::ColorBatch bad{Eigen::Vector4f{1.0f, 0.2f, 0.2f, 0.85f}, {}};
+		for (const auto &s : preview.segments) {
+			coord::phys3 pos{coord::phys_t{s.ne}, coord::phys_t{s.se}, coord::phys_t{s.up}};
+			if (not preview.animation.empty()) {
+				ghosts.push_back({preview.animation, pos, s.valid ? valid_tint : invalid_tint});
+			}
+			auto corners = footprint_ndc(view_proj, pos.to_scene3().to_world_space(), 0.5f);
+			(s.valid ? good : bad).ring(corners, 1.5f * px_x, 1.5f * px_y);
+		}
+		this->world_renderer->set_ghosts(ghosts);
+		ground.push_back(std::move(good));
+		ground.push_back(std::move(bad));
+		return;
+	}
 	// snap here (follows the cursor at once); validity of the simulation for the same anchor
 	auto [ane, ase] = gamestate::prod::snap_anchor(hit.ne.to_double(), hit.se.to_double(), preview.radius);
+	if (preview.fixed_anchor) {
+		// XR fork W5: a gate sits where the simulation found the wall
+		ane = preview.anchor_ne;
+		ase = preview.anchor_se;
+	}
 	if (std::abs(ane - preview.anchor_ne) < 1e-6 and std::abs(ase - preview.anchor_se) < 1e-6) {
 		this->ghost_valid = preview.valid;
 		this->ghost_up = preview.anchor_up;
@@ -1150,9 +1187,7 @@ void Presenter::update_placement_ghost(std::vector<renderer::hud::ColorBatch> &g
 		ground.push_back(std::move(edge));
 		return;
 	}
-	const Eigen::Vector4f tint = this->ghost_valid ? Eigen::Vector4f{1.0f, 1.0f, 1.0f, 1.0f}
-	                                               : Eigen::Vector4f{1.9f, 0.35f, 0.35f, 1.0f};
-	this->world_renderer->set_ghost(preview.animation, anchor, tint);
+	this->world_renderer->set_ghost(preview.animation, anchor, this->ghost_valid ? valid_tint : invalid_tint);
 }
 
 void Presenter::apply_map_view() {

@@ -250,6 +250,17 @@ void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
 
 	binding_func_t init_drag_selection{[&](const event_arguments &args,
 	                                       const std::shared_ptr<Controller> controller) {
+		// XR fork W5 (docs/aoe2-spec 13 L31): in the placement mode of a wall the press starts the drag,
+		// the release places the segments (VR beam: trigger held and moved)
+		if (simulation->get_production()->placement_active()) {
+			auto ground = args.mouse.to_phys3(camera);
+			if (simulation->get_production()->placement_press(ground)) {
+				log::log(INFO << "Input: left press at pixel (" << args.mouse.x << ", " << args.mouse.y
+				              << ") -> wall drag from tile (" << ground.ne.to_float() << ", " << ground.se.to_float() << ")");
+				// no selection box while the wall is dragged
+				return nullptr;
+			}
+		}
 		controller->set_drag_select_start(args.mouse);
 		return nullptr;
 	}};

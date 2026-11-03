@@ -8,6 +8,7 @@
 #include "log/message.h"
 
 #include "cvar/cvar.h"
+#include "gamestate/buildings.h"
 #include "gamestate/combat/combat_state.h"
 #include "gamestate/game.h"
 #include "gamestate/game_state.h"
@@ -248,6 +249,13 @@ HudInfo Engine::query_hud(uint64_t player) const {
 					first.garrison_names = ci->occupants;
 					first.arrows = ci->arrows;
 					first.bell = ci->bell;
+				}
+				// XR fork W5: gates (thread-safe copy of the lock state)
+				if (auto buildings = state ? state->get_buildings() : nullptr) {
+					if (auto locked = buildings->is_locked_shared(first.id)) {
+						first.gate = true;
+						first.gate_locked = *locked;
+					}
 				}
 				for (auto id : info.selected) {
 					auto s = combat->get_stats_snapshot(id);

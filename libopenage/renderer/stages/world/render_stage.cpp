@@ -187,10 +187,12 @@ void WorldRenderStage::update() {
 	}
 	this->drawn_objects = drawn;
 
-	// XR fork: tint of the placement ghost
-	if (this->ghost_object) {
-		for (const auto &unif : this->ghost_object->get_uniforms()) {
-			unif->update("u_tint", this->ghost_tint);
+	// XR fork: tint of the placement ghosts
+	for (const auto &ghost : this->ghosts) {
+		if (ghost.object) {
+			for (const auto &unif : ghost.object->get_uniforms()) {
+				unif->update("u_tint", ghost.tint);
+			}
 		}
 	}
 }
@@ -203,35 +205,62 @@ void WorldRenderStage::set_visibility(std::function<uint8_t(uint32_t)> display) 
 void WorldRenderStage::set_ghost(const std::string &animation_path,
                                  const coord::phys3 &position,
                                  const Eigen::Vector4f &tint) {
+	std::vector<Ghost> list;
+	if (not animation_path.empty()) {
+		list.push_back(Ghost{animation_path, position, tint});
+	}
+	this->set_ghosts(list);
+}
+
+void WorldRenderStage::set_ghosts(const std::vector<Ghost> &list) {
 	auto now = this->clock->get_real_time();
-	std::shared_ptr<RenderEntity> old;
+	std::vector<std::shared_ptr<RenderEntity>> old;
 	{
 		std::unique_lock lock{this->mutex};
-		this->ghost_tint = tint;
-		if (animation_path.empty() or animation_path != this->ghost_path) {
-			// other building or no placement: the old ghost leaves (dropped by update())
-			old = this->ghost_entity;
-			this->ghost_entity = nullptr;
-			this->ghost_object = nullptr;
-			this->ghost_path = animation_path;
+		// ghosts that are not needed any more or show another building leave (dropped by update())
+		while (this->ghosts.size() > list.size()) {
+			if (this->ghosts.back().entity) {
+				old.push_back(this->ghosts.back().entity);
+			}
+			this->ghosts.pop_back();
+		}
+		this->ghosts.resize(list.size());
+		for (size_t i = 0; i < list.size(); ++i) {
+			auto &slot = this->ghosts[i];
+			slot.tint = list[i].tint;
+			if (list[i].animation_path != slot.path) {
+				if (slot.entity) {
+					old.push_back(slot.entity);
+				}
+				slot.entity = nullptr;
+				slot.object = nullptr;
+				slot.path = list[i].animation_path;
+			}
 		}
 	}
-	if (old) {
-		old->mark_removed();
+	for (const auto &entity : old) {
+		entity->mark_removed();
 	}
-	if (animation_path.empty()) {
-		return;
-	}
-	if (not this->ghost_entity) {
-		auto entity = std::make_shared<RenderEntity>();
-		entity->update(GHOST_ID, position, animation_path, now);
+	for (size_t i = 0; i < list.size(); ++i) {
+		if (list[i].animation_path.empty()) {
+			continue;
+		}
+		std::shared_ptr<RenderEntity> entity;
+		{
+			std::unique_lock lock{this->mutex};
+			entity = this->ghosts[i].entity;
+		}
+		if (entity) {
+			entity->update(GHOST_ID, list[i].position, list[i].animation_path, now);
+			continue;
+		}
+		entity = std::make_shared<RenderEntity>();
+		entity->update(GHOST_ID, list[i].position, list[i].animation_path, now);
 		this->add_render_entity(entity);
 		std::unique_lock lock{this->mutex};
-		this->ghost_entity = entity;
-		this->ghost_object = this->render_objects.back();
-		return;
+		this->ghosts[i].entity = entity;
+		this->ghosts[i].object = this->render_objects.back();
 	}
-	this->ghost_entity->update(GHOST_ID, position, animation_path, now);
 }
 
 std::vector<std::tuple<uint32_t, uint32_t, Eigen::Vector3f>>

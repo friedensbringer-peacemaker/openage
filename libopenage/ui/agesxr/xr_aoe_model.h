@@ -40,6 +40,8 @@ constexpr int kAoeStanceCount = 4;
 constexpr int kAoeCmdFormation0 = 960;       // + combat::formation_t − 1: Linie (Q), Kasten (W), Gestaffelt (E), Flanke (F)
 constexpr int kAoeFormationCount = 4;
 constexpr int kAoeCmdBell = 965;             // Dorfzentrum: Stadtglocke / Zurück an die Arbeit (B)
+constexpr int kAoeCmdRepair = 966;           // W5: Dorfbewohner reparieren (R), Ziel: eigenes beschädigtes Gebäude
+constexpr int kAoeCmdGateLock = 967;         // W5: Tor verriegeln / entriegeln (Platz 0, L)
 // Sondertasten der Hotkeys (AoeCommand::hotkey): Entf und Tab
 constexpr char kAoeKeyDelete = 0x7f;
 constexpr char kAoeKeyTab = 0x09;
@@ -358,15 +360,18 @@ struct AoeCombat {
     bool bell = false;          // Glocke läutet
     int garrison = 0, garrisonMax = 0;
     bool deleteArmed = false;   // Quest: „Löschen“ wartet auf die Bestätigung
+    bool gate = false;          // W5: Tor (Befehl Verriegeln/Entriegeln)
+    bool gateLocked = false;
 };
 
 // Befehlsraster der Einheiten/Gebäude (Spec 08 §8.1, Tasten des klassischen Profils §8.2):
 //   Militär: Patrouille Z · Wachen X · Folgen C · Löschen Entf · Garnison G / Aggressiv A · Defensiv D ·
 //            Stellung halten N · Kein Angriff O · Halt S / Linie Q · Kasten W · Gestaffelt E · Flanke F ·
 //            Angriffsbewegung Tab (Formationen ab zwei Militäreinheiten)
-//   Dorfbewohner: Zeilen 1–2 = Bauen (Engine), Zeile 3: Garnison Z · Halt X · Löschen Entf · – · Abbrechen
+//   Dorfbewohner: Zeilen 1–2 = Bauen (Engine), Zeile 3: Garnison Z · Halt X · Löschen Entf · Reparieren R (W5) ·
+//            Abbrechen
 //   Gebäude: Zeilen 1–2 = Ausbilden/Forschen, Zeile 3: Glocke B (Dorfzentrum) · – · Löschen Entf ·
-//            Alle raus · Abbrechen
+//            Alle raus · Abbrechen; Tor (W5): Platz 0 Verriegeln/Entriegeln L
 // true = das Raster wurde belegt (sonst bleibt aoeFixedRow).
 inline bool aoeCombatGrid(AoeModel& m, const AoeCombat& c, bool cancelTraining, bool cancelPlacement) {
     if (m.grid.size() < static_cast<size_t>(kAoeGridCells)) m.grid.resize(static_cast<size_t>(kAoeGridCells));
@@ -405,11 +410,17 @@ inline bool aoeCombatGrid(AoeModel& m, const AoeCombat& c, bool cancelTraining, 
         m.grid[10] = {kAoeCmdGarrison, HudIcon::Garrison, "Garnison", true, ""};
         m.grid[11] = {kAoeCmdHalt, HudIcon::Halt, "Halt", true, ""};
         m.grid[12] = del;
-        m.grid[13] = AoeCommand{};
+        // W5 (Spec 08 §8.2): Reparieren R – danach ein eigenes beschädigtes Gebäude anklicken
+        m.grid[13] = {kAoeCmdRepair, HudIcon::Hammer, "Reparieren", true, "", 'R'};
         m.grid[14] = aoeCancelCell(cancelTraining, cancelPlacement);
         return true;
     }
     if (c.building) {
+        if (c.gate) {
+            // W5 (Spec 08 §8.1 Platz 0): Tor verriegeln/entriegeln
+            m.grid[0] = c.gateLocked ? AoeCommand{kAoeCmdGateLock, HudIcon::Wall, "Entriegeln", true, "", 'L', true}
+                                     : AoeCommand{kAoeCmdGateLock, HudIcon::Wall, "Verriegeln", true, "", 'L'};
+        }
         if (c.townCenter) {
             m.grid[10] = c.bell ? AoeCommand{kAoeCmdBell, HudIcon::Villager, "Zur Arbeit", true, "", 'B', true}
                                 : AoeCommand{kAoeCmdBell, HudIcon::Age, "Stadtglocke", true, "", 'B'};

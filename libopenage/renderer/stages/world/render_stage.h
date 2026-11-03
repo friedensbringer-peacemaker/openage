@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <shared_mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -157,6 +158,19 @@ public:
 	 */
 	void set_ghost(const std::string &animation_path, const coord::phys3 &position, const Eigen::Vector4f &tint);
 
+	/// XR fork W5: one ghost of the placement mode
+	struct Ghost {
+		std::string animation_path;
+		coord::phys3 position;
+		Eigen::Vector4f tint;
+	};
+
+	/**
+	 * Several ghosts of the placement mode (XR fork W5: the segments of a wall drag, each with
+	 * its own tint). An empty list removes all ghosts. Call in the render thread before update().
+	 */
+	void set_ghosts(const std::vector<Ghost> &ghosts);
+
 	/// entity id of the ghost (pick() returns it where the ghost is drawn)
 	static constexpr uint32_t GHOST_ID = 0x7ffffff0;
 
@@ -235,10 +249,14 @@ private:
 	/**
 	 * Ghost of the placement mode (XR fork).
 	 */
-	std::shared_ptr<RenderEntity> ghost_entity;
-	std::shared_ptr<WorldObject> ghost_object;
-	std::string ghost_path;
-	Eigen::Vector4f ghost_tint{1.0f, 1.0f, 1.0f, 1.0f};
+	struct GhostSlot {
+		std::shared_ptr<RenderEntity> entity;
+		std::shared_ptr<WorldObject> object;
+		std::string path;
+		Eigen::Vector4f tint{1.0f, 1.0f, 1.0f, 1.0f};
+	};
+	/// XR fork W5: several ghosts (wall drag)
+	std::vector<GhostSlot> ghosts;
 
 	/**
 	 * Fog of war (XR fork): display per entity id and the tint applied per object.

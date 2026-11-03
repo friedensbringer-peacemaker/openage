@@ -794,6 +794,15 @@ bool AoeUiController::combat_command(int code, const std::string &label) {
 		log::log(INFO << "UI: town bell " << (ringing ? "off (back to work)" : "on"));
 		order(ui_command_t::BELL, ringing ? 0 : 1);
 	}
+	// XR fork W5 (docs/aoe2-spec 04 §4.4/4.5, 08 §8.1/8.2)
+	else if (code == agesxr::kAoeCmdRepair) {
+		target(ui_command_t::REPAIR, "Reparieren");
+	}
+	else if (code == agesxr::kAoeCmdGateLock) {
+		const bool locked = this->info.first and this->info.first->gate_locked;
+		log::log(INFO << "UI: gate " << (locked ? "unlock" : "lock"));
+		order(ui_command_t::GATE_LOCK, locked ? 0 : 1);
+	}
 	else if (code == agesxr::kAoeCmdDelete) {
 		// on the Quest a second press within 3 s confirms (no keyboard, the trigger is quick)
 		if (this->aoe_ui.menu().quest and this->delete_armed_at < 0.0) {
