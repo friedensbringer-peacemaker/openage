@@ -279,6 +279,7 @@ void check_maps() {
 				s.biome = static_cast<map_biome_t>(b);
 				s.seed = seed;
 				s.size = size;
+				s.relics = false;  // W6: relics come after the animals (own check in special-game-check)
 				auto with = generate_map(s);
 				s.herds = false;
 				auto without = generate_map(s);

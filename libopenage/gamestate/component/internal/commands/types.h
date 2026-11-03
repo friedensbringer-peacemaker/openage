@@ -47,6 +47,18 @@ enum class command_t {
 	KILL,
 	/// town centers: town bell on ("combat_arg" = 1) or back to work (0)
 	BELL,
+	// XR fork W6 (special::SpecialState, docs/aoe2-spec 05 §5.7–5.9, 06 §6.5), handled in special::handle_command
+	/// monks: convert the enemy under the cursor
+	CONVERT,
+	/// monks: heal the own unit under the cursor
+	HEAL,
+	/// trebuchets: pack (move) / unpack (shoot)
+	PACK,
+	UNPACK,
+	/// monks: put the carried relic down
+	DROP_RELIC,
+	/// carriers: unload at the target point ("combat_arg" = 1: here at once)
+	UNLOAD,
 };
 
 } // namespace openage::gamestate::component::command

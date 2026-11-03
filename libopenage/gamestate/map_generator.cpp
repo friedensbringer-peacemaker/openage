@@ -479,6 +479,10 @@ double flat_radius(const BiomeParams &b, double start_r) {
 } // namespace
 
 
+size_t relic_count(size_t N) {
+	return std::clamp<size_t>(N / 16, 2, 8);
+}
+
 size_t map_generator_size(size_t requested) {
 	size_t size = ((requested + 8) / 16) * 16;
 	return std::clamp<size_t>(size, 48, 256);
@@ -1491,6 +1495,39 @@ GeneratedMap generate_map(const MapSettings &settings) {
 		}
 	}
 
+	// --- XR fork W6: relics (gaia, spec 10 §10.2 names them without a number), placed last with an own random
+	// sequence, so that the map without them (MapSettings::relics = false) stays the same as before W6
+	if (settings.relics) {
+		Rng relic_rng{mix64(seed ^ 0x72656c696373ull)};
+		const size_t count = relic_count(N);
+		std::vector<std::array<double, 2>> placed;
+		const double spacing = std::max(6.0, n / 6.0);
+		for (size_t k = 0; k < count; ++k) {
+			for (int attempt = 0; attempt < 400; ++attempt) {
+				const double x = std::floor(2.0 + relic_rng.uniform() * (n - 4.0)) + 0.5;
+				const double y = std::floor(2.0 + relic_rng.uniform() * (n - 4.0)) + 0.5;
+				const auto tx = static_cast<long>(x);
+				const auto ty = static_cast<long>(y);
+				if (not free_land(tx, ty) or reserved[tile_index(tx, ty)] or start_dist(x, y) < start_r + 4.0) {
+					continue;
+				}
+				bool near = false;
+				for (const auto &p : placed) {
+					near = near or std::hypot(p[0] - x, p[1] - y) < spacing;
+				}
+				for (const auto &o : map.objects) {
+					near = near or (std::abs(o.ne - x) < 1.0 and std::abs(o.se - y) < 1.0);
+				}
+				if (near) {
+					continue;
+				}
+				map.objects.push_back({map_object_t::RELIC, x, y, 0, gaia});
+				placed.push_back({x, y});
+				break;
+			}
+		}
+	}
+
 	for (size_t i = 0; i < tile_count; ++i) {
 		if (blocked[i]) {
 			map.blocked.push_back(i);
@@ -1630,6 +1667,8 @@ const char *to_string(map_object_t object) {
 		return "sheep";
 	case map_object_t::BOAR:
 		return "boar";
+	case map_object_t::RELIC:
+		return "relic";
 	default:
 		return "?";
 	}

@@ -339,6 +339,74 @@ public:
 	                               const time::time_t &)> handler);
 	// ---- end XR fork W3
 
+	// ---- XR fork W6 (special abilities, gamestate/special.h): new functions and a hook only,
+	// the W4 flows stay as they are
+
+	/// impact of an attack: attacker id, its owner and stats, the main target if it was hit,
+	/// the impact point (tiles); melee hits and every projectile (also a miss) report it
+	using impact_handler_t = std::function<void(entity_id_t, player_id_t, const CombatStats &,
+	                                            std::optional<entity_id_t>, double, double, const time::time_t &)>;
+
+	/// called after a melee hit and after every projectile impact (area damage, W6)
+	void on_impact(impact_handler_t handler);
+
+	/// may the attacker take this target (attacker id, target id)? false refuses orders and automatic targets
+	using target_filter_t = std::function<bool(entity_id_t, entity_id_t)>;
+
+	/// add a target rule (W6: rams attack buildings only)
+	void on_target(target_filter_t filter);
+
+	/// damage of an attack against a target without elevation/terrain factors (area attacks)
+	int64_t damage_against(const CombatStats &attacker, entity_id_t target) const;
+
+	/**
+	 * Side target of an area attack (W6): the hit with \p factor on the damage and the same
+	 * reactions as a direct hit (death, flight, fighting back).
+	 *
+	 * @return false if the target cannot be hit (dead, inside, no health).
+	 */
+	bool area_hit(const std::shared_ptr<GameState> &state,
+	              const CombatStats &attacker_stats,
+	              entity_id_t attacker_id,
+	              player_id_t attacker_owner,
+	              entity_id_t target,
+	              double factor,
+	              const time::time_t &time);
+
+	/// hit roll of an area attack with an accuracy (deterministic generator of the combat state)
+	bool roll_accuracy(double accuracy);
+
+	/**
+	 * Put an entity into a carrier without the garrison rules (W6: transport ship, ram, monk
+	 * carrying a relic, relic in a monastery): hidden like a garrison, no sight, no target,
+	 * but not an occupant of the carrier (gamestate/special.h counts and releases them).
+	 */
+	bool stow(const std::shared_ptr<GameState> &state, entity_id_t id, entity_id_t carrier, const time::time_t &time);
+
+	/**
+	 * Let a stowed entity out on a free spot next to its carrier (passable for the entity).
+	 *
+	 * @param require_spot true: nothing happens without a passable spot (ship far from the shore)
+	 * @return false if it was not stowed or (with require_spot) no spot is free
+	 */
+	bool unstow(const std::shared_ptr<GameState> &state, entity_id_t id, size_t slot, bool require_spot,
+	            const time::time_t &time);
+
+	/**
+	 * Conversion (W6): the entity changes its owner – combat values of the new owner's data,
+	 * no target, no order, the player colour follows. Other units drop it as a target.
+	 */
+	void change_owner(const std::shared_ptr<GameState> &state,
+	                  entity_id_t id,
+	                  player_id_t owner,
+	                  const std::shared_ptr<nyan::View> &db_view,
+	                  const nyan::fqon_t &nyan_entity,
+	                  const time::time_t &time);
+
+	/// stop moving at once (special orders: a trebuchet unpacks, a monk prays)
+	void halt_entity(entity_id_t id, const time::time_t &time);
+	// ---- end XR fork W6
+
 	// ---- event handlers
 	void tick(const std::shared_ptr<GameState> &state, entity_id_t attacker, const time::time_t &time);
 	void scan(const std::shared_ptr<GameState> &state, const time::time_t &time);
@@ -598,6 +666,10 @@ private:
 	std::vector<std::function<void(const std::shared_ptr<GameEntity> &, const std::shared_ptr<GameEntity> &,
 	                               const time::time_t &)>>
 		hit_handlers;
+	/// XR fork W6: impact handlers (area damage)
+	std::vector<impact_handler_t> impact_handlers;
+	/// XR fork W6: target rules
+	std::vector<target_filter_t> target_filters;
 	/// fog of war (XR fork), may be nullptr
 	std::shared_ptr<vision::VisionState> vision;
 	/// players that ever had units or buildings

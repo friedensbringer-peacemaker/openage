@@ -40,6 +40,10 @@ namespace vision {
 class VisionState;
 }
 
+namespace special {
+class SpecialState;
+} // namespace special
+
 namespace food {
 class FoodState;
 }
@@ -103,6 +107,11 @@ public:
 	 * Food economy of the game (XR fork W3): herdables, hunting, carcasses, farms, reseeding.
 	 */
 	const std::shared_ptr<food::FoodState> &get_food() const;
+
+	/**
+	 * Special abilities (XR fork W6): monks, relics, area damage, trebuchets, carriers.
+	 */
+	const std::shared_ptr<special::SpecialState> &get_special() const;
 
 	/**
 	 * Add a new player to the index.
@@ -207,6 +216,11 @@ private:
 	 * Food economy (XR fork W3).
 	 */
 	std::shared_ptr<food::FoodState> food;
+
+	/**
+	 * Special abilities (XR fork W6).
+	 */
+	std::shared_ptr<special::SpecialState> special;
 };
 } // namespace gamestate
 } // namespace openage
