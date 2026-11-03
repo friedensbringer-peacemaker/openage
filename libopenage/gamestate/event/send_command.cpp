@@ -3,9 +3,12 @@
 #include "send_command.h"
 
 #include <functional>
+#include <optional>
+#include <string>
 #include <vector>
 
 #include "coord/phys.h"
+#include "gamestate/buildings.h"
 #include "gamestate/combat/command.h"
 #include "gamestate/combat/combat_state.h"
 #include "gamestate/combat/stats.h"
@@ -153,6 +156,52 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 	// XR fork (game user interface): a plain move ignores enemies, resources and
 	// foundations under the cursor (context menu "Hierher bewegen")
 	const bool plain = params.get<bool>("plain", false);
+
+	// XR fork W5 (docs/aoe2-spec 04 §4.4/4.5, 08 §8.1): lock/unlock gates, repair the building under the cursor
+	if (command_type == component::command::command_t::GATE_LOCK) {
+		const bool lock = params.get<int>("combat_arg", 0) != 0;
+		size_t done = 0;
+		for (auto id : ids) {
+			auto owner = std::dynamic_pointer_cast<component::Ownership>(
+				gstate->get_game_entity(id)->get_component(component::component_t::OWNERSHIP));
+			done += gstate->get_buildings()->set_locked(gstate, id, owner->get_owners().get(time), lock, time) ? 1 : 0;
+		}
+		log::log(INFO << "Command gate " << (lock ? "lock" : "unlock") << ": " << done << " of " << ids.size()
+		              << " entities");
+		return;
+	}
+	if (command_type == component::command::command_t::REPAIR) {
+		if (ids.empty()) {
+			return;
+		}
+		auto owner = std::dynamic_pointer_cast<component::Ownership>(
+			gstate->get_game_entity(ids.front())->get_component(component::component_t::OWNERSHIP));
+		std::optional<entity_id_t> picked;
+		if (params.contains("target_entity")) {
+			picked = params.get<entity_id_t>("target_entity", 0);
+		}
+		else {
+			picked = prod::pick_repairable(gstate, params.get("target", coord::phys3{0, 0, 0}),
+			                               owner->get_owners().get(time), time);
+		}
+		size_t done = 0;
+		if (picked and gstate->get_game_entities().contains(*picked)) {
+			auto building = gstate->get_game_entity(*picked);
+			for (auto id : ids) {
+				auto entity = gstate->get_game_entity(id);
+				if (prod::can_build(entity, building, time)) {
+					auto command_queue = std::dynamic_pointer_cast<component::CommandQueue>(
+						entity->get_component(component::component_t::COMMANDQUEUE));
+					command_queue->add_command(time, std::make_shared<component::command::BuildCommand>(*picked));
+					done += 1;
+				}
+			}
+		}
+		log::log(INFO << "Command repair (" << (picked ? "building " + std::to_string(*picked) : std::string{"nothing to repair under the cursor"})
+		              << "): " << done << " of " << ids.size() << " entities");
+		return;
+	}
+
 	bool enemy_picked = combat::handle_command(gstate, time,
 	                                           plain ? component::command::command_t::IDLE : command_type,
 	                                           ids, target, params);
@@ -185,6 +234,12 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 		if (picked) {
 			build_target = gstate->get_game_entity(*picked);
 			log::log(INFO << "Command target: foundation entity " << *picked);
+		}
+		// XR fork W5: a right click on an own damaged building makes villagers repair it (spec 04 §4.5)
+		else if (auto damaged = prod::pick_repairable(gstate, params.get("target", coord::phys3{0, 0, 0}),
+		                                              owner->get_owners().get(time), time)) {
+			build_target = gstate->get_game_entity(*damaged);
+			log::log(INFO << "Command target: damaged building " << *damaged << " (repair)");
 		}
 	}
 

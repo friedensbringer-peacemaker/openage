@@ -24,6 +24,9 @@
 #include "coord/scene.h"
 #include "coord/tile.h"
 #include "gamestate/api/ability.h"
+#include "gamestate/building_math.h"
+#include "gamestate/building_place.h"
+#include "gamestate/buildings.h"
 #include "gamestate/combat/combat_state.h"
 #include "gamestate/api/animation.h"
 #include "gamestate/api/property.h"
@@ -58,6 +61,7 @@
 #include "gamestate/production_math.h"
 #include "gamestate/tech.h"
 #include "gamestate/tech_math.h"
+#include "gamestate/vision/vision_state.h"
 #include "renderer/camera/definitions.h"
 
 
@@ -415,6 +419,35 @@ WaterRule water_rule(const std::shared_ptr<nyan::View> &view, const nyan::fqon_t
 	return rule;
 }
 
+/**
+ * XR fork W5: elevation mode of a building (GenieUnitData.elevation_mode, docs/aoe2-spec 04 §4.2
+ * rule 4), 0 (no check) if the data have none.
+ */
+int elevation_mode(const std::shared_ptr<nyan::View> &view, const nyan::fqon_t &fqon) {
+	static std::mutex mutex;
+	static std::unordered_map<std::string, int> cache;
+	std::lock_guard<std::mutex> lock{mutex};
+	auto it = cache.find(fqon);
+	if (it != cache.end()) {
+		return it->second;
+	}
+	int mode = 0;
+	try {
+		auto obj = view->get_object(fqon);
+		for (const auto &ability_val : obj.get_set("GameEntity.abilities")) {
+			auto ability = view->get_object(object_name(ability_val));
+			if (ability.get_parents()[0] == "engine.xr.ability.GenieUnit") {
+				mode = static_cast<int>(ability.get_int("GenieUnitData.elevation_mode"));
+			}
+		}
+	}
+	catch (std::exception &err) {
+		log::log(INFO << "Production: no elevation mode for " << fqon << " (" << err.what() << "), not checked");
+	}
+	cache.emplace(fqon, mode);
+	return mode;
+}
+
 /// result of a placement check (same rules for the foundation and the ghost)
 struct PlaceCheck {
 	bool ok = false;
@@ -422,7 +455,62 @@ struct PlaceCheck {
 	std::vector<econ::tile_pos> tiles;
 	double ne = 0.0;
 	double se = 0.0;
+	/// XR fork W5: a gate on own wall segments (they are replaced)
+	std::optional<building::GateFit> gate{};
+	std::vector<entity_id_t> replaced{};
 };
+
+/// XR fork W5: own wall segments by tile (gates replace them)
+std::map<std::pair<long, long>, entity_id_t> own_walls(const std::shared_ptr<GameState> &state,
+                                                       player_id_t owner,
+                                                       const time::time_t &now) {
+	std::map<std::pair<long, long>, entity_id_t> walls;
+	for (const auto &[id, entity] : state->get_game_entities()) {
+		if (not building::is_wall_name(entity_name(entity)) or not entity->has_component(component::component_t::OWNERSHIP)
+		    or owner_of(entity, now) != owner or (state->get_combat() and state->get_combat()->is_dead(id))) {
+			continue;
+		}
+		auto p = position_of(entity, now);
+		walls[{static_cast<long>(std::floor(p.ne.to_double())), static_cast<long>(std::floor(p.se.to_double()))}] = id;
+	}
+	return walls;
+}
+
+/**
+ * XR fork W5: a gate goes on a straight line of 4 own wall segments through the cursor tile
+ * (docs/aoe2-spec 04 §4.2 rule 5, §4.4); the segments are replaced when it is placed.
+ */
+PlaceCheck check_gate(const std::shared_ptr<GameState> &state,
+                      player_id_t owner,
+                      const coord::phys3 &ground_hit,
+                      const time::time_t &now) {
+	PlaceCheck result;
+	auto hit = state->get_map()->pick_terrain(ground_hit);
+	const long x = static_cast<long>(std::floor(hit.ne.to_double()));
+	const long y = static_cast<long>(std::floor(hit.se.to_double()));
+	result.ne = x + 0.5;
+	result.se = y + 0.5;
+	result.tiles = {econ::tile_pos{x, y}};
+	auto walls = own_walls(state, owner, now);
+	auto fit = building::gate_fit(static_cast<int>(x), static_cast<int>(y), [&](int tx, int ty) {
+		return walls.contains({tx, ty});
+	});
+	if (not fit) {
+		result.message = "Ein Tor kommt auf eine gerade eigene Mauer (4 Stücke)";
+		return result;
+	}
+	auto [cne, cse] = building::gate_center(*fit);
+	result.ne = cne;
+	result.se = cse;
+	result.tiles.clear();
+	for (const auto &[tx, ty] : building::gate_tiles(fit->anchor.first, fit->anchor.second, fit->dir)) {
+		result.tiles.push_back(econ::tile_pos{tx, ty});
+		result.replaced.push_back(walls.at({tx, ty}));
+	}
+	result.gate = fit;
+	result.ok = true;
+	return result;
+}
 
 /**
  * Check the placement of a building at a clicked ground point: land buildings on free,
@@ -434,6 +522,9 @@ PlaceCheck check_place(const std::shared_ptr<GameState> &state,
                        const BuilderComp::Buildable &buildable,
                        const coord::phys3 &ground_hit,
                        const time::time_t &now) {
+	if (building::is_gate_name(buildable.name)) {
+		return check_gate(state, owner_of(builder, now), ground_hit, now);
+	}
 	PlaceCheck result;
 	auto map = state->get_map();
 	auto hit = map->pick_terrain(ground_hit);
@@ -521,7 +612,134 @@ PlaceCheck check_place(const std::shared_ptr<GameState> &state,
 	});
 	result.ok = check == placement_t::OK;
 	result.message = placement_message(check);
+	if (check == placement_t::OUTSIDE or check == placement_t::WATER) {
+		return result;
+	}
+	// XR fork W5 (docs/aoe2-spec 04 §4.2 rule 3): at least one tile explored by the player
+	const double r = 0.5 * static_cast<double>(footprint_side(buildable.radius)) - 0.25;
+	if (auto vision = state->get_vision();
+	    vision and vision->footprint_state(owner_of(builder, now), ane, ase, r) == vision::tile_state_t::UNEXPLORED) {
+		result.ok = false;
+		result.message = "Hier kann nicht gebaut werden (unerkundet)";
+		return result;
+	}
+	// rule 4: elevation after the elevation mode of the data
+	if (const int mode = elevation_mode(state->get_db_view(), buildable.fqon); mode != 0) {
+		const auto &heights = map->get_heightmap();
+		std::vector<building::corners_t> corners;
+		size_t reference = 0;
+		double best = std::numeric_limits<double>::max();
+		for (const auto &t : result.tiles) {
+			corners.push_back({heights.corner(t.ne, t.se), heights.corner(t.ne + 1, t.se), heights.corner(t.ne, t.se + 1),
+			                   heights.corner(t.ne + 1, t.se + 1)});
+			const double d = std::hypot(t.ne + 0.5 - ane, t.se + 0.5 - ase);
+			if (d < best) {
+				best = d;
+				reference = corners.size() - 1;
+			}
+		}
+		if (not building::elevation_ok(mode, corners, reference)) {
+			result.ok = false;
+			result.message = "Hier kann nicht gebaut werden (zu steil)";
+		}
+	}
 	return result;
+}
+
+/// XR fork W5: one segment of a wall drag
+struct WallSegment {
+	double ne = 0.0;
+	double se = 0.0;
+	bool ok = false;
+	std::string message;
+};
+
+/**
+ * XR fork W5: segments of a wall drag from the tile under \p start to the tile under \p end
+ * (building_math.h wall_line, decision L31), each checked like a single foundation.
+ */
+std::vector<WallSegment> wall_segments(const std::shared_ptr<GameState> &state,
+                                       const std::shared_ptr<GameEntity> &builder,
+                                       const BuilderComp::Buildable &buildable,
+                                       const coord::phys3 &start,
+                                       const coord::phys3 &end,
+                                       const time::time_t &now) {
+	auto map = state->get_map();
+	auto a = map->pick_terrain(start);
+	auto b = map->pick_terrain(end);
+	std::vector<WallSegment> out;
+	for (const auto &[x, y] : building::wall_line(static_cast<int>(std::floor(a.ne.to_double())),
+	                                              static_cast<int>(std::floor(a.se.to_double())),
+	                                              static_cast<int>(std::floor(b.ne.to_double())),
+	                                              static_cast<int>(std::floor(b.se.to_double())))) {
+		WallSegment segment;
+		segment.ne = x + 0.5;
+		segment.se = y + 0.5;
+		auto place = check_place(state, builder, buildable,
+		                         coord::phys3{coord::phys_t{segment.ne}, coord::phys_t{segment.se}, coord::phys_t{0.0}},
+		                         now);
+		segment.ok = place.ok;
+		segment.message = place.message;
+		out.push_back(segment);
+	}
+	return out;
+}
+
+/**
+ * A foundation of \p owner at \p anchor (XR fork): progress 0, health 1, no drop site until it is
+ * finished, its tiles blocked (fields: the farm ground instead, W3).
+ */
+std::shared_ptr<GameEntity> create_foundation(const std::shared_ptr<GameState> &state,
+                                              const std::shared_ptr<openage::event::EventLoop> &loop,
+                                              const std::shared_ptr<EntityFactory> &factory,
+                                              const BuilderComp::Buildable &buildable,
+                                              player_id_t owner,
+                                              const coord::phys3 &anchor,
+                                              const std::vector<econ::tile_pos> &tiles,
+                                              const time::time_t &now) {
+	auto map = state->get_map();
+	auto building = factory->add_game_entity(loop, state, owner, buildable.fqon);
+	auto building_pos = std::dynamic_pointer_cast<component::Position>(
+		building->get_component(component::component_t::POSITION));
+	building_pos->set_position(now, map->on_terrain(anchor));
+	building_pos->set_angle(now, coord::phys_angle_t::from_int(315));
+	auto building_owner = std::dynamic_pointer_cast<component::Ownership>(
+		building->get_component(component::component_t::OWNERSHIP));
+	building_owner->set_owner(now, owner);
+	auto activity = std::dynamic_pointer_cast<component::Activity>(
+		building->get_component(component::component_t::ACTIVITY));
+	activity->init(now);
+	building->get_manager()->run_activity_system(now);
+	state->add_game_entity(building);
+
+	auto constructable = component_of<ConstructableComp>(building, component::component_t::CONSTRUCTABLE);
+	if (constructable == nullptr) {
+		// no construction in the data: complete at once
+		log::log(WARN << "Production: " << buildable.name << " has no Constructable, placed complete");
+	}
+	else {
+		constructable->start_foundation(buildable.time);
+		update_building_health(state, building, -1.0, now);
+		if (building->has_component(component::component_t::DROP_SITE)) {
+			constructable->pending_drop_site = building->get_component(component::component_t::DROP_SITE);
+			building->remove_component(component::component_t::DROP_SITE);
+		}
+		if (not constructable->construct_animation.empty()) {
+			building->render_update(now, constructable->construct_animation);
+		}
+	}
+	if (is_field_name(buildable.name)) {
+		// XR fork W3: farms and traps do not block their tiles; the ground shows the farm
+		if (auto food_state = state->get_food()) {
+			food_state->field_placed(state, building, now);
+		}
+	}
+	else {
+		for (const auto &t : tiles) {
+			map->block_tile(coord::tile{t.ne, t.se}, now);
+		}
+	}
+	return building;
 }
 
 /// XR fork W3: the player has a finished mill (farms are offered only then, docs/aoe2-spec 13)
@@ -966,8 +1184,55 @@ bool can_build(const std::shared_ptr<GameEntity> &builder,
 		return false;
 	}
 	auto constructable = component_of<ConstructableComp>(foundation, component::component_t::CONSTRUCTABLE);
-	return constructable != nullptr and not constructable->is_complete()
-	       and owner_of(builder, time) == owner_of(foundation, time);
+	if (constructable == nullptr or owner_of(builder, time) != owner_of(foundation, time)) {
+		return false;
+	}
+	// XR fork W5: own (allied: no alliances yet) damaged buildings are repaired (spec 04 §4.5)
+	return not constructable->is_complete() or is_damaged(nullptr, foundation, time);
+}
+
+bool is_damaged(const std::shared_ptr<GameState> &state,
+                const std::shared_ptr<GameEntity> &building,
+                const time::time_t &time) {
+	auto constructable = component_of<ConstructableComp>(building, component::component_t::CONSTRUCTABLE);
+	if (constructable == nullptr or not constructable->is_complete() or constructable->max_health <= 0) {
+		return false;
+	}
+	if (state != nullptr and state->get_combat() and state->get_combat()->is_dead(building->get_id())) {
+		return false;
+	}
+	const auto health = health_of(building, *constructable, time);
+	return health >= 0 and gamestate::building::can_repair(static_cast<double>(health))
+	       and health < constructable->max_health;
+}
+
+std::optional<entity_id_t> pick_repairable(const std::shared_ptr<GameState> &state,
+                                           const coord::phys3 &ground_hit,
+                                           player_id_t player,
+                                           const time::time_t &time) {
+	auto origin_w = ground_hit.to_scene3().to_world_space();
+	const auto &dir_w = renderer::camera::CAM_DIRECTION;
+	const econ::vec3 origin{origin_w.x(), origin_w.y(), origin_w.z()};
+	const econ::vec3 dir{dir_w.x(), dir_w.y(), dir_w.z()};
+
+	std::optional<entity_id_t> best;
+	double best_distance = std::numeric_limits<double>::max();
+	for (const auto &[id, entity] : state->get_game_entities()) {
+		auto constructable = component_of<ConstructableComp>(entity, component::component_t::CONSTRUCTABLE);
+		if (constructable == nullptr or not entity->has_component(component::component_t::OWNERSHIP)
+		    or owner_of(entity, time) != player or not is_damaged(state, entity, time)) {
+			continue;
+		}
+		auto base_w = position_of(entity, time).to_scene3().to_world_space();
+		const econ::vec3 base{base_w.x(), base_w.y(), base_w.z()};
+		const econ::vec3 tip{base_w.x(), base_w.y() + 0.5, base_w.z()};
+		auto distance = econ::line_segment_distance(origin, dir, base, tip);
+		if (distance <= constructable->radius + 0.3 and distance < best_distance) {
+			best = id;
+			best_distance = distance;
+		}
+	}
+	return best;
 }
 
 void complete_building(const std::shared_ptr<GameEntity> &building,
@@ -1198,7 +1463,12 @@ bool Production::start_placement(const std::string &id) {
 		return not this->placement.empty();
 	}
 	this->placement = chosen->id;
-	this->set_status_locked(chosen->label + " platzieren (Klick setzt, Rechtsklick/Esc bricht ab)", status_t::info);
+	this->wall_start.reset();
+	// XR fork W5 (docs/aoe2-spec 13 L31): walls are dragged
+	this->set_status_locked(gamestate::building::is_wall_name(chosen->id)
+	                            ? chosen->label + ": klicken und zur Stelle ziehen, an der der Wall errichtet werden soll"
+	                            : chosen->label + " platzieren (Klick setzt, Rechtsklick/Esc bricht ab)",
+	                        status_t::info);
 	log::log(INFO << "Production: placement mode " << chosen->id);
 	return true;
 }
@@ -1210,6 +1480,7 @@ void Production::cancel_placement() {
 	}
 	log::log(INFO << "Production: placement of " << this->placement << " cancelled");
 	this->placement.clear();
+	this->wall_start.reset();
 	this->set_status_locked("Bauen abgebrochen", status_t::info);
 }
 
@@ -1227,10 +1498,57 @@ bool Production::place_at(const coord::phys3 &ground_hit) {
 	request.kind = Request::kind_t::PLACE;
 	request.id = this->placement;
 	request.pos = ground_hit;
+	// XR fork W5: release of a wall drag; a plain click on a wall places one segment
+	if (gamestate::building::is_wall_name(this->placement)) {
+		request.kind = Request::kind_t::PLACE_WALL;
+		request.start = this->wall_start.value_or(ground_hit);
+	}
+	this->wall_start.reset();
 	this->requests.push_back(std::move(request));
 	this->placement.clear();
 	this->dirty = true;
 	return true;
+}
+
+bool Production::placement_press(const coord::phys3 &ground_hit) {
+	std::lock_guard<std::mutex> lock{this->mutex};
+	if (this->placement.empty() or not gamestate::building::is_wall_name(this->placement)) {
+		return false;
+	}
+	this->wall_start = ground_hit;
+	this->preview_dirty = true;
+	log::log(INFO << "Production: wall drag of " << this->placement << " starts at tile (" << ground_hit.ne.to_double()
+	              << ", " << ground_hit.se.to_double() << ")");
+	return true;
+}
+
+bool Production::placement_is_wall() const {
+	std::lock_guard<std::mutex> lock{this->mutex};
+	return gamestate::building::is_wall_name(this->placement);
+}
+
+void Production::place_wall(const std::string &id, const coord::phys3 &start, const coord::phys3 &end) {
+	Request request;
+	request.kind = Request::kind_t::PLACE_WALL;
+	request.id = id;
+	request.start = start;
+	request.pos = end;
+	this->push(std::move(request));
+}
+
+void Production::place_wall_for(player_id_t player,
+                                const std::vector<entity_id_t> &builders,
+                                const std::string &id,
+                                const coord::phys3 &start,
+                                const coord::phys3 &end) {
+	Request request;
+	request.kind = Request::kind_t::PLACE_WALL;
+	request.id = id;
+	request.start = start;
+	request.pos = end;
+	request.for_player = player;
+	request.builders = builders;
+	this->push(std::move(request));
 }
 
 void Production::place(const std::string &id, const coord::phys3 &ground_hit) {
@@ -1455,6 +1773,15 @@ void Production::update(const std::shared_ptr<GameState> &state,
 	}
 
 	auto population = count_population(state, now);
+
+	// XR fork W5: messages of the build system (a repair stops) for the HUD player
+	if (auto buildings = state->get_buildings()) {
+		for (const auto &message : buildings->take_messages()) {
+			if (message.player == player_id) {
+				this->set_status(message.text, message.warn ? status_t::warn : status_t::info);
+			}
+		}
+	}
 
 	// XR fork W1: technologies, ages, civilisations of the players
 	auto techs = state->get_tech();
@@ -1834,7 +2161,8 @@ void Production::update(const std::shared_ptr<GameState> &state,
 			}
 		} break;
 
-		case Request::kind_t::PLACE: {
+		case Request::kind_t::PLACE:
+		case Request::kind_t::PLACE_WALL: {
 			std::vector<std::shared_ptr<GameEntity>> builders;
 			const BuilderComp::Buildable *buildable = nullptr;
 			// ai (XR fork): builders of a computer opponent instead of the HUD selection
@@ -1878,7 +2206,80 @@ void Production::update(const std::shared_ptr<GameState> &state,
 				status("Farm: zuerst eine Mühle bauen", status_t::warn);
 				break;
 			}
-			auto map = state->get_map();
+			if (request.kind == Request::kind_t::PLACE_WALL) {
+				// XR fork W5: wall drag (docs/aoe2-spec 04 §4.4, 13 L31): segments along the tile line, each
+				// checked by itself, invalid ones skipped, costs per placed segment
+				auto line = wall_segments(state, builders.front(), *buildable, request.start, request.pos, now);
+				const auto owner = owner_of(builders.front(), now);
+				auto &stock = state->get_player(owner)->get_resources();
+				std::vector<entity_id_t> placed;
+				size_t skipped = 0;
+				std::string poor;
+				for (const auto &segment : line) {
+					if (not segment.ok) {
+						skipped += 1;
+						continue;
+					}
+					// a segment before may have taken the tile (crossing lines): check again
+					auto place = check_place(state, builders.front(), *buildable,
+					                         coord::phys3{coord::phys_t{segment.ne}, coord::phys_t{segment.se},
+					                                      coord::phys_t{0.0}},
+					                         now);
+					if (not place.ok) {
+						skipped += 1;
+						continue;
+					}
+					if (not poor.empty() or not stock.spend(buildable->cost)) {
+						if (poor.empty()) {
+							auto missing = missing_resource(stock.get(), buildable->cost);
+							poor = missing ? missing_message(*missing) : "Nicht genug Rohstoffe";
+						}
+						skipped += 1;
+						continue;
+					}
+					coord::phys3 anchor{coord::phys_t{place.ne}, coord::phys_t{place.se}, coord::phys_t{0.0}};
+					auto building = create_foundation(state, loop, factory, *buildable, owner, anchor, place.tiles, now);
+					this->foundations.insert(building->get_id());
+					placed.push_back(building->get_id());
+				}
+				if (placed.empty()) {
+					status(not poor.empty()                    ? poor
+					       : line.empty() or line[0].message.empty() ? std::string{"Hier kann nicht gebaut werden"}
+					                                               : line[0].message,
+					       status_t::warn);
+					log::log(INFO << "Production: wall " << buildable->name << " of player " << owner << ": no segment placed ("
+					              << line.size() << " tiles)");
+					break;
+				}
+				// every builder works through the segments, nearest first (spec 04 §4.4)
+				std::vector<std::pair<double, double>> centres;
+				for (auto id : placed) {
+					auto p = position_of(find_entity(state, id), now);
+					centres.emplace_back(p.ne.to_double(), p.se.to_double());
+				}
+				for (const auto &builder : builders) {
+					auto bp = position_of(builder, now);
+					auto first = building::nearest_segment(bp.ne.to_double(), bp.se.to_double(), centres).value_or(0);
+					component_of<BuilderComp>(builder, component::component_t::BUILDER)->wall_queue = placed;
+					auto queue = std::dynamic_pointer_cast<component::CommandQueue>(
+						builder->get_component(component::component_t::COMMANDQUEUE));
+					queue->add_command(now, std::make_shared<component::command::BuildCommand>(placed[first]));
+				}
+				log::log(INFO << "Production: player " << owner << " places a wall of " << placed.size() << " "
+				              << buildable->name << " segments (" << skipped << " skipped, " << line.size()
+				              << " tiles), " << builders.size() << " builders, " << cost_str(buildable->cost)
+				              << " each");
+				std::string text = label_of(buildable->name) + ": " + std::to_string(placed.size())
+				                   + (placed.size() == 1 ? " Stück" : " Stücke") + " gesetzt";
+				if (skipped > 0) {
+					text += ", " + std::to_string(skipped) + " ausgelassen";
+				}
+				if (not poor.empty()) {
+					text += " (" + poor + ")";
+				}
+				status(text, status_t::info);
+				break;
+			}
 			auto place = check_place(state, builders.front(), *buildable, request.pos, now);
 			const auto &tiles = place.tiles;
 			coord::phys3 anchor{coord::phys_t{place.ne}, coord::phys_t{place.se}, coord::phys_t{0.0}};
@@ -1897,48 +2298,24 @@ void Production::update(const std::shared_ptr<GameState> &state,
 				break;
 			}
 
-			// foundation
-			auto building = factory->add_game_entity(loop, state, owner, buildable->fqon);
-			auto building_pos = std::dynamic_pointer_cast<component::Position>(
-				building->get_component(component::component_t::POSITION));
-			building_pos->set_position(now, map->on_terrain(anchor));
-			building_pos->set_angle(now, coord::phys_angle_t::from_int(315));
-			auto building_owner = std::dynamic_pointer_cast<component::Ownership>(
-				building->get_component(component::component_t::OWNERSHIP));
-			building_owner->set_owner(now, owner);
-			auto activity = std::dynamic_pointer_cast<component::Activity>(
-				building->get_component(component::component_t::ACTIVITY));
-			activity->init(now);
-			building->get_manager()->run_activity_system(now);
-			state->add_game_entity(building);
-
-			auto constructable = component_of<ConstructableComp>(building, component::component_t::CONSTRUCTABLE);
-			if (constructable == nullptr) {
-				// no construction in the data: complete at once
-				log::log(WARN << "Production: " << buildable->name << " has no Constructable, placed complete");
+			// XR fork W5: a gate replaces the wall segments under it (docs/aoe2-spec 04 §4.2 rule 5)
+			if (place.gate and state->get_combat()) {
+				for (auto id : place.replaced) {
+					state->get_combat()->remove(state, id, now);
+					this->foundations.erase(id);
+				}
 			}
-			else {
-				constructable->start_foundation(buildable->time);
-				update_building_health(state, building, -1.0, now);
-				if (building->has_component(component::component_t::DROP_SITE)) {
-					constructable->pending_drop_site = building->get_component(component::component_t::DROP_SITE);
-					building->remove_component(component::component_t::DROP_SITE);
-				}
-				if (not constructable->construct_animation.empty()) {
-					building->render_update(now, constructable->construct_animation);
-				}
+			// foundation
+			auto building = create_foundation(state, loop, factory, *buildable, owner, anchor, tiles, now);
+			if (component_of<ConstructableComp>(building, component::component_t::CONSTRUCTABLE)) {
 				this->foundations.insert(building->get_id());
 			}
-			if (is_field_name(buildable->name)) {
-				// XR fork W3: farms and traps do not block their tiles; the ground shows the farm
-				if (auto food_state = state->get_food()) {
-					food_state->field_placed(state, building, now);
-				}
-			}
-			else {
-				for (const auto &t : tiles) {
-					map->block_tile(coord::tile{t.ne, t.se}, now);
-				}
+			if (place.gate and state->get_buildings()) {
+				gamestate::building::Gate gate;
+				gate.owner = owner;
+				gate.dir = place.gate->dir;
+				gate.anchor = place.gate->anchor;
+				state->get_buildings()->add_gate(building->get_id(), gate);
 			}
 
 			// the selected villagers start building
@@ -2358,6 +2735,7 @@ PlacementPreview Production::placement_preview() const {
 void Production::update_placement_preview(const std::shared_ptr<GameState> &state, const time::time_t &now) {
 	std::string id;
 	std::optional<coord::phys3> cursor;
+	std::optional<coord::phys3> drag_start;
 	std::vector<entity_id_t> selected;
 	player_id_t player_id;
 	bool dirty;
@@ -2365,6 +2743,7 @@ void Production::update_placement_preview(const std::shared_ptr<GameState> &stat
 		std::lock_guard<std::mutex> lock{this->mutex};
 		id = this->placement;
 		cursor = this->preview_cursor;
+		drag_start = this->wall_start;
 		selected = this->selection;
 		player_id = this->player;
 		dirty = this->preview_dirty;
@@ -2451,6 +2830,20 @@ void Production::update_placement_preview(const std::shared_ptr<GameState> &stat
 	result.reason = result.valid ? std::string{} : place.message;
 	// XR fork W3 (spec 13): buildings without an own picture (farm, trap) show only a white outline
 	result.outline_only = is_field_name(buildable->name);
+	// XR fork W5: a gate sits on the wall line, not on the grid of its square
+	result.fixed_anchor = place.gate.has_value() or gamestate::building::is_gate_name(buildable->name);
+	// XR fork W5 (spec 13 L31): wall drag – every segment from the start to the cursor with its own colour
+	if (drag_start and gamestate::building::is_wall_name(buildable->name)) {
+		constexpr size_t MAX_PREVIEW_SEGMENTS = 96;
+		for (const auto &segment : wall_segments(state, builder_entity, *buildable, *drag_start, *cursor, now)) {
+			if (result.segments.size() >= MAX_PREVIEW_SEGMENTS) {
+				break;
+			}
+			auto ground = map->on_terrain(coord::phys3{coord::phys_t{segment.ne}, coord::phys_t{segment.se}, coord::phys_t{0.0}});
+			result.segments.push_back({segment.ne, segment.se, ground.up.to_double(), segment.ok});
+		}
+		result.valid = std::any_of(result.segments.begin(), result.segments.end(), [](const auto &s) { return s.valid; });
+	}
 
 	std::lock_guard<std::mutex> lock{this->mutex};
 	if (this->placement == id) {

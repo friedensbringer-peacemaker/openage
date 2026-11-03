@@ -28,6 +28,7 @@
 #include "gamestate/component/internal/position.h"
 #include "gamestate/component/types.h"
 #include "gamestate/entity_factory.h"
+#include "gamestate/buildings.h"
 #include "gamestate/food.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
@@ -79,6 +80,8 @@ Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 
 	// XR fork: auto attacks and the victory condition (gamestate/combat)
 	this->state->get_combat()->start(this->state, start_time);
+	// XR fork W5: gates (footprint hook of the combat state)
+	this->state->get_buildings()->start(this->state);
 
 	if (map_settings.type == map_type_t::RANDOM
 	    and this->generate_random_map(event_loop, entity_factory, terrain_factory, map_settings, start_time)) {

@@ -47,6 +47,12 @@ enum class command_t {
 	KILL,
 	/// town centers: town bell on ("combat_arg" = 1) or back to work (0)
 	BELL,
+
+	// XR fork W5 (docs/aoe2-spec 04 §4.4/4.5), handled in event/send_command.cpp
+	/// villagers repair the own damaged building under the cursor
+	REPAIR,
+	/// gates: lock ("combat_arg" = 1) or unlock (0)
+	GATE_LOCK,
 };
 
 } // namespace openage::gamestate::component::command

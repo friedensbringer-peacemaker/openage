@@ -21,6 +21,11 @@
  *   passage for own/ally units, locked gates block everyone (L32)
  * - garrison ejection below 20 % HP, only for finished buildings (spec 04 §4.6)
  * - wall costs: only valid segments count, cost = segments x segment cost
+ * - placement (gamestate/building_place.h): elevation modes 0/1/2/3 on flat
+ *   and sloped footprints, gate fit on straight walls in all four directions
+ *   (anchor, centre and anchor back), no gate on bent or short walls, nearest
+ *   wall segment, follow-up after building (L33), repair costs carried over
+ *   steps sum up to the formula
  * Exit code 0 if all checks pass. No dependencies besides the standard library.
  */
 
@@ -33,6 +38,7 @@
 #include <vector>
 
 #include "gamestate/building_math.h"
+#include "gamestate/building_place.h"
 
 using namespace openage::gamestate;
 using namespace openage::gamestate::building;
@@ -209,6 +215,111 @@ void check_wall_costs() {
 	check(wall_cost({0, 0, 0}, 5.0) == 0.0, "invalid wall is free (nothing placed)");
 }
 
+void check_placement() {
+	auto flat = [](double h) { return corners_t{h, h, h, h}; };
+	const std::vector<corners_t> plain(9, flat(0.0));
+	for (int mode = 0; mode <= 3; ++mode) {
+		check(elevation_ok(mode, plain, 4), "flat footprint ok in mode " + std::to_string(mode));
+	}
+	// a slope of 0.1 per corner: too steep for mode 2 (0.4 in total)
+	std::vector<corners_t> slope;
+	for (int i = 0; i < 4; ++i) {
+		const double h = 0.1 * i;
+		slope.push_back(corners_t{h, h + 0.1, h, h + 0.1});
+	}
+	check(not elevation_ok(2, slope, 0), "mode 2 rejects a slope of 0.4");
+	check(elevation_ok(3, slope, 0), "mode 3 accepts a gentle slope");
+	check(elevation_ok(0, slope, 0), "mode 0 never checks");
+	// sweep: one tile raised by d levels
+	for (int step = 0; step <= 30; ++step) {
+		const double d = 0.1 * step;
+		std::vector<corners_t> bump(9, flat(0.0));
+		bump[8] = flat(d);
+		const std::string at = std::to_string(d);
+		check(elevation_ok(3, bump, 4) == (d <= LEVEL_STEP + 1e-9), "mode 3 bump of " + at);
+		check(elevation_ok(1, bump, 4) == (d <= LEVEL_STEP + 1e-9), "mode 1 like mode 3, bump of " + at);
+		check(elevation_ok(2, bump, 4) == (d <= FLAT_TOLERANCE + 1e-9), "mode 2 bump of " + at);
+		check(elevation_ok(0, bump, 4), "mode 0 bump of " + at);
+	}
+
+	// gates on straight walls in every direction, cursor on each tile of the wall
+	const std::vector<gate_dir_t> dirs{gate_dir_t::EAST_WEST, gate_dir_t::NORTH_SOUTH, gate_dir_t::NW_SE,
+	                                   gate_dir_t::NE_SW};
+	for (auto dir : dirs) {
+		const auto unit = gate_tiles(0, 0, dir);
+		std::set<std::pair<int, int>> wall;
+		for (int i = -3; i <= 8; ++i) {
+			wall.insert({20 + i * unit[1].first, 20 + i * unit[1].second});
+		}
+		auto is_wall = [&](int x, int y) { return wall.contains({x, y}); };
+		for (int i = -3; i <= 8; ++i) {
+			const int cx = 20 + i * unit[1].first;
+			const int cy = 20 + i * unit[1].second;
+			auto fit = gate_fit(cx, cy, is_wall);
+			bool ok = fit.has_value() and fit->dir == dir;
+			if (ok) {
+				bool covers = false;
+				for (const auto &t : gate_tiles(fit->anchor.first, fit->anchor.second, fit->dir)) {
+					ok = ok and is_wall(t.first, t.second);
+					covers = covers or t == tile_t{cx, cy};
+				}
+				ok = ok and covers;
+				auto [ne, se] = gate_center(*fit);
+				ok = ok and gate_anchor(ne, se, fit->dir) == fit->anchor;
+			}
+			check(ok, "gate fits on a straight wall, direction " + std::to_string(static_cast<int>(dir)) + ", tile "
+			              + std::to_string(i));
+		}
+	}
+	{
+		// inner positions preferred: the cursor tile becomes the second gate tile
+		std::set<std::pair<int, int>> wall{{0, 5}, {1, 5}, {2, 5}, {3, 5}, {4, 5}, {5, 5}};
+		auto fit = gate_fit(2, 5, [&](int x, int y) { return wall.contains({x, y}); });
+		check(fit and fit->anchor == tile_t{1, 5}, "cursor tile is the second gate tile");
+		// bent wall: 2 tiles east, then 2 south: no straight run of 4
+		std::set<std::pair<int, int>> bent{{0, 0}, {1, 0}, {2, 0}, {2, 1}, {2, 2}};
+		check(not gate_fit(1, 0, [&](int x, int y) { return bent.contains({x, y}); }), "no gate on a bent wall");
+		std::set<std::pair<int, int>> short_wall{{0, 0}, {1, 0}, {2, 0}};
+		check(not gate_fit(1, 0, [&](int x, int y) { return short_wall.contains({x, y}); }), "no gate on 3 tiles");
+		check(not gate_fit(1, 0, [](int, int) { return false; }), "no gate without a wall");
+	}
+
+	// nearest segment
+	const std::vector<std::pair<double, double>> open{{5.5, 5.5}, {6.5, 5.5}, {7.5, 5.5}};
+	check(nearest_segment(8.0, 5.0, open) == std::optional<size_t>{2}, "nearest segment is the closest");
+	check(nearest_segment(0.0, 0.0, open) == std::optional<size_t>{0}, "nearest segment from the other side");
+	check(nearest_segment(6.0, 5.5, open) == std::optional<size_t>{0}, "tie keeps the line order");
+	check(not nearest_segment(0.0, 0.0, {}), "no open segment");
+
+	// follow-up (L33)
+	check(follow_up(true, {true, false, false, false}) == follow_t::FARM, "farm builder farms");
+	check(follow_up(false, {false, true, false, false}) == follow_t::GATHER, "lumber camp builder cuts wood");
+	check(follow_up(false, {false, false, true, true}) == follow_t::GATHER, "mining camp builder mines");
+	check(follow_up(false, {true, false, false, false}) == follow_t::SEARCH, "mill builder searches");
+	check(follow_up(false, {true, true, true, true}) == follow_t::SEARCH, "town centre builder searches");
+	check(follow_up(false, {false, false, false, false}) == follow_t::SEARCH, "house builder searches");
+
+	// repair costs over many steps: the whole units sum up to the formula
+	for (int steps = 1; steps <= 50; steps += 7) {
+		std::array<double, 4> owed{};
+		std::array<double, 4> paid{};
+		const std::array<double, 4> cost{0.0, 275.0, 0.0, 100.0};
+		const double hp_max = 2400.0;
+		const double hp_step = hp_max / steps;
+		bool whole = true;
+		for (int i = 0; i < steps; ++i) {
+			auto due = repair_due(owed, cost, hp_step, hp_max);
+			for (size_t r = 0; r < 4; ++r) {
+				paid[r] += due[r];
+				whole = whole and due[r] == std::floor(due[r]);
+			}
+		}
+		check(whole, "repair costs are whole units, " + std::to_string(steps) + " steps");
+		check(std::abs(paid[1] + owed[1] - 137.5) < 1e-6 and std::abs(paid[3] + owed[3] - 50.0) < 1e-6,
+		      "full repair costs half the build price, " + std::to_string(steps) + " steps");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -218,6 +329,7 @@ int main() {
 	check_gates();
 	check_eject();
 	check_wall_costs();
+	check_placement();
 	if (failures > 0) {
 		std::cout << "building check: " << checks << " checks, " << failures << " failures" << std::endl;
 		return EXIT_FAILURE;

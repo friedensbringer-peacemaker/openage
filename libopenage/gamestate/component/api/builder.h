@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -50,6 +51,8 @@ public:
 		TO_SITE,
 		/// building (one step at a time)
 		BUILDING,
+		/// XR fork W5: after a building was finished, looking for a foundation nearby (spec 04 §4.3, L33)
+		SEARCH,
 	};
 
 	struct Job {
@@ -60,6 +63,13 @@ public:
 		double step = 0.0;
 		/// failed walks in a row
 		int failed_walks = 0;
+		/// XR fork W5: repair a finished building instead of constructing it (spec 04 §4.5)
+		bool repair = false;
+		/// XR fork W5: HP repaired but not yet added (whole HP are applied) and costs owed
+		double repair_hp = 0.0;
+		std::array<double, 4> repair_owed{};
+		/// XR fork W5: end of the search for a foundation (simulation seconds)
+		double search_until = 0.0;
 	};
 
 	Builder(const std::shared_ptr<openage::event::EventLoop> &loop,
@@ -83,6 +93,10 @@ public:
 
 	/// time of the last INFO log of this unit (throttling)
 	time::time_t last_log{time::TIME_MIN};
+
+	/// XR fork W5: wall foundations of a drag that this unit builds one after the other, nearest
+	/// first (spec 04 §4.4); a build order for another foundation clears it
+	std::vector<entity_id_t> wall_queue{};
 
 private:
 	std::vector<Buildable> buildables;

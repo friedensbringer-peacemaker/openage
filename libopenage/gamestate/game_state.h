@@ -44,6 +44,10 @@ namespace food {
 class FoodState;
 }
 
+namespace building {
+class BuildingState;
+}
+
 /**
  * State of the game.
  *
@@ -103,6 +107,11 @@ public:
 	 * Food economy of the game (XR fork W3): herdables, hunting, carcasses, farms, reseeding.
 	 */
 	const std::shared_ptr<food::FoodState> &get_food() const;
+
+	/**
+	 * Buildings of round W5 (XR fork): gates, build speed, messages of the build system.
+	 */
+	const std::shared_ptr<building::BuildingState> &get_buildings() const;
 
 	/**
 	 * Add a new player to the index.
@@ -207,6 +216,11 @@ private:
 	 * Food economy (XR fork W3).
 	 */
 	std::shared_ptr<food::FoodState> food;
+
+	/**
+	 * Buildings (XR fork W5).
+	 */
+	std::shared_ptr<building::BuildingState> buildings;
 };
 } // namespace gamestate
 } // namespace openage

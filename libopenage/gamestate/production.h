@@ -60,11 +60,26 @@ std::optional<entity_id_t> pick_foundation(const std::shared_ptr<GameState> &sta
                                            const time::time_t &time);
 
 /**
- * Check if a game entity can work on a foundation.
+ * Check if a game entity can work on a foundation (XR fork W5: or repair a damaged
+ * finished building of its owner, docs/aoe2-spec 04 §4.5).
  */
 bool can_build(const std::shared_ptr<GameEntity> &builder,
                const std::shared_ptr<GameEntity> &foundation,
                const time::time_t &time);
+
+/**
+ * XR fork W5: a damaged finished building of \p player under the cursor (repair target), like
+ * pick_foundation().
+ */
+std::optional<entity_id_t> pick_repairable(const std::shared_ptr<GameState> &state,
+                                           const coord::phys3 &ground_hit,
+                                           player_id_t player,
+                                           const time::time_t &time);
+
+/// XR fork W5: a finished building of a player is damaged and alive (repair possible)
+bool is_damaged(const std::shared_ptr<GameState> &state,
+                const std::shared_ptr<GameEntity> &building,
+                const time::time_t &time);
 
 /**
  * A building is complete: its drop site works, it shows its idle animation.
@@ -294,6 +309,20 @@ struct PlacementPreview {
 	/// XR fork W3 (docs/aoe2-spec 13): no picture of its own (farm, fishing trap): only a white
 	/// diamond outline of the footprint, red where it cannot be placed
 	bool outline_only = false;
+
+	/// XR fork W5: the anchor is not on the grid of the footprint (gates: centre of 4 tiles on a wall),
+	/// the presenter draws the ghost at the anchor of the simulation
+	bool fixed_anchor = false;
+
+	/// XR fork W5 (docs/aoe2-spec 13 L31): segments of a wall drag (button held), each with its own
+	/// colour; empty while not dragging
+	struct Segment {
+		double ne = 0.0;
+		double se = 0.0;
+		double up = 0.0;
+		bool valid = false;
+	};
+	std::vector<Segment> segments{};
 };
 
 /**
@@ -378,6 +407,21 @@ public:
 	/// place a building directly (scripts, tests)
 	void place(const std::string &id, const coord::phys3 &ground_hit);
 
+	/**
+	 * XR fork W5: the button went down in the placement mode (VR beam: trigger, desktop: left
+	 * button). For walls this starts the drag (docs/aoe2-spec 13 L31): the preview shows the
+	 * segments from here to the cursor, place_at() at the release places them all.
+	 *
+	 * @return true if a wall drag started.
+	 */
+	bool placement_press(const coord::phys3 &ground_hit);
+
+	/// XR fork W5: place a wall drag of the selection directly (scripts, tests)
+	void place_wall(const std::string &id, const coord::phys3 &start, const coord::phys3 &end);
+
+	/// the building of the placement mode is a wall (drag) – any thread
+	bool placement_is_wall() const;
+
 	// ---- ai (XR fork): requests of a computer opponent, independent of the HUD
 	// player and its selection; they never change the HUD status message
 
@@ -410,6 +454,13 @@ public:
 	               const std::vector<entity_id_t> &builders,
 	               const std::string &id,
 	               const coord::phys3 &ground_hit);
+
+	/// XR fork W5: a wall drag of \p player from \p start to \p end, built by \p builders
+	void place_wall_for(player_id_t player,
+	                    const std::vector<entity_id_t> &builders,
+	                    const std::string &id,
+	                    const coord::phys3 &start,
+	                    const coord::phys3 &end);
 	// ---- end ai (XR fork)
 
 	// --- simulation thread ---
@@ -435,6 +486,8 @@ private:
 	void update_placement_preview(const std::shared_ptr<GameState> &state, const time::time_t &now);
 
 	std::optional<coord::phys3> preview_cursor{};
+	/// XR fork W5: ground point where the wall drag started (button held)
+	std::optional<coord::phys3> wall_start{};
 	bool preview_dirty = false;
 	PlacementPreview preview{};
 	// simulation thread only
@@ -455,12 +508,16 @@ private:
 			/// XR fork W3 test options (replays): resources, a finished entity at a tile
 			TEST_RESOURCES,
 			TEST_SPAWN,
+			/// XR fork W5: wall drag from start to pos
+			PLACE_WALL,
 		};
 		kind_t kind = kind_t::TRAIN;
 		std::string id;
 		entity_id_t building = 0;
 		size_t index = 0;
 		coord::phys3 pos{0, 0, 0};
+		/// XR fork W5: start of a wall drag
+		coord::phys3 start{0, 0, 0};
 		// ai (XR fork): request of a computer opponent (no HUD status) and its builders
 		std::optional<player_id_t> for_player{};
 		std::vector<entity_id_t> builders{};

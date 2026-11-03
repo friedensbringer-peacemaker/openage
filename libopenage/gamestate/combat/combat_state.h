@@ -18,6 +18,7 @@
 #include <nyan/nyan.h>
 
 #include "coord/phys.h"
+#include "coord/tile.h"
 #include "event/evententity.h"
 #include "gamestate/combat/behavior.h"
 #include "gamestate/combat/rules.h"
@@ -339,6 +340,14 @@ public:
 	                               const time::time_t &)> handler);
 	// ---- end XR fork W3
 
+	/**
+	 * XR fork W5: footprint of buildings that are no square (gates: 4 tiles in a line); remove()
+	 * frees these tiles instead of the square of the hitbox. Nothing = the square.
+	 */
+	void set_footprint_hook(std::function<std::optional<std::vector<coord::tile>>(entity_id_t)> hook) {
+		this->footprint_hook = std::move(hook);
+	}
+
 	// ---- event handlers
 	void tick(const std::shared_ptr<GameState> &state, entity_id_t attacker, const time::time_t &time);
 	void scan(const std::shared_ptr<GameState> &state, const time::time_t &time);
@@ -598,6 +607,8 @@ private:
 	std::vector<std::function<void(const std::shared_ptr<GameEntity> &, const std::shared_ptr<GameEntity> &,
 	                               const time::time_t &)>>
 		hit_handlers;
+	/// XR fork W5: footprint of gates (set_footprint_hook)
+	std::function<std::optional<std::vector<coord::tile>>(entity_id_t)> footprint_hook;
 	/// fog of war (XR fork), may be nullptr
 	std::shared_ptr<vision::VisionState> vision;
 	/// players that ever had units or buildings

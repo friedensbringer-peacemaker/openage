@@ -13,6 +13,7 @@
 #include "log/message.h"
 
 #include "coord/tile.h"
+#include "gamestate/building_math.h"
 #include "gamestate/component/api/builder.h"
 #include "gamestate/component/api/constructable.h"
 #include "gamestate/component/api/gather.h"
@@ -52,8 +53,6 @@ constexpr int MAX_CHASE_FAILURES = 4;
 constexpr size_t HIT_LOGS_PER_SECOND = 6;
 /// garrison: a unit enters when its edge is this close to the building (tiles)
 constexpr double ENTER_DISTANCE = 0.6;
-/// buildings below this share of their health throw the garrison out (06 §6.5)
-constexpr double EJECT_HEALTH = 0.2;
 /// order logic: move commands at most this often (s)
 constexpr double ORDER_MOVE_PERIOD = 2.0;
 /// unit class of the towers (05 §5.4, 06 §6.4)
@@ -1755,9 +1754,10 @@ void CombatState::apply_hit(const std::shared_ptr<GameState> &state,
 		return;
 	}
 
-	// buildings under 20 % throw their garrison out (06 §6.5)
+	// buildings under 20 % throw their garrison out (06 §6.5; XR fork W5: rule of building_math.h)
 	if (target.stats->building and not target.occupants.empty()
-	    and static_cast<double>(health) < EJECT_HEALTH * static_cast<double>(target.stats->max_health)) {
+	    and building::must_eject_garrison(static_cast<double>(health), static_cast<double>(target.stats->max_health),
+	                                      true)) {
 		log::log(INFO << "Combat: " << describe(target.entity, *target.stats, target_owner)
 		              << " below 20 % health, the garrison comes out");
 		this->eject_all(state, target, false, time);
@@ -1975,7 +1975,15 @@ void CombatState::remove(const std::shared_ptr<GameState> &state, entity_id_t id
 		return;
 	}
 	auto entity = c->entity;
-	if (c->stats->building) {
+	// XR fork W5: buildings with a footprint of their own (gates: a line of 4 tiles)
+	std::optional<std::vector<coord::tile>> special;
+	if (c->stats->building and this->footprint_hook) {
+		special = this->footprint_hook(id);
+	}
+	if (special) {
+		state->get_map()->unblock_tiles(*special, time);
+	}
+	else if (c->stats->building) {
 		// free the footprint for pathfinding (whole tiles under the square)
 		auto pos = this->position_of(entity, time);
 		double r = c->stats->radius;

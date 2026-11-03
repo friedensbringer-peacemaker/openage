@@ -7,6 +7,7 @@
 #include "error/error.h"
 #include "log/log.h"
 
+#include "gamestate/buildings.h"
 #include "gamestate/combat/combat_state.h"
 #include "gamestate/food.h"
 #include "gamestate/game_entity.h"
@@ -24,13 +25,18 @@ GameState::GameState(const std::shared_ptr<nyan::Database> &db,
 	combat{std::make_shared<combat::CombatState>(event_loop)},
 	tech{std::make_shared<tech::TechState>()},
 	vision{std::make_shared<vision::VisionState>(event_loop)},
-	food{std::make_shared<food::FoodState>(event_loop)} {
+	food{std::make_shared<food::FoodState>(event_loop)},
+	buildings{std::make_shared<building::BuildingState>()} {
 	// XR fork: auto attacks and picks respect the fog of war
 	this->combat->set_vision(this->vision);
 }
 
 const std::shared_ptr<food::FoodState> &GameState::get_food() const {
 	return this->food;
+}
+
+const std::shared_ptr<building::BuildingState> &GameState::get_buildings() const {
+	return this->buildings;
 }
 
 const std::shared_ptr<nyan::View> &GameState::get_db_view() {

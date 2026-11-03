@@ -22,7 +22,9 @@
 #include "gamestate/component/api/move.h"
 #include "gamestate/component/api/turn.h"
 #include "gamestate/component/internal/command_queue.h"
+#include "gamestate/buildings.h"
 #include "gamestate/component/internal/commands/move.h"
+#include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
 #include "gamestate/component/types.h"
 #include "gamestate/game_entity.h"
@@ -162,6 +164,13 @@ const time::time_t Move::move_default(const std::shared_ptr<gamestate::GameEntit
 	auto pathfinder = map->get_pathfinder();
 	auto grid_id = map->get_grid_id(move_path_grid->get_name());
 	auto waypoints = find_path(pathfinder, grid_id, current_pos, destination, start_time);
+	// XR fork W5: open gates are passable in the path grid; units of other players stop in front of them
+	if (auto buildings = state->get_buildings(); buildings and not waypoints.empty()
+	                                             and entity->has_component(component::component_t::OWNERSHIP)) {
+		auto owner = std::dynamic_pointer_cast<component::Ownership>(
+			entity->get_component(component::component_t::OWNERSHIP));
+		waypoints = buildings->clip_path(owner->get_owners().get(start_time), waypoints);
+	}
 	// XR fork: follow the terrain elevation (hills), no change on flat maps
 	waypoints = map->follow_terrain(waypoints);
 

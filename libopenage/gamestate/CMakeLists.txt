@@ -1,4 +1,5 @@
 add_sources(libopenage
+    buildings.cpp
     definitions.cpp
     econ.cpp
     food.cpp

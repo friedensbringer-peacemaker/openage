@@ -60,7 +60,6 @@ constexpr entry_t T = entry_t::TECH;
 constexpr const char *SHIPS = "noch ohne Mechanik: Schiffe (W6)";
 constexpr const char *MONKS = "noch ohne Mechanik: Mönche (W6)";
 constexpr const char *SIEGE = "noch ohne Mechanik: Belagerung (W6)";
-constexpr const char *WALLS = "noch ohne Mechanik: Mauern (W5)";
 constexpr const char *TRADE = "noch ohne Mechanik: Markt/Handel (W7)";
 constexpr const char *WONDER = "noch ohne Mechanik: Wunder/Reliquien (W8)";
 } // namespace detail
@@ -137,9 +136,9 @@ constexpr CatalogEntry CATALOG[] = {
 	{"Dock", "Hafen", 221, true, "dock", detail::B, nullptr, ""},
 	{"Farm", "Farm", 222, true, "farm", detail::B, nullptr, ""},
 	{"FishingTrap", "Fischreuse", 223, true, "trap", detail::B, nullptr, ""},
-	{"PalisadeWall", "Palisade", 224, true, "wall", detail::B, detail::WALLS, ""},
-	{"StoneWall", "Steinmauer", 225, true, "wall", detail::B, detail::WALLS, ""},
-	{"StoneGate", "Tor", 226, true, "wall", detail::B, detail::WALLS, ""},
+	{"PalisadeWall", "Palisade", 224, true, "wall", detail::B, nullptr, ""},
+	{"StoneWall", "Steinmauer", 225, true, "wall", detail::B, nullptr, ""},
+	{"StoneGate", "Tor", 226, true, "wall", detail::B, nullptr, ""},
 	{"Wonder", "Weltwunder", 227, true, "house", detail::B, detail::WONDER, ""},
 	// ---- technologies: ages (Town Center)
 	{"FeudalAge", "Feudalzeit", 301, false, "age", detail::T, nullptr, "Neues Zeitalter: neue Einheiten, Gebäude und Techniken"},
@@ -191,7 +190,7 @@ constexpr CatalogEntry CATALOG[] = {
 	{"MurderHoles", "Pechnasen", 343, false, "tech", detail::T, nullptr, "Türme ohne Mindestreichweite"},
 	{"TreadmillCrane", "Tretkran", 344, false, "tech", detail::T, nullptr, "Dorfbewohner bauen schneller"},
 	{"SiegeEngineers", "Belagerungsingenieure", 345, false, "tech", detail::T, detail::SIEGE, "Belagerung: mehr Reichweite"},
-	{"FortifiedWall", "Befestigte Mauer", 346, false, "tech", detail::T, detail::WALLS, "Mauern stärker"},
+	{"FortifiedWall", "Befestigte Mauer", 346, false, "tech", detail::T, nullptr, "Mauern stärker"},
 	// Barracks
 	{"Swordsman", "Schwertkämpfer", 350, false, "sword", detail::T, nullptr, "Milizsoldaten werden Schwertkämpfer"},
 	{"Longswordsman", "Langschwertkämpfer", 351, false, "sword", detail::T, nullptr, "Schwertkämpfer werden Langschwertkämpfer"},
