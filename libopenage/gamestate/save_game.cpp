@@ -13,6 +13,8 @@
 
 #include "coord/phys.h"
 #include "coord/tile.h"
+#include "gamestate/building_place.h"
+#include "gamestate/buildings.h"
 #include "gamestate/combat/combat_state.h"
 #include "gamestate/combat/stats.h"
 #include "gamestate/component/api/builder.h"
@@ -288,6 +290,16 @@ SaveData capture(const std::shared_ptr<GameState> &state,
 				e.order = "build";
 				e.order_target = *job.target;
 			}
+			// XR fork W5 (version 6): the rest of its wall drag
+			e.wall_queue.assign(builder->wall_queue.begin(), builder->wall_queue.end());
+		}
+		// XR fork W5 (version 6): gates
+		if (auto buildings = state->get_buildings()) {
+			if (const auto *gate = buildings->gate(id)) {
+				changed = true;
+				e.gate_dir = static_cast<int>(gate->dir);
+				e.gate_locked = gate->locked;
+			}
 		}
 		// attack
 		if (combat != nullptr) {
@@ -555,8 +567,23 @@ RestoreResult restore(const SaveData &data,
 		auto spot = component_of<component::Harvestable>(entity, component::component_t::HARVESTABLE);
 		const bool field = spot != nullptr and food::is_field(spot->kind);
 		if (constructable != nullptr and not e->generated) {
+			// XR fork W5 (version 6): a gate covers its line of 4 tiles; open when built and not locked
+			if (e->gate_dir and state->get_buildings()) {
+				building::Gate gate;
+				gate.owner = static_cast<player_id_t>(e->owner);
+				gate.dir = static_cast<building::gate_dir_t>(*e->gate_dir);
+				gate.anchor = building::gate_anchor(e->ne, e->se, gate.dir);
+				gate.locked = e->gate_locked;
+				gate.finished = not(e->construction and *e->construction < 1.0);
+				state->get_buildings()->add_gate(entity->get_id(), gate);
+				if (not gate.finished or gate.locked) {
+					for (const auto &tile : state->get_buildings()->footprint(entity->get_id()).value_or(std::vector<coord::tile>{})) {
+						map->block_tile(tile, time);
+					}
+				}
+			}
 			// buildings block their tiles (generated ones already do; XR fork W3: farms and traps never)
-			if (not field) {
+			else if (not field) {
 				for (const auto &tile : building_footprint(pos, constructable->radius)) {
 					map->block_tile(tile, time);
 				}
@@ -654,6 +681,26 @@ RestoreResult restore(const SaveData &data,
 	}
 	if (garrisoned > 0) {
 		log::log(INFO << "Load: " << garrisoned << " units back in their buildings");
+	}
+
+	// XR fork W5 (version 6): the rest of a wall drag; the order target stays in it, so that the build order
+	// keeps the drag (system/build.cpp)
+	for (auto &[e, entity] : restored) {
+		auto builder = component_of<component::Builder>(entity, component::component_t::BUILDER);
+		if (builder == nullptr or e->wall_queue.empty()) {
+			continue;
+		}
+		auto mapped = [&](uint64_t id) {
+			auto it = id_map.find(id);
+			return it != id_map.end() ? it->second : static_cast<entity_id_t>(id);
+		};
+		builder->wall_queue.clear();
+		for (auto id : e->wall_queue) {
+			builder->wall_queue.push_back(mapped(id));
+		}
+		if (e->order == "build") {
+			builder->wall_queue.push_back(mapped(e->order_target));
+		}
 	}
 
 	// orders (all entities exist now)

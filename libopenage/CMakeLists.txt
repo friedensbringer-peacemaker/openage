@@ -547,6 +547,15 @@ if(OPENAGE_NATIVE_ENTRY)
 	add_executable(openage-building-check gamestate/building_check.cpp)
 	target_include_directories(openage-building-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 	add_test(NAME openage-building-check COMMAND openage-building-check)
+	# game state check of builders, walls, gates, repair, save game v6, AI with the converted modpack
+	# (--root <dir>, headless)
+	add_executable(openage-building-game-check gamestate/building_game_check.cpp)
+	target_include_directories(openage-building-game-check PRIVATE $<TARGET_PROPERTY:libopenage,INCLUDE_DIRECTORIES>)
+	add_dependencies(openage-building-game-check cppgen)
+	target_link_libraries(openage-building-game-check PRIVATE libopenage nyan::nyan Eigen3::Eigen Threads::Threads)
+	if(OPENAGE_QT)
+		target_link_libraries(openage-building-game-check PRIVATE Qt6::Core Qt6::Gui)
+	endif()
 	# ---- end XR fork W5 ----
 endif()
 

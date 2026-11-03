@@ -34,6 +34,7 @@
 #include "gamestate/game_state.h"
 #include "gamestate/map.h"
 #include "gamestate/player.h"
+#include "gamestate/production.h"
 #include "gamestate/production_math.h"
 #include "gamestate/vision/vision_state.h"
 
@@ -189,9 +190,12 @@ void AiPlayer::think(const std::shared_ptr<GameState> &state, const time::time_t
 
 	this->defend(state, world, time);
 	this->attack(state, world, time);
+	// XR fork W5: repairs before the economy takes the free villagers
+	this->repair(state, world, time);
 	this->gather(state, world, time);
 	this->produce(state, world, time);
 	this->food_economy(state, world, time);
+	this->fortify(state, world, time);
 	this->report(state, world, time);
 
 	{
@@ -1380,6 +1384,103 @@ void AiPlayer::food_economy(const std::shared_ptr<GameState> &state, const World
 	}
 	std::erase_if(this->last_herd, [&](const auto &entry) { return now - entry.second > 60.0; });
 	std::erase_if(this->bad_spots, [&](const auto &entry) { return now - entry.second > 120.0; });
+}
+
+// ---------------------------------------------------------------- buildings (XR fork W5)
+
+void AiPlayer::fortify(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time) {
+	if (not this->production->enabled() or not world.has_home or this->defending) {
+		return;
+	}
+	const double now = time.to_double();
+	if (now - this->last_palisade < 20.0) {
+		return;
+	}
+	const auto *age_state = state->get_tech() ? state->get_tech()->find(this->player) : nullptr;
+	if (age_state == nullptr or age_state->age < 2) {
+		return;
+	}
+	const auto size = static_cast<long>(state->get_map()->get_size()[0]);
+	const auto drags = palisade_ring(static_cast<long>(std::floor(world.home_ne)), static_cast<long>(std::floor(world.home_se)),
+	                                 PALISADE_RADIUS, PALISADE_GAP, size);
+	if (this->palisade_next >= drags.size()) {
+		return;
+	}
+	const auto &d = drags[this->palisade_next];
+	const long tiles = std::max(std::abs(d.x1 - d.x0), std::abs(d.y1 - d.y0)) + 1;
+	const double wood = state->get_player(this->player)->get_resources().get()[static_cast<size_t>(resource_t::WOOD)];
+	// 2 wood per segment in the data; the reserve keeps houses and farms going
+	if (wood < PALISADE_WOOD_RESERVE + 2.0 * static_cast<double>(tiles)) {
+		return;
+	}
+	const double mx = 0.5 * static_cast<double>(d.x0 + d.x1) + 0.5;
+	const double my = 0.5 * static_cast<double>(d.y0 + d.y1) + 0.5;
+	auto builders = this->free_builders(state, world, mx, my, time);
+	if (builders.empty()) {
+		return;
+	}
+	this->last_palisade = now;
+	auto at = [](long x, long y) {
+		return coord::phys3{coord::phys_t{static_cast<double>(x) + 0.5}, coord::phys_t{static_cast<double>(y) + 0.5},
+		                    coord::phys_t{0.0}};
+	};
+	const bool done = this->production->build_wall(state, this->player, "PalisadeWall", {builders.front()->id},
+	                                               at(d.x0, d.y0), at(d.x1, d.y1), time);
+	this->last_order[builders.front()->id] = now;
+	log::log(INFO << "AI P" << this->player << " drags a palisade " << (this->palisade_next + 1) << "/" << drags.size()
+	              << " from (" << d.x0 << ", " << d.y0 << ") to (" << d.x1 << ", " << d.y1 << "), " << tiles
+	              << " tiles, villager " << builders.front()->id << (done ? "" : " [not done]") << ", t=" << fmt1(now)
+	              << " s");
+	this->palisade_next += 1;
+}
+
+void AiPlayer::repair(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time) {
+	if (not this->production->enabled() or this->defending) {
+		return;
+	}
+	const double now = time.to_double();
+	// buildings someone repairs already
+	std::unordered_set<entity_id_t> repaired;
+	for (const auto &v : world.villagers) {
+		auto entity = state->get_game_entity(v.id);
+		if (auto b = component_of<component::Builder>(entity, component::component_t::BUILDER)) {
+			const auto &job = b->get_job();
+			if (job.repair and job.target) {
+				repaired.insert(*job.target);
+			}
+		}
+	}
+	for (const auto &b : world.buildings) {
+		auto entity = state->get_game_entity(b.id);
+		if (repaired.contains(b.id) or not prod::is_damaged(state, entity, time)) {
+			continue;
+		}
+		auto last = this->last_repair.find(b.id);
+		if (last != this->last_repair.end() and now - last->second < 15.0) {
+			continue;
+		}
+		// no enemies next to it (the repairer would be killed)
+		bool threatened = false;
+		for (const auto &e : world.enemies) {
+			threatened = threatened or dist(e.ne, e.se, b.ne, b.se) < this->params.defense_radius;
+		}
+		if (threatened) {
+			continue;
+		}
+		auto candidates = this->free_builders(state, world, b.ne, b.se, time);
+		if (candidates.empty()) {
+			return;
+		}
+		const auto *v = candidates.front();
+		auto queue = component_of<component::CommandQueue>(state->get_game_entity(v->id), component::component_t::COMMANDQUEUE);
+		queue->add_command(time, std::make_shared<component::command::BuildCommand>(b.id));
+		this->last_order[v->id] = now;
+		this->last_repair[b.id] = now;
+		log::log(INFO << "AI P" << this->player << ": villager " << v->id << " repairs " << b.name << " " << b.id
+		              << ", t=" << fmt1(now) << " s");
+		return;  // one repair order per round
+	}
+	std::erase_if(this->last_repair, [&](const auto &entry) { return not this->last_health.contains(entry.first); });
 }
 
 // ---------------------------------------------------------------- report

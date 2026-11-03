@@ -243,7 +243,7 @@ void check_roundtrip() {
 	}
 	CHECK(w4 >= 6, "W4 fields present (%zu)", w4);
 	// XR fork W3 (version 4 of W3, version 5): animals on the map, carcasses, reseeds
-	CHECK(back.version == 5 and back.map.herds, "version 5 with herds");
+	CHECK(back.version == 6 and back.map.herds, "version 6 with herds");
 	CHECK(back.entities[1].dead and not back.entities[5].dead, "carcass flag");
 	CHECK(back.players[2].reseeds.size() == 2 and back.players[2].reseeds[1][1] == 61.0 and back.players[0].reseeds.empty(),
 	      "reseeds per player");
@@ -279,6 +279,40 @@ void check_roundtrip() {
 	SaveData old;
 	CHECK(parse("[save]\nversion = 3\n[map]\ntype = random\n", old, error) and not old.map.herds, "version 3: no herds");
 	CHECK(parse("[save]\nversion = 5\n[map]\ntype = random\n", old, error) and old.map.herds, "version 5 default: herds");
+	CHECK(parse("[save]\nversion = 6\n[map]\ntype = random\n", old, error) and old.map.herds, "version 6 default: herds");
+
+	// XR fork W5 (version 6): wall drag of a builder, gates; missing keys = defaults
+	{
+		SaveData w5 = sample(3, 4);
+		w5.entities[0].wall_queue = {w5.entities[1].id, w5.entities[2].id};
+		w5.entities[3].gate_dir = 2;
+		w5.entities[3].gate_locked = true;
+		w5.entities[2].gate_dir = 0;
+		SaveData r5;
+		const std::string t5 = serialize(w5);
+		CHECK(t5.find("version = 6") != std::string::npos and t5.find("wall_queue = ") != std::string::npos
+		          and t5.find("gate_dir = 2") != std::string::npos and t5.find("gate_locked = 1") != std::string::npos,
+		      "W5 keys written");
+		CHECK(parse(t5, r5, error) and r5.entities[0].wall_queue == w5.entities[0].wall_queue
+		          and r5.entities[3].gate_dir == std::optional<int>{2} and r5.entities[3].gate_locked
+		          and r5.entities[2].gate_dir == std::optional<int>{0} and not r5.entities[2].gate_locked
+		          and not r5.entities[1].gate_dir and r5.entities[1].wall_queue.empty(),
+		      "W5 keys round trip: %s", error.c_str());
+		CHECK(state_hash(r5, true) == state_hash(w5, true), "W5 state hash with orders");
+		CHECK(not parse(head + "gate_dir = 7\n", back, error), "bad gate direction rejected");
+		// version 5 files (no W5 keys) load with the defaults
+		CHECK(parse("[save]\nversion = 5\n[map]\ntype = random\n[entity]\nfqon = x\n", old, error)
+		          and old.entities.back().wall_queue.empty() and not old.entities.back().gate_dir
+		          and not old.entities.back().gate_locked,
+		      "version 5 loads without W5 keys: %s", error.c_str());
+		// canonical: the wall queue belongs to the order (dropped without orders, remapped with them)
+		auto c = canonical(r5, false);
+		bool empty = true;
+		for (const auto &e : c.entities) {
+			empty = empty and e.wall_queue.empty();
+		}
+		CHECK(empty, "canonical without orders drops the wall queue");
+	}
 	CHECK(parse("[save]\nversion = 3\n[map]\ntype = random\nherds = 1\n", old, error) and old.map.herds,
 	      "explicit herds kept");
 	// version 4 exists twice: W3 (key herds) and W4 (no herds key, maps without animals)

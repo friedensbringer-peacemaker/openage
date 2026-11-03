@@ -157,6 +157,17 @@ public:
 		return true;
 	}
 
+	bool build_wall(const std::shared_ptr<GameState> & /* state */,
+	                player_id_t player,
+	                const std::string &wall,
+	                const std::vector<entity_id_t> &builders,
+	                const coord::phys3 &start,
+	                const coord::phys3 &end,
+	                const time::time_t & /* time */) override {
+		this->production->place_wall_for(player, builders, wall, start, end);
+		return true;
+	}
+
 private:
 	std::shared_ptr<prod::Production> production;
 };

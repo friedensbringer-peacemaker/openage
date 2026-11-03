@@ -542,4 +542,56 @@ private:
 	size_t suppressed = 0;
 };
 
+// ---------------------------------------------------------------- palisades (XR fork W5)
+
+/// one drag of a wall: start and end tile
+struct WallDrag {
+	long x0 = 0;
+	long y0 = 0;
+	long x1 = 0;
+	long y1 = 0;
+};
+
+/// half side of the palisade square around the town centre (tiles, own choice: outside the houses)
+constexpr long PALISADE_RADIUS = 12;
+/// width of the gaps in the middle of each side (exits; palisades have no gates in these data)
+constexpr long PALISADE_GAP = 3;
+/// wood the AI keeps when it builds palisades (2 wood per segment come on top)
+constexpr double PALISADE_WOOD_RESERVE = 150.0;
+
+/**
+ * Drags of a palisade ring around (cx, cy) (docs/PLAN-W5-W6.md W5.7): a square of half side
+ * \p r, each side split into two drags with a gap of \p gap tiles in its middle, clipped to the
+ * map (0..size-1). Order: north, east, south, west (two drags each); drags that leave nothing
+ * on the map are dropped.
+ */
+inline std::vector<WallDrag> palisade_ring(long cx, long cy, long r, long gap, long size) {
+	std::vector<WallDrag> out;
+	auto clamp = [&](long v) { return std::clamp(v, 0L, size - 1); };
+	const long g0 = gap / 2;
+	const long g1 = gap - g0;
+	auto side = [&](long ax, long ay, long bx, long by) {
+		// split the straight side a..b at its middle, leave the gap out
+		const long dx = (bx > ax) - (bx < ax);
+		const long dy = (by > ay) - (by < ay);
+		const long mx = (ax + bx) / 2;
+		const long my = (ay + by) / 2;
+		// a side whose fixed coordinate lies off the map is dropped, the others are clamped along the side
+		const long fixed = dx != 0 ? ay : ax;
+		if (fixed < 0 or fixed >= size) {
+			return;
+		}
+		const WallDrag first{ax, ay, mx - dx * g1, my - dy * g1};
+		const WallDrag second{mx + dx * (g0 + 1), my + dy * (g0 + 1), bx, by};
+		for (const auto &d : {first, second}) {
+			out.push_back(WallDrag{clamp(d.x0), clamp(d.y0), clamp(d.x1), clamp(d.y1)});
+		}
+	};
+	side(cx - r, cy - r, cx + r, cy - r);
+	side(cx + r, cy - r, cx + r, cy + r);
+	side(cx + r, cy + r, cx - r, cy + r);
+	side(cx - r, cy + r, cx - r, cy - r);
+	return out;
+}
+
 } // namespace openage::gamestate::ai

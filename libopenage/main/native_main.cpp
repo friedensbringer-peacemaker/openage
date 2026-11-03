@@ -215,6 +215,8 @@ struct native_args {
 	// XR fork W3: food replays (sheep, hunting, farm + reseed; fishing on a coast map)
 	bool replay_food = false;
 	bool replay_fish = false;
+	// XR fork W5: buildings replay (palisade drag, gate on a stone wall)
+	bool replay_buildings = false;
 	// save games (XR fork): slot directory, file to load, headless save/load check
 	std::string save_dir{};
 	std::string load_file{};
@@ -252,7 +254,7 @@ void usage(const char *argv0) {
 	             " [--ai-first-attack <s>] [--ai-attack-size <n>] [--sim-speed <x>] [--capture-at <s1,s2,...>]"
 	             " [--ui | --no-ui] [--ui-demo <what@s,...>] [--replay-ui]"
 	             " [--ui-style aoe|classic] [--ui-quest] [--replay-aoe] [--replay-markers] [--replay-tech]"
-	             " [--civ <name|random>] [--ai-civ <name|random>] [--replay-vision] [--replay-food] [--replay-fish] [--replay-war] [--vision normal|explored|all]"
+	             " [--civ <name|random>] [--ai-civ <name|random>] [--replay-vision] [--replay-food] [--replay-fish] [--replay-buildings] [--replay-war] [--vision normal|explored|all]"
 	             " [--save-dir <dir>] [--load <file>] [--save-check <dir> [--save-check-seconds <s>]]\n";
 }
 
@@ -483,6 +485,11 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		}
 		else if (arg == "--replay-food" or arg == "--replay-fish") {
 			(arg == "--replay-food" ? args.replay_food : args.replay_fish) = true;
+			args.ui = true;
+			args.ui_style = "aoe";
+		}
+		else if (arg == "--replay-buildings") {
+			args.replay_buildings = true;
 			args.ui = true;
 			args.ui_style = "aoe";
 		}
@@ -1704,6 +1711,18 @@ struct FoodReplayPlan {
 	std::string farm_after;
 	/// capture suffix after which the driver queues two reseeds at the mill
 	std::string reseed_after;
+	/// XR fork W5 (--replay-buildings): placement modes and test grants of technologies after captures
+	struct Placement {
+		std::string after;
+		std::string id;
+	};
+	std::vector<Placement> placements;
+	struct Grant {
+		std::string after;
+		openage::gamestate::player_id_t player = 0;
+		std::string tech;
+	};
+	std::vector<Grant> grants;
 };
 
 /**
@@ -2011,6 +2030,185 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 	add(65.0, E::kMouseMove, mp.first, mp.second + 4, 0, 0);
 	capture(66.0, "-7-neusaeen");
 	capture(67.0, nullptr);
+	return steps;
+}
+
+/**
+ * Input replay of the buildings (--replay-buildings, XR fork W5; with --map random, vision all):
+ * a villager drags a palisade (left button held from the start to the end tile: the preview shows
+ * every segment, red ones on blocked tiles), releases it (foundations, 2 wood each) and builds the
+ * segments one after the other; a stone wall from the test options gets a gate (preview on the wall,
+ * foundation, built). Captures <png stem>-1-start … -6-tor.
+ */
+std::vector<openage::renderer::opengl::TestFrameSink::Step> building_replay_steps(const native_args &args,
+                                                                                   openage::gamestate::MapSettings &map_settings,
+                                                                                   double start,
+                                                                                   const std::string &capture_file,
+                                                                                   FoodReplayPlan &plan) {
+	using namespace openage;
+	using renderer::opengl::TestFrameSink;
+	using gamestate::map_object_t;
+	using gamestate::map_terrain_t;
+	using E = renderer::SinkInputEvent;
+
+	const auto map = gamestate::generate_map(map_settings);
+	const gamestate::Heightmap heights{map.width, map.height, map.corners};
+	const auto tc = map.starts.at(0);
+	const long N = static_cast<long>(map.width);
+	std::set<std::pair<long, long>> used;
+	for (const auto &o : map.objects) {
+		used.insert({static_cast<long>(std::floor(o.ne)), static_cast<long>(std::floor(o.se))});
+	}
+	for (long y = static_cast<long>(tc[1]) - 2; y < static_cast<long>(tc[1]) + 2; ++y) {
+		for (long x = static_cast<long>(tc[0]) - 2; x < static_cast<long>(tc[0]) + 2; ++x) {
+			used.insert({x, y});
+		}
+	}
+	auto land = [&](long ne, long se) {
+		if (ne < 1 or se < 1 or ne >= N - 1 or se >= N - 1) {
+			return false;
+		}
+		auto t = map.tiles[static_cast<size_t>(ne) + static_cast<size_t>(se) * map.width];
+		return t != map_terrain_t::WATER and t != map_terrain_t::WATER_MEDIUM and t != map_terrain_t::WATER_DEEP
+		       and t != map_terrain_t::ICE and t != map_terrain_t::SHALLOWS and t != map_terrain_t::FOREST;
+	};
+	// a free horizontal row of \p length tiles (start tile) with \p margin free rows around it, nearest to (cx, cy)
+	auto free_row = [&](double cx, double cy, long length, long margin) -> std::optional<std::array<long, 2>> {
+		std::optional<std::array<long, 2>> best;
+		double best_d = 1e9;
+		for (long y = margin + 1; y + margin < N - 1; ++y) {
+			for (long x = 2; x + length < N - 2; ++x) {
+				const double d = std::hypot(x + 0.5 * length - cx, y + 0.5 - cy);
+				if (d >= best_d) {
+					continue;
+				}
+				bool ok = true;
+				for (long yy = y - margin; ok and yy <= y + margin; ++yy) {
+					for (long xx = x - 1; ok and xx <= x + length; ++xx) {
+						ok = land(xx, yy) and not used.contains({xx, yy});
+					}
+				}
+				if (ok) {
+					best_d = d;
+					best = std::array<long, 2>{x, y};
+				}
+			}
+		}
+		return best;
+	};
+	auto palisade = free_row(tc[0], tc[1] + 5.0, 9, 1);
+	if (palisade) {
+		for (long x = (*palisade)[0] - 1; x <= (*palisade)[0] + 9; ++x) {
+			for (long y = (*palisade)[1] - 1; y <= (*palisade)[1] + 1; ++y) {
+				used.insert({x, y});
+			}
+		}
+	}
+	auto wall = free_row(tc[0], tc[1] - 6.0, 8, 2);
+	log::log(INFO << "buildings replay: palisade row " << (palisade ? std::to_string((*palisade)[0]) + ", " + std::to_string((*palisade)[1]) : "-")
+	              << ", stone wall row " << (wall ? std::to_string((*wall)[0]) + ", " + std::to_string((*wall)[1]) : "-"));
+
+	if (not map_settings.view) {
+		gamestate::MapView start_view;
+		start_view.ne = tc[0];
+		start_view.se = tc[1];
+		start_view.zoom = 1.5f;
+		map_settings.view = start_view;
+	}
+	const gamestate::MapView view = *map_settings.view;
+	const int width = static_cast<int>(args.width);
+	const int height = static_cast<int>(args.height);
+	auto camera = std::make_shared<renderer::camera::Camera>(nullptr, util::Vector2s{args.width, args.height});
+	camera->look_at_coord(coord::scene3{10.0, 10.0, 0});
+	camera->move_to(Eigen::Vector3f{0.0f, view.height, 0.0f});
+	camera->look_at_coord(coord::scene3{view.ne, view.se, 0});
+	camera->set_zoom(view.zoom);
+	const Eigen::Matrix4f matrix = camera->get_projection_matrix() * camera->get_view_matrix();
+	auto pixel = [&](double ne, double se, double up) {
+		double ground = heights.is_flat() ? 0.0 : heights.at(ne, se);
+		coord::phys3 pos{coord::phys_t{ne}, coord::phys_t{se}, coord::phys_t{ground + up}};
+		auto w = pos.to_scene3().to_world_space();
+		Eigen::Vector4f clip = matrix * Eigen::Vector4f{w.x(), w.y(), w.z(), 1.0f};
+		int x = static_cast<int>(std::lround((clip.x() + 1.0) * 0.5 * width));
+		int y = static_cast<int>(std::lround(height - (clip.y() + 1.0) * 0.5 * height));
+		return std::pair{x, y};
+	};
+
+	std::vector<TestFrameSink::Step> steps;
+	auto add = [&](double at, int type, int x, int y, int button, int buttons) {
+		TestFrameSink::Step step;
+		step.at = start + at;
+		step.what = TestFrameSink::Step::kind::input;
+		step.event.type = type;
+		step.event.x = x;
+		step.event.y = y;
+		step.event.button = button;
+		step.event.buttons = buttons;
+		steps.push_back(step);
+	};
+	auto click = [&](double t, std::pair<int, int> p, int button) {
+		add(t, E::kMouseMove, p.first, p.second, 0, 0);
+		add(t + 0.1, E::kMouseDown, p.first, p.second, button, button);
+		add(t + 0.2, E::kMouseUp, p.first, p.second, button, 0);
+	};
+	auto capture = [&](double t, const char *suffix) {
+		const std::filesystem::path png{capture_file};
+		TestFrameSink::Step shot;
+		shot.at = start + t;
+		shot.what = TestFrameSink::Step::kind::capture;
+		shot.file = suffix == nullptr ? capture_file
+		                              : (png.parent_path() / (png.stem().string() + suffix + png.extension().string())).string();
+		steps.push_back(shot);
+	};
+
+	std::vector<const gamestate::MapObject *> villagers;
+	for (const auto &o : map.objects) {
+		if (o.kind == map_object_t::VILLAGER and o.owner == 0) {
+			villagers.push_back(&o);
+		}
+	}
+	plan.grant_after = "-sync-0";
+	capture(0.6, "-sync-0");
+	if (villagers.size() < 2 or not palisade or not wall) {
+		log::log(WARN << "buildings replay: map lacks villagers or free rows");
+		capture(2.0, nullptr);
+		return steps;
+	}
+	plan.grants.push_back({"-sync-0", 0, "FeudalAge"});
+	for (long i = 0; i < 8; ++i) {
+		plan.spawns.push_back({"-sync-0", 0, "StoneWall", (*wall)[0] + i + 0.5, (*wall)[1] + 0.5});
+	}
+	capture(3.0, "-1-start");
+	// 1. palisade: select a villager, placement mode from the driver, drag from the start to the end tile
+	auto v1 = pixel(villagers[0]->ne, villagers[0]->se, 0.6);
+	click(3.5, v1, E::kLeftButton);
+	capture(4.2, "-sync-1");
+	plan.placements.push_back({"-sync-1", "PalisadeWall"});
+	auto a = pixel((*palisade)[0] + 0.5, (*palisade)[1] + 0.5, 0.0);
+	auto b = pixel((*palisade)[0] + 8.5, (*palisade)[1] + 0.5, 0.0);
+	auto m = pixel((*palisade)[0] + 4.5, (*palisade)[1] + 0.5, 0.0);
+	add(5.0, E::kMouseMove, a.first, a.second, 0, 0);
+	capture(5.6, "-sync-2");
+	add(6.0, E::kMouseDown, a.first, a.second, E::kLeftButton, E::kLeftButton);
+	add(6.3, E::kMouseMove, m.first, m.second, 0, E::kLeftButton);
+	add(6.6, E::kMouseMove, b.first, b.second, 0, E::kLeftButton);
+	capture(7.6, "-2-palisade-ziehen");
+	add(8.0, E::kMouseUp, b.first, b.second, E::kLeftButton, 0);
+	capture(20.0, "-3-palisade-bau");
+	capture(70.0, "-4-palisade-fertig");
+	// 2. gate: another villager, placement mode of the gate, preview on the wall, click places it
+	auto v2 = pixel(villagers[1]->ne, villagers[1]->se, 0.6);
+	click(70.5, v2, E::kLeftButton);
+	capture(71.2, "-sync-3");
+	plan.placements.push_back({"-sync-3", "StoneGate"});
+	auto g = pixel((*wall)[0] + 3.5, (*wall)[1] + 0.5, 0.0);
+	add(72.0, E::kMouseMove, g.first - 6, g.second, 0, 0);
+	capture(72.6, "-sync-4");
+	add(73.0, E::kMouseMove, g.first, g.second, 0, 0);
+	capture(74.0, "-5-tor-vorschau");
+	click(74.5, g, E::kLeftButton);
+	capture(160.0, "-6-tor");
+	capture(161.0, nullptr);
 	return steps;
 }
 
@@ -3141,6 +3339,9 @@ bool egl_sink_check(const native_args &args,
 	else if ((args.replay_food or args.replay_fish) and not args.stop_in_resize) {
 		steps = food_replay_steps(args, map_settings, start, png.string(), food_plan);
 	}
+	else if (args.replay_buildings and not args.stop_in_resize) {
+		steps = building_replay_steps(args, map_settings, start, png.string(), food_plan);
+	}
 	else if (args.replay_markers and not args.stop_in_resize) {
 		steps = markers_replay_steps(args, map_settings, start, png.string());
 	}
@@ -3223,7 +3424,7 @@ bool egl_sink_check(const native_args &args,
 	std::atomic<bool> prod_driver_stop{false};
 	std::thread prod_driver;
 	if (args.replay_prod or args.replay_ui or args.replay_aoe or args.replay_markers or args.replay_tech
-	    or args.replay_vision or args.replay_war or args.replay_food or args.replay_fish) {
+	    or args.replay_vision or args.replay_war or args.replay_food or args.replay_fish or args.replay_buildings) {
 		// the UI replay only logs the snapshots (no house on water)
 		auto water = args.replay_prod ? prod_targets.water : std::nullopt;
 		prod_driver = std::thread{[&prod_driver_stop, production = engine->get_production(), water]() {
@@ -3254,7 +3455,7 @@ bool egl_sink_check(const native_args &args,
 	// food replays (XR fork W3): test options of the production once the captures before them exist
 	std::atomic<bool> food_driver_stop{false};
 	std::thread food_driver;
-	if (args.replay_food or args.replay_fish) {
+	if (args.replay_food or args.replay_fish or args.replay_buildings) {
 		const auto dir = png.parent_path();
 		const auto stem = png.stem().string();
 		const auto ext = png.extension().string();
@@ -3266,7 +3467,25 @@ bool egl_sink_check(const native_args &args,
 			bool farm = false;
 			bool reseed = false;
 			std::vector<bool> spawned(plan.spawns.size(), false);
+			// XR fork W5: placement modes and technology grants of the buildings replay
+			std::vector<bool> placed(plan.placements.size(), false);
+			std::vector<bool> granted_tech(plan.grants.size(), false);
 			while (not food_driver_stop) {
+				for (size_t i = 0; i < plan.grants.size(); ++i) {
+					if (not granted_tech[i] and taken(plan.grants[i].after)) {
+						granted_tech[i] = true;
+						log::log(INFO << "buildings replay: test grant " << plan.grants[i].tech << " for player "
+						              << plan.grants[i].player);
+						production->grant_research(plan.grants[i].player, plan.grants[i].tech);
+					}
+				}
+				for (size_t i = 0; i < plan.placements.size(); ++i) {
+					if (not placed[i] and taken(plan.placements[i].after)) {
+						placed[i] = true;
+						log::log(INFO << "buildings replay: placement mode " << plan.placements[i].id);
+						production->start_placement(plan.placements[i].id);
+					}
+				}
 				std::this_thread::sleep_for(std::chrono::milliseconds(100));
 				if (not granted and taken(plan.grant_after)) {
 					granted = true;
@@ -3517,7 +3736,8 @@ int main(int argc, char **argv) {
 
 	// ai (XR fork): the input replays check the human side; keep the computer opponent out
 	if ((args.replay or args.replay_econ or args.replay_combat or args.replay_prod or args.replay_select or args.replay_ui
-	     or args.replay_aoe or args.replay_markers or args.replay_tech or args.replay_food or args.replay_fish)
+	     or args.replay_aoe or args.replay_markers or args.replay_tech or args.replay_food or args.replay_fish
+	     or args.replay_buildings)
 	    and not args.ai_explicit) {
 		args.map.ai.mode = gamestate::ai_mode_t::OFF;
 	}

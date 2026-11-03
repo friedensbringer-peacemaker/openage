@@ -36,7 +36,39 @@ void check(bool ok, const std::string &what) {
 } // namespace
 
 
+/// XR fork W5: palisade ring around the town centre
+void check_palisades() {
+	for (long r = 4; r <= 16; r += 4) {
+		for (long gap = 1; gap <= 4; ++gap) {
+			const long cx = 32;
+			const long cy = 32;
+			auto drags = palisade_ring(cx, cy, r, gap, 64);
+			check(drags.size() == 8, "palisade: 8 drags, r " + std::to_string(r) + " gap " + std::to_string(gap));
+			// every drag is straight and lies on the square
+			bool square = true;
+			long tiles = 0;
+			for (const auto &d : drags) {
+				square = square and (d.x0 == d.x1 or d.y0 == d.y1);
+				square = square and (std::abs(d.x0 - cx) == r or std::abs(d.y0 - cy) == r);
+				tiles += std::max(std::abs(d.x1 - d.x0), std::abs(d.y1 - d.y0)) + 1;
+			}
+			check(square, "palisade drags on the square");
+			// 4 sides of 2r+1 tiles, minus the gaps
+			check(tiles == 4 * (2 * r + 1 - gap), "palisade tiles = sides minus gaps, r " + std::to_string(r)
+			                                          + " gap " + std::to_string(gap));
+		}
+	}
+	// near the map edge: sides off the map are dropped, the others clamped
+	auto edge = palisade_ring(5, 32, 12, 3, 64);
+	bool on_map = true;
+	for (const auto &d : edge) {
+		on_map = on_map and d.x0 >= 0 and d.x1 >= 0 and d.y0 >= 0 and d.y1 >= 0 and d.x0 < 64 and d.x1 < 64;
+	}
+	check(edge.size() == 6 and on_map, "palisade at the west edge: west side dropped, rest on the map");
+}
+
 int main() {
+	check_palisades();
 	// ---- parameters per difficulty
 	for (auto d : {difficulty_t::EASY, difficulty_t::NORMAL}) {
 		auto p = params_for(d);

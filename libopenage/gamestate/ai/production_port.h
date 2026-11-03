@@ -131,6 +131,17 @@ public:
 	                    const time::time_t & /* time */) {
 		return false;
 	}
+
+	/// XR fork W5: a wall drag from \p start to \p end, built by \p builders (default: none, e.g. the stub)
+	virtual bool build_wall(const std::shared_ptr<GameState> & /* state */,
+	                        player_id_t /* player */,
+	                        const std::string & /* wall */,
+	                        const std::vector<entity_id_t> & /* builders */,
+	                        const coord::phys3 & /* start */,
+	                        const coord::phys3 & /* end */,
+	                        const time::time_t & /* time */) {
+		return false;
+	}
 };
 
 /**

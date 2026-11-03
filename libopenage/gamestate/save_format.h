@@ -51,9 +51,11 @@ namespace openage::gamestate::save {
 ///    player; the file has the key "herds") or XR fork W4 (stance, formation, patrol/guard/follow/attack move,
 ///    garrison, town bell per entity; no "herds" key, the map had no animals);
 /// 5: W3 + W4 together (both sets of keys).
+/// 6: optional keys of round W5 (wall drag of a builder "wall_queue", gates "gate_dir"/"gate_locked") and of
+///    round W6; a missing key means its default.
 /// Older versions still load (missing fields: no civilisation, nothing researched, vision NORMAL with nothing
 /// explored, aggressive stance, no garrison; maps without a "herds" key before 5 had no animals: herds off).
-constexpr int FORMAT_VERSION = 5;
+constexpr int FORMAT_VERSION = 6;
 
 /// slots 1..SLOT_COUNT are chosen by the player, slot 0 is the autosave,
 /// QUICK_SLOT the quick save (F5/F9)
@@ -146,6 +148,11 @@ struct SavedEntity {
 	uint64_t resume_entity = 0;
 	/// town center: the bell rings
 	bool bell = false;
+	/// XR fork W5 (version 6): wall segments a builder still builds after its order (spec 04 §4.4)
+	std::vector<uint64_t> wall_queue{};
+	/// XR fork W5 (version 6): a gate – orientation (building_math.h gate_dir_t) and lock
+	std::optional<int> gate_dir{};
+	bool gate_locked = false;
 };
 
 /// whole save game
@@ -377,6 +384,20 @@ inline std::string serialize(const SaveData &d) {
 		}
 		if (e.bell) {
 			out << "bell = 1\n";
+		}
+		// XR fork W5 (version 6)
+		if (not e.wall_queue.empty()) {
+			out << "wall_queue =";
+			for (auto id : e.wall_queue) {
+				out << " " << id;
+			}
+			out << "\n";
+		}
+		if (e.gate_dir) {
+			out << "gate_dir = " << *e.gate_dir << "\n";
+			if (e.gate_locked) {
+				out << "gate_locked = 1\n";
+			}
 		}
 	}
 	if (not d.removed.empty()) {
@@ -769,6 +790,27 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 				}
 				e.bell = b != 0;
 			}
+			// XR fork W5 (version 6)
+			else if (key == "wall_queue") {
+				uint64_t id = 0;
+				while (v >> id) {
+					e.wall_queue.push_back(id);
+				}
+			}
+			else if (key == "gate_dir") {
+				int dir = 0;
+				if (not(v >> dir) or dir < 0 or dir > 3) {
+					return fail("Tor");
+				}
+				e.gate_dir = dir;
+			}
+			else if (key == "gate_locked") {
+				int l = 0;
+				if (not(v >> l)) {
+					return fail("Tor");
+				}
+				e.gate_locked = l != 0;
+			}
 		}
 		else if (section == "removed") {
 			if (key == "ids") {
@@ -882,6 +924,13 @@ inline SaveData canonical(const SaveData &d, bool with_orders = false) {
 		}
 		e.combat_entity = remap(e.combat_entity);
 		e.resume_entity = remap(e.resume_entity);
+		// XR fork W5: the wall drag of a builder (order of the line kept) belongs to its order
+		for (auto &id : e.wall_queue) {
+			id = remap(id);
+		}
+		if (not with_orders) {
+			e.wall_queue.clear();
+		}
 		for (auto &p : e.combat_route) {
 			p = {round6(p[0]), round6(p[1])};
 		}

@@ -177,6 +177,10 @@ private:
 	                                        double ne, double se, const time::time_t &time) const;
 	/// own foundations nobody works on get a builder again
 	void resume_foundations(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
+	/// XR fork W5: palisade ring around the town centre (Feudal Age, enough wood)
+	void fortify(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
+	/// XR fork W5: villagers repair damaged own buildings (no enemies near them)
+	void repair(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
 	void report(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
 	void schedule(const std::shared_ptr<GameState> &state, const time::time_t &time);
 
@@ -241,6 +245,11 @@ private:
 	std::unordered_map<entity_id_t, std::pair<double, size_t>> last_resume;
 	/// path grid of land units (passability of building spots), -1 = unknown
 	long land_grid = -2;
+	/// XR fork W5: next drag of the palisade ring, time of the last drag and of the last repair order
+	/// per own building (simulation seconds)
+	size_t palisade_next = 0;
+	double last_palisade = -100.0;
+	std::unordered_map<entity_id_t, double> last_repair;
 
 	LogThrottle gather_log{5.0};
 	LogThrottle defend_log{10.0};
