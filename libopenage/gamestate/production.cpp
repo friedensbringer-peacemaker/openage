@@ -702,7 +702,9 @@ std::shared_ptr<GameEntity> create_foundation(const std::shared_ptr<GameState> &
 	auto building_pos = std::dynamic_pointer_cast<component::Position>(
 		building->get_component(component::component_t::POSITION));
 	building_pos->set_position(now, map->on_terrain(anchor));
-	building_pos->set_angle(now, coord::phys_angle_t::from_int(315));
+	// XR fork W5: the palisade sprite keeps its variants in the angles; angle 0 is the standing wall (as the
+	// placement ghost), 315 would pick a broken variant
+	building_pos->set_angle(now, coord::phys_angle_t::from_int(gamestate::building::is_wall_name(buildable.name) ? 0 : 315));
 	auto building_owner = std::dynamic_pointer_cast<component::Ownership>(
 		building->get_component(component::component_t::OWNERSHIP));
 	building_owner->set_owner(now, owner);

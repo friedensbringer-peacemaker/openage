@@ -813,7 +813,11 @@ void Presenter::init_input() {
 		log::log(INFO << "Loading HUD controls");
 		auto hud_controller = std::make_shared<input::hud::Controller>();
 		auto hud_context = std::make_shared<input::hud::BindingContext>();
-		input::hud::setup_defaults(hud_context, this->hud_renderer);
+		// XR fork W5: no selection box while a wall is dragged in the placement mode
+		input::hud::setup_defaults(hud_context, this->hud_renderer, [this]() {
+			auto production = this->simulation ? this->simulation->get_production() : nullptr;
+			return production != nullptr and production->placement_is_wall();
+		});
 		this->input_manager->set_hud_controller(hud_controller);
 		input_ctx->set_hud_bindings(hud_context);
 	}

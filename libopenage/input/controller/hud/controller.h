@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 
 #include "input/event.h"
@@ -67,9 +68,11 @@ private:
  *
  * @param ctx Binding context the actions are added to.
  * @param hud_renderer HUD render stage that is used to render the selection box.
+ * @param no_box XR fork W5: while it returns true (wall drag in the placement mode) no selection box is drawn.
  */
 void setup_defaults(const std::shared_ptr<BindingContext> &ctx,
-                    const std::shared_ptr<renderer::hud::HudRenderStage> &hud_renderer);
+                    const std::shared_ptr<renderer::hud::HudRenderStage> &hud_renderer,
+                    std::function<bool()> no_box = {});
 
 } // namespace input::hud
 } // namespace openage
