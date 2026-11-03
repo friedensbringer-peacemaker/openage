@@ -215,6 +215,8 @@ struct native_args {
 	// XR fork W3: food replays (sheep, hunting, farm + reseed; fishing on a coast map)
 	bool replay_food = false;
 	bool replay_fish = false;
+	// XR fork W6: special replay (monk converts, mangonel area damage, trebuchet), runs on the food plumbing
+	bool replay_special = false;
 	// save games (XR fork): slot directory, file to load, headless save/load check
 	std::string save_dir{};
 	std::string load_file{};
@@ -252,7 +254,7 @@ void usage(const char *argv0) {
 	             " [--ai-first-attack <s>] [--ai-attack-size <n>] [--sim-speed <x>] [--capture-at <s1,s2,...>]"
 	             " [--ui | --no-ui] [--ui-demo <what@s,...>] [--replay-ui]"
 	             " [--ui-style aoe|classic] [--ui-quest] [--replay-aoe] [--replay-markers] [--replay-tech]"
-	             " [--civ <name|random>] [--ai-civ <name|random>] [--replay-vision] [--replay-food] [--replay-fish] [--replay-war] [--vision normal|explored|all]"
+	             " [--civ <name|random>] [--ai-civ <name|random>] [--replay-vision] [--replay-food] [--replay-fish] [--replay-special] [--replay-war] [--vision normal|explored|all]"
 	             " [--save-dir <dir>] [--load <file>] [--save-check <dir> [--save-check-seconds <s>]]\n";
 }
 
@@ -478,6 +480,12 @@ bool parse_args(int argc, char **argv, native_args &args) {
 		}
 		else if (arg == "--replay-war") {
 			args.replay_war = true;
+			args.ui = true;
+			args.ui_style = "aoe";
+		}
+		else if (arg == "--replay-special") {
+			args.replay_special = true;
+			args.replay_food = true;
 			args.ui = true;
 			args.ui_style = "aoe";
 		}
@@ -1925,6 +1933,76 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 
 	plan.grant_after = "-sync-0";
 	capture(0.6, "-sync-0");
+	if (args.replay_special) {
+		// XR fork W6 (--replay-special): a monk converts an enemy militia (faith in the info line), a mangonel
+		// shoots into an enemy group next to an own militia (area damage), a trebuchet shows its commands.
+		// Captures -s1-start, -s2-konvertieren, -s3-mange, -s4-tribock.
+		const auto gaia_less = static_cast<openage::gamestate::player_id_t>(1);
+		auto monastery = near_square(tc[0] + 5.0, tc[1] + 5.0, 3, false, 5.0);
+		if (monastery) {
+			mark(*monastery, 3);
+		}
+		auto monk = near_square(tc[0] + 4.0, tc[1] - 3.0, 1, false, 3.0);
+		if (monk) {
+			mark(*monk, 1);
+		}
+		std::optional<std::array<double, 2>> foe1, foe2, foe3, own, mangonel, treb;
+		if (monk) {
+			foe1 = near_square((*monk)[0] + 7.0, (*monk)[1], 1, false, 0.0);
+			if (foe1) {
+				mark(*foe1, 1);
+				foe2 = near_square((*foe1)[0] + 3.0, (*foe1)[1] - 3.0, 1, false, 0.0);
+			}
+			if (foe2) {
+				mark(*foe2, 1);
+				foe3 = near_square((*foe2)[0] + 0.7, (*foe2)[1], 1, false, 0.0);
+			}
+			if (foe3) {
+				mark(*foe3, 1);
+				own = near_square((*foe2)[0], (*foe2)[1] + 0.7, 1, false, 0.0);
+			}
+			if (own) {
+				mark(*own, 1);
+				mangonel = near_square((*foe2)[0] - 5.0, (*foe2)[1], 1, false, 3.5);
+			}
+			if (mangonel) {
+				mark(*mangonel, 1);
+			}
+			treb = near_square(tc[0] - 4.0, tc[1] + 4.0, 1, false, 3.5);
+		}
+		if (not monastery or not monk or not foe1 or not foe3 or not own or not mangonel or not treb) {
+			log::log(WARN << "special replay: map lacks free spots");
+			capture(2.0, nullptr);
+			return steps;
+		}
+		plan.spawns.push_back({"-sync-0", 0, "Monastery", (*monastery)[0], (*monastery)[1]});
+		plan.spawns.push_back({"-sync-0", 0, "Monk", (*monk)[0], (*monk)[1]});
+		plan.spawns.push_back({"-sync-0", gaia_less, "Militia", (*foe1)[0], (*foe1)[1]});
+		plan.spawns.push_back({"-sync-0", gaia_less, "Militia", (*foe2)[0], (*foe2)[1]});
+		plan.spawns.push_back({"-sync-0", gaia_less, "Militia", (*foe3)[0], (*foe3)[1]});
+		plan.spawns.push_back({"-sync-0", 0, "Militia", (*own)[0], (*own)[1]});
+		plan.spawns.push_back({"-sync-0", 0, "Mangonel", (*mangonel)[0], (*mangonel)[1]});
+		plan.spawns.push_back({"-sync-0", 0, "Trebuchet", (*treb)[0], (*treb)[1]});
+		capture(3.0, "-s1-start");
+		auto mp = pixel((*monk)[0], (*monk)[1], 0.6);
+		log_px("monk", mp);
+		click(3.5, mp, E::kLeftButton);
+		capture(4.2, "-sync-s1");
+		click(4.5, pixel((*foe1)[0], (*foe1)[1], 0.6), E::kRightButton);
+		capture(16.0, "-s2-konvertieren");
+		auto gp = pixel((*mangonel)[0], (*mangonel)[1], 0.6);
+		log_px("mangonel", gp);
+		click(16.5, gp, E::kLeftButton);
+		capture(17.2, "-sync-s2");
+		click(17.5, pixel((*foe2)[0], (*foe2)[1], 0.6), E::kRightButton);
+		capture(30.0, "-s3-mange");
+		auto tp = pixel((*treb)[0], (*treb)[1], 0.8);
+		log_px("trebuchet", tp);
+		click(30.5, tp, E::kLeftButton);
+		capture(31.5, "-s4-tribock");
+		capture(32.0, nullptr);
+		return steps;
+	}
 	if (args.replay_fish) {
 		if (not dock or not ship or not fish) {
 			log::log(WARN << "fish replay: no dock spot, ship tile or fish on this map");

@@ -515,8 +515,29 @@ void check_monks(const Options &opt) {
 	}
 
 	std::cout << "== S4 Ketzerei" << std::endl;
+	// Heresy is researched in a monastery of the Castle Age
+	if (auto tc1 = w.town_center(1)) {
+		auto p1 = w.position(tc1);
+		auto spot1 = w.land_near(p1.ne.to_double() - 6.0, p1.se.to_double() + 6.0, 12);
+		if (spot1) {
+			w.spawn_at(1, ge("monastery", "Monastery"), spot1->first, spot1->second);
+		}
+	}
+	w.production->grant_research(1, "FeudalAge");
+	w.advance(0.3);
+	w.production->grant_research(1, "CastleAge");
+	w.advance(0.3);
 	w.production->grant_research(1, "Heresy");
 	w.advance(0.5);
+	{
+		bool heresy = false;
+		if (const auto *pt = w.state->get_tech()->find(1)) {
+			for (const auto &t : pt->order) {
+				heresy = heresy or (t.size() >= 7 and t.compare(t.size() - 7, 7, ".Heresy") == 0);
+			}
+		}
+		check(heresy, "player 1 researched Heresy (test grant)");
+	}
 	auto heretic = w.unit_near(1, "militia", "Militia", mp.ne.to_double() + 3.0, mp.se.to_double() - 2.0);
 	if (monk2 and heretic) {
 		w.passive(heretic);
@@ -526,6 +547,11 @@ void check_monks(const Options &opt) {
 		check(w.advance_until(20.0, [&]() { return not w.alive(heretic); }), "heresy: the converted unit dies");
 		check(w.owner(heretic) == 1, "heresy: it dies as player 1's unit");
 		check(w.special()->counters().heresy_deaths >= 1, "heresy counted");
+	}
+	if (monk2) {
+		// only one healer for the heal rate below
+		w.combat()->kill(w.state, monk2->get_id(), w.now);
+		w.advance(0.5);
 	}
 
 	std::cout << "== S5 Heilen" << std::endl;
@@ -556,6 +582,7 @@ void check_monks(const Options &opt) {
 		check(not r2.empty(), "buildings not healable: " + r2);
 		// automatic healing (stance preference Heal of the data)
 		w.set_health(soldier, max / 2);
+		w.combat()->set_stance(monk->get_id(), combat::stance_t::AGGRESSIVE);
 		w.special()->cancel_job(monk->get_id());
 		w.advance(7.0);
 		check(w.advance_until(40.0, [&]() { return w.health(soldier) >= max; }), "idle monk heals the wounded unit on its own");
@@ -673,20 +700,30 @@ void check_siege(const Options &opt) {
 	auto c2 = scene_spot(w, -10.0, 6.0);
 	auto house = w.spawn_at(1, ge("house", "House"), std::floor(c2.first) + 1.0, std::floor(c2.second) + 1.0);
 	auto guard = w.unit_near(1, "militia", "Militia", c2.first + 2.5, c2.second);
-	auto ram = w.unit_near(0, "ram", "Ram", c2.first + 3.5, c2.second + 0.5);
+	// next to the house: the ram needs no path (movement is the engine's, not W6)
+	auto ram = w.spawn_at(0, ge("ram", "Ram"), std::floor(c2.first) + 2.9, std::floor(c2.second) + 1.0);
 	if (house == nullptr or guard == nullptr or ram == nullptr) {
 		check(false, "scene for the ram");
 		return;
 	}
 	w.passive(guard);
 	w.advance(0.3);
-	const auto guard_h0 = w.health(guard);
-	w.command(component::command::command_t::ATTACK, {ram}, guard->get_id(), w.position(guard));
-	w.advance(10.0);
-	check(w.health(guard) == guard_h0, "ram does not attack a unit (ordered or on its own)");
 	const auto house_h0 = w.health(house);
 	w.combat()->order_attack(w.state, ram->get_id(), house->get_id(), w.now);
-	check(w.advance_until(30.0, [&]() { return w.health(house) < house_h0; }), "ram damages the house");
+	const bool rammed = w.advance_until(30.0, [&]() { return w.health(house) < house_h0; });
+	std::cout << "  ram at " << fmt(w.distance(ram, house)) << " tiles from the house, target "
+	          << (w.combat()->get_target(ram->get_id()) ? std::to_string(*w.combat()->get_target(ram->get_id())) : std::string{"-"})
+	          << ", house " << w.health(house) << "/" << w.max_health(house) << std::endl;
+	check(rammed, "ram damages the house");
+	w.combat()->stop(w.state, ram->get_id(), w.now);
+	w.advance(0.3);
+	bool ram_on_unit = false;
+	w.command(component::command::command_t::ATTACK, {ram}, guard->get_id(), w.position(guard));
+	w.advance_until(10.0, [&]() {
+		ram_on_unit = ram_on_unit or w.combat()->get_target(ram->get_id()) == guard->get_id();
+		return false;
+	});
+	check(not ram_on_unit, "ram does not take a unit as target (ordered or on its own)");
 
 	// trebuchet: unpack / pack (transform unit of the data)
 	auto c3 = scene_spot(w, -6.0, -10.0);

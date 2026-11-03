@@ -27,7 +27,6 @@
 #include "gamestate/component/api/move.h"
 #include "gamestate/component/api_component.h"
 #include "gamestate/component/internal/command_queue.h"
-#include "gamestate/component/internal/commands/idle.h"
 #include "gamestate/component/internal/commands/move.h"
 #include "gamestate/component/internal/ownership.h"
 #include "gamestate/component/internal/position.h"
@@ -191,12 +190,6 @@ std::optional<path::grid_id_t> grid_of(const std::shared_ptr<GameState> &state,
 bool finished(const std::shared_ptr<GameEntity> &entity) {
 	auto constructable = component_of<component::Constructable>(entity, component::component_t::CONSTRUCTABLE);
 	return constructable == nullptr or constructable->is_complete();
-}
-
-void idle(const std::shared_ptr<GameEntity> &entity, const time::time_t &time) {
-	if (auto queue = component_of<component::CommandQueue>(entity, component::component_t::COMMANDQUEUE)) {
-		queue->add_command(time, std::make_shared<component::command::IdleCommand>());
-	}
 }
 
 void move_to(const std::shared_ptr<GameState> &state, const std::shared_ptr<GameEntity> &entity, double x, double y,
@@ -1104,7 +1097,6 @@ void SpecialState::attempt_conversion(const std::shared_ptr<GameState> &state, e
 		tu->job = Job{};
 	}
 	combat->change_owner(state, target_id, *mo, view_of(state, *mo), fqon_of(e), time);
-	idle(e, time);
 	this->stats.conversions += 1;
 }
 

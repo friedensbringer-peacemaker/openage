@@ -646,14 +646,6 @@ inline std::vector<special_plan_t> plan_special(const SpecialView &v, const Spec
 			plan.push_back(special_plan_t::RESEARCH_CASTLE);
 		}
 	}
-	if (v.age >= 2 and v.water) {
-		if (not v.dock and not v.dock_planned) {
-			build(special_plan_t::BUILD_DOCK);
-		}
-		else if (v.dock and v.galleys < p.galleys) {
-			plan.push_back(special_plan_t::TRAIN_GALLEY);
-		}
-	}
 	if (v.age >= 3) {
 		if (not v.monastery and not v.monastery_planned) {
 			build(special_plan_t::BUILD_MONASTERY);
@@ -662,7 +654,13 @@ inline std::vector<special_plan_t> plan_special(const SpecialView &v, const Spec
 			plan.push_back(special_plan_t::TRAIN_MONK);
 		}
 		if (not v.workshop and not v.workshop_planned) {
-			build(special_plan_t::BUILD_WORKSHOP);
+			// the siege workshop needs a blacksmith (data condition): first a Feudal building
+			if (v.feudal_buildings == 0 and not v.feudal_planned) {
+				build(special_plan_t::BUILD_FEUDAL_BUILDING);
+			}
+			else if (v.feudal_buildings > 0) {
+				build(special_plan_t::BUILD_WORKSHOP);
+			}
 		}
 		else if (v.workshop) {
 			if (v.rams < p.rams) {
@@ -671,6 +669,15 @@ inline std::vector<special_plan_t> plan_special(const SpecialView &v, const Spec
 			else if (v.mangonels < p.mangonels) {
 				plan.push_back(special_plan_t::TRAIN_MANGONEL);
 			}
+		}
+	}
+	// ships last: monastery and siege workshop come first in the Castle Age
+	if (v.age >= 2 and v.water) {
+		if (not v.dock and not v.dock_planned) {
+			build(special_plan_t::BUILD_DOCK);
+		}
+		else if (v.dock and v.galleys < p.galleys) {
+			plan.push_back(special_plan_t::TRAIN_GALLEY);
 		}
 	}
 	return plan;
