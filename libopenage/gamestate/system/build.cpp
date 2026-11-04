@@ -372,7 +372,9 @@ time::time_t search_step(const std::shared_ptr<GameEntity> &entity,
 	double best_d = building::FOLLOW_SEARCH_RADIUS * building::FOLLOW_SEARCH_RADIUS;
 	for (const auto &[id, e] : state->get_game_entities()) {
 		auto c = constructable_of(e);
+		// fields are left to their builder: it becomes their only farmer (spec 13 L33), a helper would take the field
 		if (c == nullptr or c->is_complete() or not e->has_component(component::component_t::OWNERSHIP)
+		    or e->has_component(component::component_t::HARVESTABLE)
 		    or owner_of(e, time) != owner or (state->get_combat() and state->get_combat()->is_dead(id))) {
 			continue;
 		}
