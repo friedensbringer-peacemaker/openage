@@ -1948,10 +1948,10 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		}
 		std::optional<std::array<double, 2>> foe1, foe2, foe3, own, mangonel, treb;
 		if (monk) {
-			foe1 = near_square((*monk)[0] + 7.0, (*monk)[1], 1, false, 0.0);
+			foe1 = near_square((*monk)[0] + 5.0, (*monk)[1] + 5.0, 1, false, 0.0);
 			if (foe1) {
 				mark(*foe1, 1);
-				foe2 = near_square((*foe1)[0] + 3.0, (*foe1)[1] - 3.0, 1, false, 0.0);
+				foe2 = near_square((*foe1)[0] + 1.0, (*foe1)[1] + 4.0, 1, false, 0.0);
 			}
 			if (foe2) {
 				mark(*foe2, 1);
@@ -1980,27 +1980,38 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		plan.spawns.push_back({"-sync-0", gaia_less, "Militia", (*foe1)[0], (*foe1)[1]});
 		plan.spawns.push_back({"-sync-0", gaia_less, "Militia", (*foe2)[0], (*foe2)[1]});
 		plan.spawns.push_back({"-sync-0", gaia_less, "Militia", (*foe3)[0], (*foe3)[1]});
-		plan.spawns.push_back({"-sync-0", 0, "Militia", (*own)[0], (*own)[1]});
-		plan.spawns.push_back({"-sync-0", 0, "Mangonel", (*mangonel)[0], (*mangonel)[1]});
+		// the own militia next to the target comes after the conversion (the monk would heal it first)
+		plan.spawns.push_back({"-s2-konvertieren", 0, "Militia", (*own)[0], (*own)[1]});
+		// after the conversion as well: its shots would make the militia walk away from the right click
+		plan.spawns.push_back({"-s2-konvertieren", 0, "Mangonel", (*mangonel)[0], (*mangonel)[1]});
 		plan.spawns.push_back({"-sync-0", 0, "Trebuchet", (*treb)[0], (*treb)[1]});
 		capture(3.0, "-s1-start");
 		auto mp = pixel((*monk)[0], (*monk)[1], 0.6);
 		log_px("monk", mp);
-		click(3.5, mp, E::kLeftButton);
+		// a drag box around the unit (a click on the sprite may miss it)
+		auto box_select = [&](double t, std::pair<int, int> p, int box) {
+			add(t, E::kMouseMove, p.first - box, p.second - box, 0, 0);
+			add(t + 0.1, E::kMouseDown, p.first - box, p.second - box, E::kLeftButton, E::kLeftButton);
+			for (int i = 1; i <= 4; ++i) {
+				add(t + 0.1 + 0.05 * i, E::kMouseMove, p.first - box + box * i / 2, p.second - box + box * i / 2, 0, E::kLeftButton);
+			}
+			add(t + 0.4, E::kMouseUp, p.first + box, p.second + box, E::kLeftButton, 0);
+		};
+		box_select(3.5, mp, 30);
 		capture(4.2, "-sync-s1");
 		click(4.5, pixel((*foe1)[0], (*foe1)[1], 0.6), E::kRightButton);
 		capture(16.0, "-s2-konvertieren");
 		auto gp = pixel((*mangonel)[0], (*mangonel)[1], 0.6);
 		log_px("mangonel", gp);
-		click(16.5, gp, E::kLeftButton);
-		capture(17.2, "-sync-s2");
-		click(17.5, pixel((*foe2)[0], (*foe2)[1], 0.6), E::kRightButton);
-		capture(30.0, "-s3-mange");
+		box_select(18.5, gp, 30);
+		capture(19.2, "-sync-s2");
+		click(19.5, pixel((*foe2)[0], (*foe2)[1], 0.6), E::kRightButton);
+		capture(32.0, "-s3-mange");
 		auto tp = pixel((*treb)[0], (*treb)[1], 0.8);
 		log_px("trebuchet", tp);
-		click(30.5, tp, E::kLeftButton);
-		capture(31.5, "-s4-tribock");
-		capture(32.0, nullptr);
+		box_select(32.5, tp, 30);
+		capture(33.5, "-s4-tribock");
+		capture(34.0, nullptr);
 		return steps;
 	}
 	if (args.replay_fish) {

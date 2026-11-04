@@ -107,7 +107,13 @@ void WorldObject::update_uniforms(const time::time_t &time) {
 	// Animation information
 	auto [last_update, animation_info] = this->animation_info.frame(time);
 
-	for (size_t layer_idx = 0; layer_idx < this->layer_uniforms.size(); ++layer_idx) {
+	// XR fork W6: an animation with fewer layers than the renderables (mangonel/trebuchet attack, until the
+	// renderables follow in the next fetch) draws only its layers, the others stay hidden
+	const size_t layers = std::min(this->layer_uniforms.size(), animation_info->get_layer_count());
+	for (size_t layer_idx = layers; layer_idx < this->layer_uniforms.size(); ++layer_idx) {
+		this->layer_uniforms[layer_idx]->update(this->scale, 0.0f);
+	}
+	for (size_t layer_idx = 0; layer_idx < layers; ++layer_idx) {
 		auto &layer_unifs = this->layer_uniforms.at(layer_idx);
 		layer_unifs->update(this->obj_world_position, current_pos.to_world_space());
 
