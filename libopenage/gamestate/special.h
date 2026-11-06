@@ -122,6 +122,8 @@ struct SpecialType {
 
 	// ---- trebuchet (transform unit of the data, packed/unpacked)
 	bool packable = false;
+	/// standing graphic of the unpacked form (GenieUnit.form_overrides, empty in modpacks before tcfix6)
+	std::string unpacked_idle_animation;
 	/// melee attack (ApplyDiscreteEffect "Attack"); rams = melee siege: they attack buildings only
 	bool melee = false;
 	bool ram = false;
@@ -239,6 +241,10 @@ public:
 	 */
 	std::string order_repair(const std::shared_ptr<GameState> &state, entity_id_t villager, entity_id_t target,
 	                         const time::time_t &time);
+	/// a trebuchet stands with the graphic of its form
+	void show_form(const std::shared_ptr<GameState> &state, entity_id_t trebuchet, bool unpacked,
+	               const time::time_t &time);
+
 	/// the attack rule of a trebuchet: unpacks to shoot, packs to walk; packed no automatic targets
 	combat::CombatState::siege_gate_t siege_gate(const std::shared_ptr<GameState> &state, entity_id_t id, bool in_range,
 	                                             bool explicit_order, const time::time_t &time);

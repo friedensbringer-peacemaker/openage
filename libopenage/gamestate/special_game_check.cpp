@@ -800,10 +800,20 @@ void check_siege(const Options &opt) {
 	w.advance(0.5);
 	const auto *tt = w.special()->type_of(w.state, treb, w.now);
 	check(tt and tt->packable, "trebuchet can pack (transform unit of the data)");
+	check(tt and tt->unpacked_idle_animation.find("idle_form_override_trebuchet") != std::string::npos,
+	      "the unpacked form has its own standing graphic in the data: " + (tt ? tt->unpacked_idle_animation : std::string{}));
+	const auto stands_unpacked = [&]() {
+		return treb->get_shown_animation_path().find("idle_form_override_trebuchet") != std::string::npos;
+	};
+	check(not stands_unpacked(), "packed graphic before unpacking: " + treb->get_shown_animation_path());
 	auto r = w.special()->set_packed(w.state, treb->get_id(), false, w.now);
 	check(r.empty(), "trebuchet unpacks" + (r.empty() ? std::string{} : ": " + r));
+	w.advance(1.0);
+	check(not stands_unpacked(), "still the packed graphic while it unpacks");
 	check(w.advance_until(special::SpecialState::PACK_TIME + 1.0, [&]() { return w.special()->is_unpacked(treb->get_id()); }),
 	      "unpacked after " + fmt(special::SpecialState::PACK_TIME) + " s");
+	w.advance(0.2);
+	check(stands_unpacked(), "stands with the unpacked graphic: " + treb->get_shown_animation_path());
 	auto p0 = w.position(treb);
 	auto dest = w.land_near(p0.ne.to_double() + 4.0, p0.se.to_double(), 8);
 	if (dest) {
@@ -818,6 +828,7 @@ void check_siege(const Options &opt) {
 		}),
 		      "after packing it moves");
 		check(not w.special()->is_unpacked(treb->get_id()), "trebuchet packed");
+		check(not stands_unpacked(), "packed graphic again after packing: " + treb->get_shown_animation_path());
 	}
 }
 
@@ -1248,6 +1259,10 @@ void check_save(const Options &opt) {
 	check(std::abs(faith_after - faith_before) < 1.0, "faith restored: " + fmt(faith_after));
 	auto trebs = l.of(0, "Trebuchet");
 	check(trebs.size() == 1 and l.special()->is_unpacked(trebs.front()->get_id()), "trebuchet unpacked after loading");
+	if (trebs.size() == 1) {
+		check(trebs.front()->get_shown_animation_path().find("idle_form_override_trebuchet") != std::string::npos,
+		      "unpacked graphic after loading: " + trebs.front()->get_shown_animation_path());
+	}
 	auto again = save::capture(l.state, l.settings, l.game->get_generated_entity_range(), l.now, "W6");
 	auto count = [](const save::SaveData &d) {
 		size_t n = 0;

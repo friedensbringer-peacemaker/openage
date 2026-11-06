@@ -157,6 +157,26 @@ void carry_animations_of(const std::shared_ptr<nyan::View> &view, const nyan::Ob
 	}
 }
 
+/// Standing graphic of the unpacked form: GenieUnit.form_overrides[*] (AnimationOverride.ability, .animations).
+/// Modpacks before tcfix6 do not have the member: the trebuchet then keeps its packed graphic.
+void form_animations_of(const std::shared_ptr<nyan::View> &view, const nyan::Object &genie_unit, SpecialType &t) {
+	try {
+		for (const auto &override_value : genie_unit.get_orderedset("GenieUnit.form_overrides")) {
+			auto override_obj = view->get_object(object_name(override_value));
+			auto ability = view->get_object(override_obj.get_object("AnimationOverride.ability").get_name());
+			if (not has_parent(ability, "engine.ability.type.Idle")) {
+				continue;
+			}
+			for (const auto &animation_value : override_obj.get_set("AnimationOverride.animations")) {
+				t.unpacked_idle_animation = api::APIAnimation::get_animation_path(view->get_object(object_name(animation_value)));
+			}
+		}
+	}
+	catch (const std::exception &err) {
+		log::log(DBG << "Special: no form graphics for " << t.name << ": " << err.what());
+	}
+}
+
 /// first animation of an Animated ability (empty if none)
 std::string ability_animation(const std::shared_ptr<GameEntity> &entity, component::component_t kind) {
 	if (not entity->has_component(kind)) {
@@ -391,6 +411,7 @@ SpecialType read_type(const std::shared_ptr<nyan::View> &view, const nyan::fqon_
 				const int transform = static_cast<int>(int_or(ability, "GenieUnitData.transform_unit_id", -1));
 				if (transform >= 0 and t.unit_class == 51) {
 					t.packable = true;
+					form_animations_of(view, ability, t);
 				}
 				if (capacity > 0 and not t.building) {
 					t.cargo_slots = std::max(t.cargo_slots, capacity);
@@ -737,6 +758,7 @@ void SpecialState::tick(const std::shared_ptr<GameState> &state, const time::tim
 				u->pack_until.reset();
 				u->unpacked = not u->pack_target;
 				this->stats.packs += 1;
+				this->show_form(state, id, u->unpacked, time);
 				log::log(INFO << "Special: " << describe(entity, time) << (u->unpacked ? " unpacked" : " packed")
 				              << " at t=" << fmt1(now));
 				if (not u->unpacked and u->after_pack) {
@@ -1455,6 +1477,23 @@ void SpecialState::show_carrying(const std::shared_ptr<GameState> &state, entity
 	entity->set_animation_overrides(time, overrides);
 }
 
+void SpecialState::show_form(const std::shared_ptr<GameState> &state, entity_id_t trebuchet, bool unpacked,
+                             const time::time_t &time) {
+	auto entity = find_entity(state, trebuchet);
+	if (entity == nullptr) {
+		return;
+	}
+	std::unordered_map<std::string, std::string> overrides;
+	const auto *t = unpacked ? this->type_of(state, entity, time) : nullptr;
+	if (t != nullptr and not t->unpacked_idle_animation.empty()) {
+		const auto idle = ability_animation(entity, component::component_t::IDLE);
+		if (not idle.empty()) {
+			overrides[idle] = t->unpacked_idle_animation;
+		}
+	}
+	entity->set_animation_overrides(time, overrides);
+}
+
 std::optional<entity_id_t> SpecialState::carried_relic(entity_id_t monk) const {
 	const auto *u = this->find_unit(monk);
 	return u ? u->relic : std::nullopt;
@@ -2060,6 +2099,7 @@ void SpecialState::load_entity(const std::shared_ptr<GameState> &state, entity_i
 	}
 	if (saved.siege_mode == "unpacked" and t and t->packable) {
 		u.unpacked = true;
+		this->show_form(state, id, true, time);
 	}
 	if (u.job.kind == job_t::NONE and not u.relic and not u.unpacked and not u.has_faith) {
 		this->units.erase(id);
