@@ -1996,7 +1996,8 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		if (treb) {
 			mark(*treb, 1);
 			carrier = near_square(tc[0] - 1.0, tc[1] + 7.0, 1, false, 1.0);
-			target = near_square((*treb)[0] - 7.0, (*treb)[1] + 3.0, 1, false, 3.0);
+			// up and to the left on the screen, in range (4 to 16)
+			target = near_square((*treb)[0] + 2.0, (*treb)[1] - 11.0, 1, false, 3.0);
 		}
 		if (target) {
 			mark(*target, 1);
@@ -2061,13 +2062,14 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		click(42.2, pixel((*away)[0], (*away)[1], 0.0), E::kRightButton);
 		capture(43.2, "-s6-traegt");
 		box_select(43.6, tp, 30);
-		add(44.2, E::kKeyDown, 0, 0, 0, 0, 'U');
-		add(44.25, E::kKeyUp, 0, 0, 0, 0, 'U');
-		capture(49.0, "-s7-aufgebaut");
-		click(49.2, pixel((*target)[0], (*target)[1], 0.5), E::kRightButton);
-		capture(50.0, "-s8-schuss");
-		capture(50.8, "-s9-schuss");
-		capture(51.5, nullptr);
+		// the command grid needs the selection in the production snapshot
+		add(45.0, E::kKeyDown, 0, 0, 0, 0, 'U');
+		add(45.05, E::kKeyUp, 0, 0, 0, 0, 'U');
+		capture(50.0, "-s7-aufgebaut");
+		click(50.2, pixel((*target)[0], (*target)[1], 0.5), E::kRightButton);
+		capture(51.0, "-s8-schuss");
+		capture(52.0, "-s9-schuss");
+		capture(53.0, nullptr);
 		return steps;
 	}
 	if (args.replay_fish) {
