@@ -255,6 +255,12 @@ class GenieGameEntityGroup(ConverterObjectGroup):
 
         return False
 
+    def get_shooter_unit(self):
+        """
+        Returns the unit whose projectiles, attacks and ranges the line uses when it shoots.
+        """
+        return self.get_head_unit()
+
     def has_projectile(self, projectile_id: int, civ_id: int = -1) -> bool:
         """
         Checks if units shoot a projectile with this ID.
@@ -876,6 +882,15 @@ class GenieUnitTransformGroup(GenieUnitLineGroup):
 
         # -1 -> no projectile
         return projectile_id_0 > -1 or projectile_id_1 > -1 or projectile_id_2 > -1 or projectile_id_3 > -1
+
+    def get_shooter_unit(self):
+        """
+        XR fork: the packed trebuchet has no projectile, only its unpacked form shoots.
+        """
+        if self.head_unit["projectile_id0"].value > -1 or self.head_unit["projectile_id1"].value > -1:
+            return self.head_unit
+
+        return self.transform_unit
 
     def get_head_unit_id(self) -> int:
         """

@@ -45,11 +45,14 @@ class AoCEffectSubprocessor:
         """
         dataset = line.data
 
-        if projectile != 1:
+        if projectile == 0:
+            current_unit = line.get_shooter_unit()
+
+        elif projectile != 1:
             current_unit = line.get_head_unit()
 
         else:
-            projectile_id = line.get_head_unit()["projectile_id1"].value
+            projectile_id = line.get_shooter_unit()["projectile_id1"].value
             current_unit = dataset.genie_units[projectile_id]
 
         effects: list[ForwardRef | NyanObject] = []
@@ -58,7 +61,7 @@ class AoCEffectSubprocessor:
 
         # XR fork: area damage of the attacker (blast radius) as engine.effect.property.type.Area;
         # projectiles lose effect linearly to the edge, melee area attacks keep it (AoE II)
-        attacker = line.get_head_unit()
+        attacker = line.get_shooter_unit() if projectile == 0 else line.get_head_unit()
         blast_range = 0.0
         if attacker.has_member("blast_range"):
             blast_range = float(attacker["blast_range"].value)
