@@ -62,6 +62,8 @@ enum class map_object_t : uint8_t {
 	// XR fork W3 (food), appended: placed only with MapSettings::herds
 	SHEEP,       ///< herdable (gaia until a player sees it), not blocking
 	BOAR,        ///< game that fights back, not blocking
+	// XR fork W6, appended: placed only with MapSettings::relics
+	RELIC,       ///< relic (gaia), carried by monks into a monastery
 	COUNT,
 };
 
@@ -175,6 +177,13 @@ GeneratedMap generate_map(const MapSettings &settings);
  * Edge length the generator uses for a requested size (multiple of 16, 48..256).
  */
 size_t map_generator_size(size_t requested);
+
+/**
+ * Number of relics on a random map of side N (XR fork W6). The specification names relics
+ * on random maps without a number (10 §10.2); assumption: one per 16 tiles of side, 2 to 8
+ * (48: 3, 64: 4, 96: 6).
+ */
+size_t relic_count(size_t N);
 
 /**
  * Names for logs.

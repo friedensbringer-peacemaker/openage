@@ -12,6 +12,7 @@
 #include "gamestate/food.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/player.h"
+#include "gamestate/special.h"
 #include "gamestate/tech.h"
 #include "gamestate/vision/vision_state.h"
 
@@ -26,7 +27,8 @@ GameState::GameState(const std::shared_ptr<nyan::Database> &db,
 	tech{std::make_shared<tech::TechState>()},
 	vision{std::make_shared<vision::VisionState>(event_loop)},
 	food{std::make_shared<food::FoodState>(event_loop)},
-	buildings{std::make_shared<building::BuildingState>()} {
+	buildings{std::make_shared<building::BuildingState>()},
+	special{std::make_shared<special::SpecialState>(event_loop)} {
 	// XR fork: auto attacks and picks respect the fog of war
 	this->combat->set_vision(this->vision);
 }
@@ -37,6 +39,10 @@ const std::shared_ptr<food::FoodState> &GameState::get_food() const {
 
 const std::shared_ptr<building::BuildingState> &GameState::get_buildings() const {
 	return this->buildings;
+}
+
+const std::shared_ptr<special::SpecialState> &GameState::get_special() const {
+	return this->special;
 }
 
 const std::shared_ptr<nyan::View> &GameState::get_db_view() {

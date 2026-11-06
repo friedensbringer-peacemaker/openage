@@ -32,7 +32,7 @@
  *  F8. Fishing (coast map): a dock only next to the shore (not on land), fishing ship
  *      trained at the dock, it fishes and drops the food at the dock; a fishing trap on
  *      water, built by the ship and fished.
- *  F9. Save game version 6 (W5: the keys of W3 unchanged): converted sheep, a carcass, a farm, queued reseeds; save ->
+ *  F9. Save game version 6 (the keys of W3 unchanged): converted sheep, a carcass, a farm, queued reseeds; save ->
  *      load -> save gives the same state; a version 3 file still loads (map without animals).
  *  F10. Computer opponent: builds a mill and farms, herds and hunts, reaches the Feudal
  *      Age (time printed; earlier than 18:40 of 0.6.0-xr.0.14).
@@ -777,7 +777,8 @@ void check_fishing(const Options &opt) {
 	snap = w.production->snapshot();
 	auto ship_option = w.option(snap, "FishingShip");
 	check(ship_option != nullptr and ship_option->available, "dock trains fishing ships");
-	check(w.option(snap, "Galley") == nullptr and w.option(snap, "TransportShip") == nullptr, "no warships yet (W6)");
+	// W6: the dock also lists the warships and the transport ship now (SHIPS free, age rules of the data)
+	check(w.option(snap, "FishingShip") != nullptr, "dock lists the fishing ship among its ships");
 	w.production->train_in(dock->get_id(), "FishingShip");
 	check(w.advance_until(ship_option->time + 10.0, [&]() { return not w.of(0, "FishingShip").empty(); }),
 	      "fishing ship trained");

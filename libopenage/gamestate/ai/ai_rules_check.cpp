@@ -8,6 +8,7 @@
  * Prints "ai rules check: N checks, 0 failures" and exits with 0 if all pass.
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -354,6 +355,60 @@ int main() {
 						}
 					}
 				}
+			}
+		}
+	}
+
+	// XR fork W6: special plan (monastery, monks, siege, ships) – parameter sweep
+	for (int age = 1; age <= 4; ++age) {
+		for (size_t vil : {5u, 20u, 30u}) {
+			for (size_t feudal = 0; feudal <= 2; ++feudal) {
+				for (int flags = 0; flags < 64; ++flags) {
+					SpecialView v;
+					v.age = age;
+					v.villagers = vil;
+					v.feudal_buildings = feudal;
+					v.castle_offered = (flags & 1) != 0;
+					v.monastery = (flags & 2) != 0;
+					v.workshop = (flags & 4) != 0;
+					v.dock = (flags & 8) != 0;
+					v.water = (flags & 16) != 0;
+					v.researching = (flags & 32) != 0;
+					v.monks = static_cast<size_t>(flags % 3);
+					v.rams = static_cast<size_t>((flags / 3) % 2);
+					auto plan = plan_special(v);
+					const std::string what = "special plan a" + std::to_string(age) + " v" + std::to_string(vil) + " f"
+					                         + std::to_string(feudal) + " x" + std::to_string(flags);
+					auto has = [&](special_plan_t w) { return std::find(plan.begin(), plan.end(), w) != plan.end(); };
+					size_t builds = 0;
+					for (auto w : plan) {
+						builds += w == special_plan_t::BUILD_FEUDAL_BUILDING or w == special_plan_t::BUILD_MONASTERY
+						                  or w == special_plan_t::BUILD_WORKSHOP or w == special_plan_t::BUILD_DOCK ?
+						              1 :
+						              0;
+					}
+					check(builds <= 1, what + ": one building at a time");
+					check(not has(special_plan_t::RESEARCH_CASTLE)
+					          or (age == 2 and vil >= 20 and feudal >= 2 and v.castle_offered and not v.researching),
+					      what + ": castle age only with two feudal buildings");
+					check(age >= 3 or (not has(special_plan_t::TRAIN_MONK) and not has(special_plan_t::BUILD_MONASTERY)
+					                   and not has(special_plan_t::TRAIN_RAM) and not has(special_plan_t::BUILD_WORKSHOP)),
+					      what + ": monks and siege from the castle age");
+					check(not has(special_plan_t::TRAIN_MONK) or (v.monastery and v.monks < 2), what + ": monks need a monastery");
+					check(not has(special_plan_t::TRAIN_RAM) or (v.workshop and v.rams < 1), what + ": ram from the workshop");
+					check(v.water or (not has(special_plan_t::BUILD_DOCK) and not has(special_plan_t::TRAIN_GALLEY)),
+					      what + ": ships only with water");
+					check(age < 3 or v.monastery or has(special_plan_t::BUILD_MONASTERY) or builds == 1,
+					      what + ": the castle age builds a monastery");
+				}
+			}
+		}
+	}
+	for (double faith : {0.0, 50.0, 99.9, 100.0}) {
+		for (double d : {0.0, 9.0, 11.0, 11.5}) {
+			for (bool mil : {false, true}) {
+				check(ai_should_convert(faith, d, 9.0, mil) == (faith >= 100.0 and mil and d <= 11.0),
+				      "convert rule faith " + std::to_string(faith) + " d " + std::to_string(d));
 			}
 		}
 	}

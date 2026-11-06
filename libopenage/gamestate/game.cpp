@@ -30,6 +30,7 @@
 #include "gamestate/entity_factory.h"
 #include "gamestate/buildings.h"
 #include "gamestate/food.h"
+#include "gamestate/special.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/heightmap.h"
@@ -89,6 +90,9 @@ Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 		this->start_vision(map_settings.vision, start_time);
 		// XR fork W3: herdables, hunting, carcasses, farms (gaia = the player after the starts)
 		this->state->get_food()->start(this->state, {static_cast<player_id_t>(this->start_count)}, start_time);
+		// XR fork W6: monks, relics, area damage, trebuchets, carriers
+		this->state->get_special()->start(this->state, {static_cast<player_id_t>(this->start_count)}, map_settings.seed,
+		                                  start_time);
 		// ai (XR fork): computer opponent
 		this->start_ai(event_loop, map_settings, start_time);
 		return;
@@ -96,6 +100,8 @@ Game::Game(const std::shared_ptr<openage::event::EventLoop> &event_loop,
 	this->generate_terrain(terrain_factory);
 	// XR fork: the fixed test map is always fully visible (render checks compare it byte for byte)
 	this->start_vision(vision_mode_t::ALL, start_time);
+	// XR fork W6: special abilities also on the test map (no gaia there)
+	this->state->get_special()->start(this->state, {}, map_settings.seed, start_time);
 }
 
 const std::shared_ptr<GameState> &Game::get_state() const {
@@ -383,6 +389,8 @@ RandomMapObjects random_map_objects(const std::string &modpack) {
 	// XR fork W3: herdables and game
 	o(map_object_t::SHEEP) = entity("sheep", "Sheep");
 	o(map_object_t::BOAR) = entity("boar", "Boar");
+	// XR fork W6: relics (gaia)
+	o(map_object_t::RELIC) = entity("relic", "Relic");
 	return result;
 }
 

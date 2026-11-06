@@ -24,7 +24,7 @@
  *  T5. Civilisations: Britons (player 0) and Japanese (player 1): civ recorded,
  *      castle of the Britons trains longbowmen (game_setup patch), the town
  *      centres show different architecture, a fixed and a random choice.
- *  T6. Save game (version 5 since W3 + W4) with civilisation, technologies and a queued
+ *  T6. Save game (version 6 since W6) with civilisation, technologies and a queued
  *      research; loading applies them again (villager health, age); a version 1
  *      file still loads.
  *  T7. Computer opponent: researches Loom and the Feudal Age (builds the second
@@ -410,7 +410,7 @@ void check_research(const Options &opt) {
 	      "save text with civilisation, techs and the queued research");
 	save::SaveData parsed;
 	std::string error;
-	check(save::parse(text, parsed, error), "parse version 5 " + error);
+	check(save::parse(text, parsed, error), "parse version 6 " + error);
 	MapSettings loaded_map = parsed.map;
 	World l{opt, loaded_map};
 	auto result = save::restore(parsed, l.state, l.loop, l.factory, l.production, l.game->get_generated_entity_range(), l.now);

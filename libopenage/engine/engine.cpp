@@ -15,6 +15,7 @@
 #include "gamestate/production.h"
 #include "gamestate/save_game.h"
 #include "gamestate/simulation.h"
+#include "gamestate/special.h"
 #include "input/controller/game/controller.h"
 #include "presenter/presenter.h"
 #include "time/clock.h"
@@ -255,6 +256,24 @@ HudInfo Engine::query_hud(uint64_t player) const {
 					if (auto locked = buildings->is_locked_shared(first.id)) {
 						first.gate = true;
 						first.gate_locked = *locked;
+					}
+				}
+				// XR fork W6: faith, relics, cargo, trebuchet
+				if (auto special = state->get_special()) {
+					if (auto si = special->get_info(first.id)) {
+						first.monk = si->monk;
+						first.heals = si->heals;
+						first.faith = si->faith;
+						first.relic = si->relic;
+						first.special_job = si->job;
+						first.relics = si->relics;
+						first.relic_gold = si->relic_gold;
+						first.cargo = si->cargo;
+						first.cargo_max = si->cargo_max;
+						first.transport = si->transport;
+						first.packable = si->packable;
+						first.unpacked = si->unpacked;
+						first.packing = si->packing;
 					}
 				}
 				for (auto id : info.selected) {

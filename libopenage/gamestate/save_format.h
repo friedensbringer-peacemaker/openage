@@ -52,9 +52,11 @@ namespace openage::gamestate::save {
 ///    garrison, town bell per entity; no "herds" key, the map had no animals);
 /// 5: W3 + W4 together (both sets of keys).
 /// 6: optional keys of round W5 (wall drag of a builder "wall_queue", gates "gate_dir"/"gate_locked") and of
-///    round W6; a missing key means its default.
+///    round W6 ("relics" of the map, "faith", "convert_target", "relic_carry", "relic_store", "cargo",
+///    "siege_mode" per entity); a missing key means its default.
 /// Older versions still load (missing fields: no civilisation, nothing researched, vision NORMAL with nothing
-/// explored, aggressive stance, no garrison; maps without a "herds" key before 5 had no animals: herds off).
+/// explored, aggressive stance, no garrison; maps without a "herds" key before 5 had no animals: herds off;
+/// maps without a "relics" key before 6 had no relics: relics off).
 constexpr int FORMAT_VERSION = 6;
 
 /// slots 1..SLOT_COUNT are chosen by the player, slot 0 is the autosave,
@@ -153,6 +155,15 @@ struct SavedEntity {
 	/// XR fork W5 (version 6): a gate – orientation (building_math.h gate_dir_t) and lock
 	std::optional<int> gate_dir{};
 	bool gate_locked = false;
+	/// XR fork W6 (version 6): faith of a monk (missing = full), conversion in progress (target, faith
+	/// time), carried relic, relics in a monastery, units in a carrier, trebuchet "unpacked"
+	std::optional<double> faith{};
+	std::optional<uint64_t> convert_target{};
+	double convert_time = 0.0;
+	std::optional<uint64_t> relic_carry{};
+	std::vector<uint64_t> relic_store{};
+	std::vector<uint64_t> cargo{};
+	std::string siege_mode{};
 };
 
 /// whole save game
@@ -302,6 +313,7 @@ inline std::string serialize(const SaveData &d) {
 	}
 	out << "vision = " << vision_mode_name(m.vision) << "\n";
 	out << "herds = " << (m.herds ? 1 : 0) << "\n";
+	out << "relics = " << (m.relics ? 1 : 0) << "\n";
 	for (const auto &p : d.players) {
 		out << "[player]\n";
 		out << "id = " << p.id << "\n";
@@ -399,6 +411,31 @@ inline std::string serialize(const SaveData &d) {
 				out << "gate_locked = 1\n";
 			}
 		}
+		// XR fork W6 (version 6)
+		if (e.faith) {
+			out << "faith = " << fmt_double(*e.faith) << "\n";
+		}
+		if (e.convert_target) {
+			out << "convert_target = " << *e.convert_target << " " << fmt_double(e.convert_time) << "\n";
+		}
+		if (e.relic_carry) {
+			out << "relic_carry = " << *e.relic_carry << "\n";
+		}
+		auto list = [&](const char *key, const std::vector<uint64_t> &ids) {
+			if (ids.empty()) {
+				return;
+			}
+			out << key << " =";
+			for (auto id : ids) {
+				out << " " << id;
+			}
+			out << "\n";
+		};
+		list("relic_store", e.relic_store);
+		list("cargo", e.cargo);
+		if (not e.siege_mode.empty()) {
+			out << "siege_mode = " << e.siege_mode << "\n";
+		}
 	}
 	if (not d.removed.empty()) {
 		out << "[removed]\n";
@@ -426,6 +463,7 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 	bool has_map = false;
 	bool has_type = false;
 	bool has_herds = false;
+	bool has_relics = false;
 	size_t line_no = 0;
 	auto fail = [&](const std::string &what) {
 		error = "Spielstand beschädigt (Zeile " + std::to_string(line_no) + ": " + what + ")";
@@ -580,6 +618,14 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 				}
 				m.herds = h != 0;
 				has_herds = true;
+			}
+			else if (key == "relics") {
+				int r = 0;
+				if (not(v >> r)) {
+					return fail("relics");
+				}
+				m.relics = r != 0;
+				has_relics = true;
 			}
 			else if (key == "ai_seed") {
 				if (not(v >> m.ai.seed)) {
@@ -811,6 +857,43 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 				}
 				e.gate_locked = l != 0;
 			}
+			// XR fork W6 (version 6)
+			else if (key == "faith") {
+				double f = 0.0;
+				if (not(v >> f) or not std::isfinite(f)) {
+					return fail("Glaube");
+				}
+				e.faith = f;
+			}
+			else if (key == "convert_target") {
+				uint64_t target = 0;
+				double t = 0.0;
+				if (not(v >> target >> t) or not std::isfinite(t)) {
+					return fail("Konvertierung");
+				}
+				e.convert_target = target;
+				e.convert_time = t;
+			}
+			else if (key == "relic_carry") {
+				uint64_t relic = 0;
+				if (not(v >> relic)) {
+					return fail("Reliquie");
+				}
+				e.relic_carry = relic;
+			}
+			else if (key == "relic_store" or key == "cargo") {
+				auto &list = key == "cargo" ? e.cargo : e.relic_store;
+				uint64_t id = 0;
+				while (v >> id) {
+					list.push_back(id);
+				}
+			}
+			else if (key == "siege_mode") {
+				if (value != "packed" and value != "unpacked") {
+					return fail("siege_mode");
+				}
+				e.siege_mode = value;
+			}
 		}
 		else if (section == "removed") {
 			if (key == "ids") {
@@ -832,6 +915,10 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 		// XR fork W3: the map of older saves had no animals (same generated objects as then); a version 4 file
 		// without "herds" comes from the W4 branch (combat), whose maps had no animals either
 		d.map.herds = false;
+	}
+	if (d.version < 6 and not has_relics) {
+		// XR fork W6: the map of older saves had no relics (same generated objects as then)
+		d.map.relics = false;
 	}
 	if (not has_map or not has_type) {
 		error = "Spielstand beschädigt (Karte fehlt)";
@@ -936,6 +1023,23 @@ inline SaveData canonical(const SaveData &d, bool with_orders = false) {
 		}
 		e.bell_ne = round6(e.bell_ne);
 		e.bell_se = round6(e.bell_se);
+		// XR fork W6: conversion target, relics and cargo (new ids as well)
+		if (e.faith) {
+			e.faith = std::round(*e.faith * 100.0) / 100.0;
+		}
+		if (e.convert_target) {
+			e.convert_target = remap(*e.convert_target);
+			e.convert_time = round6(e.convert_time);
+		}
+		if (e.relic_carry) {
+			e.relic_carry = remap(*e.relic_carry);
+		}
+		for (auto &id : e.relic_store) {
+			id = remap(id);
+		}
+		for (auto &id : e.cargo) {
+			id = remap(id);
+		}
 	}
 	return c;
 }

@@ -40,8 +40,16 @@ constexpr int kAoeStanceCount = 4;
 constexpr int kAoeCmdFormation0 = 960;       // + combat::formation_t − 1: Linie (Q), Kasten (W), Gestaffelt (E), Flanke (F)
 constexpr int kAoeFormationCount = 4;
 constexpr int kAoeCmdBell = 965;             // Dorfzentrum: Stadtglocke / Zurück an die Arbeit (B)
-constexpr int kAoeCmdRepair = 966;           // W5: Dorfbewohner reparieren (R), Ziel: eigenes beschädigtes Gebäude
-constexpr int kAoeCmdGateLock = 967;         // W5: Tor verriegeln / entriegeln (Platz 0, L)
+constexpr int kAoeCmdRepair = 973;           // W5: Dorfbewohner reparieren (R), Ziel: eigenes beschädigtes Gebäude
+constexpr int kAoeCmdGateLock = 974;         // W5: Tor verriegeln / entriegeln (Platz 0, L)
+// W6 Spezial (docs/aoe2-spec 05 §5.7–5.9, 06 §6.5, 08 §8.1/8.2): Mönche, Transporter, Tribock
+constexpr int kAoeCmdConvert = 966;         // Mönch: Konvertieren (C), Ziel: gegnerische Einheit
+constexpr int kAoeCmdHeal = 967;            // Mönch: Heilen (E), Ziel: eigene Einheit
+constexpr int kAoeCmdUnloadAt = 968;        // Transportschiff: Entladen (L), Ziel: Ufer
+constexpr int kAoeCmdPack = 969;            // Tribock: Packen (P)
+constexpr int kAoeCmdUnpack = 970;          // Tribock: Entpacken (U)
+constexpr int kAoeCmdDropRelic = 971;       // Mönch mit Reliquie: Reliquie ablegen
+constexpr int kAoeCmdUnloadHere = 972;      // Rammbock/Schiff: Entladen hier (L)
 // Sondertasten der Hotkeys (AoeCommand::hotkey): Entf und Tab
 constexpr char kAoeKeyDelete = 0x7f;
 constexpr char kAoeKeyTab = 0x09;
@@ -362,7 +370,53 @@ struct AoeCombat {
     bool deleteArmed = false;   // Quest: „Löschen“ wartet auf die Bestätigung
     bool gate = false;          // W5: Tor (Befehl Verriegeln/Entriegeln)
     bool gateLocked = false;
+    // W6: Mönch (Glaube 0–100, trägt Reliquie), Transporter (Ladung/Plätze, Schiff), Tribock
+    bool monk = false, heals = false, relic = false;
+    int faith = 0;
+    int cargo = 0, cargoMax = 0;
+    bool transport = false;
+    bool packable = false, unpacked = false, packing = false;
 };
+
+// W6: Befehle der Spezialeinheiten (Spec 08 §8.1: Mönch Konvertieren · Heilen auf 0/1, mit Reliquie
+// Reliquie ablegen auf 0, Transport Entladen auf 0, Packen/Entpacken auf 4; Tasten §8.2: C Konvertieren,
+// E Heilen, L Entladen, P Packen, U Entpacken). true = das Raster wurde belegt.
+inline bool aoeSpecialGrid(AoeModel& m, const AoeCombat& c, const AoeCommand& del) {
+    if (c.monk) {
+        m.grid.assign(static_cast<size_t>(kAoeGridCells), AoeCommand{});
+        if (c.relic) {
+            m.grid[0] = {kAoeCmdDropRelic, HudIcon::Back, "Reliquie ablegen", true, ""};
+        }
+        else {
+            const bool full = c.faith >= 100;
+            m.grid[0] = {kAoeCmdConvert, HudIcon::Emblem, "Konvertieren", full,
+                         full ? "" : "Glaube " + std::to_string(c.faith) + "/100", 'C'};
+            m.grid[1] = {kAoeCmdHeal, HudIcon::Tech, "Heilen", c.heals, c.heals ? "" : "kann nicht heilen", 'E'};
+        }
+        m.grid[3] = del;
+        m.grid[4] = {kAoeCmdGarrison, HudIcon::Garrison, "Garnison", true, "", 'G'};
+        m.grid[9] = {kAoeCmdHalt, HudIcon::Halt, "Halt", true, "", 'S'};
+        return true;
+    }
+    if (c.transport) {
+        m.grid.assign(static_cast<size_t>(kAoeGridCells), AoeCommand{});
+        const bool any = c.cargo > 0;
+        m.grid[0] = {kAoeCmdUnloadAt, HudIcon::Unload, "Entladen", any, any ? "" : "niemand an Bord", 'L'};
+        m.grid[3] = del;
+        m.grid[4] = {kAoeCmdUnloadHere, HudIcon::Unload, "Hier raus", any, any ? "" : "niemand an Bord"};
+        m.grid[9] = {kAoeCmdHalt, HudIcon::Halt, "Halt", true, "", 'S'};
+        return true;
+    }
+    if (c.packable) {
+        m.grid.assign(static_cast<size_t>(kAoeGridCells), AoeCommand{});
+        m.grid[3] = del;
+        m.grid[4] = c.unpacked ? AoeCommand{kAoeCmdPack, HudIcon::Hammer, "Packen", !c.packing, c.packing ? "baut gerade um" : "", 'P'}
+                               : AoeCommand{kAoeCmdUnpack, HudIcon::Hammer, "Entpacken", !c.packing, c.packing ? "baut gerade um" : "", 'U'};
+        m.grid[9] = {kAoeCmdHalt, HudIcon::Halt, "Halt", true, "", 'S'};
+        return true;
+    }
+    return false;
+}
 
 // Befehlsraster der Einheiten/Gebäude (Spec 08 §8.1, Tasten des klassischen Profils §8.2):
 //   Militär: Patrouille Z · Wachen X · Folgen C · Löschen Entf · Garnison G / Aggressiv A · Defensiv D ·
@@ -377,6 +431,7 @@ inline bool aoeCombatGrid(AoeModel& m, const AoeCombat& c, bool cancelTraining, 
     if (m.grid.size() < static_cast<size_t>(kAoeGridCells)) m.grid.resize(static_cast<size_t>(kAoeGridCells));
     const AoeCommand del = c.deleteArmed ? AoeCommand{kAoeCmdDelete, HudIcon::Cancel, "Sicher?", true, "", kAoeKeyDelete, true}
                                          : AoeCommand{kAoeCmdDelete, HudIcon::Cancel, "Löschen", true, "", kAoeKeyDelete};
+    if (!c.building && !c.villager && aoeSpecialGrid(m, c, del)) return true;
     if (c.military && !c.building && !c.villager) {
         m.grid.assign(static_cast<size_t>(kAoeGridCells), AoeCommand{});
         m.grid[0] = {kAoeCmdPatrol, HudIcon::Next, "Patrouille", true, "", 'Z'};
@@ -403,6 +458,10 @@ inline bool aoeCombatGrid(AoeModel& m, const AoeCombat& c, bool cancelTraining, 
             m.grid[static_cast<size_t>(10 + i)] = f;
         }
         m.grid[14] = {kAoeCmdAttackMove, HudIcon::Sword, "Angriffsbew.", true, "", kAoeKeyTab};
+        if (c.cargoMax > 0) {
+            // W6: Rammbock mit Infanterie (Spec 06 §6.5) – Garnisonsplatz wird „Entladen“
+            m.grid[4] = {kAoeCmdUnloadHere, HudIcon::Unload, "Entladen", c.cargo > 0, c.cargo > 0 ? "" : "niemand drin", 'L'};
+        }
         return true;
     }
     if (c.villager) {

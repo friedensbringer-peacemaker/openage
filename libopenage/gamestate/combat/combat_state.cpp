@@ -486,6 +486,12 @@ bool CombatState::order_attack(const std::shared_ptr<GameState> &state,
 	    or not(this->is_enemy(*a, *t, time) or this->is_hunt(*a, *t, time))) {
 		return false;
 	}
+	// XR fork W6: target rules of the special abilities
+	for (const auto &filter : this->target_filters) {
+		if (not filter(attacker, target)) {
+			return false;
+		}
+	}
 	if (a->stats->movable) {
 		// stop what the unit does (walking, gathering): the attack ticks take over
 		this->halt(a->entity, time);
@@ -1240,6 +1246,12 @@ void CombatState::engage(const std::shared_ptr<GameState> &state,
                          entity_id_t target,
                          bool explicit_order,
                          const time::time_t &time) {
+	// XR fork W6: target rules of the special abilities (automatic targets too)
+	for (const auto &filter : this->target_filters) {
+		if (not filter(attacker.entity->get_id(), target)) {
+			return;
+		}
+	}
 	if (not attacker.post and attacker.stats->movable and not attacker.inside) {
 		attacker.post = ground(this->position_of(attacker.entity, time));
 	}
@@ -1582,6 +1594,16 @@ void CombatState::attack(const std::shared_ptr<GameState> &state, Combatant &att
 	                      * this->terrain_factor_of(state, target, time);
 	this->apply_hit(state, *attacker.stats, attacker.entity->get_id(), this->owner_of(attacker.entity, time), target,
 	                factor, time);
+	// XR fork W6: area damage of melee attacks (elephants, rams, demolition ships)
+	if (not this->impact_handlers.empty()) {
+		const auto stats = attacker.stats;
+		const auto id = attacker.entity->get_id();
+		const auto owner = this->owner_of(attacker.entity, time);
+		const auto target_id = target.entity->get_id();
+		for (const auto &handler : this->impact_handlers) {
+			handler(id, owner, *stats, target_id, tpos.ne.to_double(), tpos.se.to_double(), time);
+		}
+	}
 }
 
 void CombatState::launch(const std::shared_ptr<GameState> &state, Combatant &attacker, Combatant &target,
@@ -1678,6 +1700,10 @@ void CombatState::impact(const std::shared_ptr<GameState> &state, uint64_t proje
 		if (t != nullptr and not t->dead and not t->inside) {
 			this->projectile_count.hits += 1;
 			this->apply_hit(state, *p.stats, p.shooter, p.owner, *t, p.elevation * this->terrain_factor_of(state, *t, time), time);
+			// XR fork W6: area damage around the impact
+			for (const auto &handler : this->impact_handlers) {
+				handler(p.shooter, p.owner, *p.stats, *p.target, p.flight.to.ne, p.flight.to.se, time);
+			}
 			this->publish_projectiles();
 			return;
 		}
@@ -1708,6 +1734,11 @@ void CombatState::impact(const std::shared_ptr<GameState> &state, uint64_t proje
 		this->projectile_count.miss_hits += 1;
 		this->apply_hit(state, *p.stats, p.shooter, p.owner, *best, p.elevation * this->terrain_factor_of(state, *best, time),
 		                time);
+	}
+	// XR fork W6: area damage around the impact (also of a miss)
+	for (const auto &handler : this->impact_handlers) {
+		handler(p.shooter, p.owner, *p.stats, best ? std::optional<entity_id_t>{best->entity->get_id()} : std::nullopt,
+		        p.flight.to.ne, p.flight.to.se, time);
 	}
 	this->publish_projectiles();
 }
@@ -2436,6 +2467,194 @@ match_state_t CombatState::get_match_state(player_id_t player) const {
 void CombatState::on_match_over(std::function<void(const MatchStatus &)> callback) {
 	std::lock_guard<std::mutex> lock{this->shared_mutex};
 	this->match_callbacks.push_back(std::move(callback));
+}
+
+// ---------------------------------------------------------------- XR fork W6: special abilities
+
+void CombatState::on_impact(impact_handler_t handler) {
+	this->impact_handlers.push_back(std::move(handler));
+}
+
+void CombatState::on_target(target_filter_t filter) {
+	this->target_filters.push_back(std::move(filter));
+}
+
+int64_t CombatState::damage_against(const CombatStats &attacker, entity_id_t target) const {
+	const auto *t = this->find(target);
+	if (t == nullptr) {
+		return 0;
+	}
+	return compute_damage(attacker.attack, t->stats->armor, 1.0);
+}
+
+bool CombatState::area_hit(const std::shared_ptr<GameState> &state,
+                           const CombatStats &attacker_stats,
+                           entity_id_t attacker_id,
+                           player_id_t attacker_owner,
+                           entity_id_t target,
+                           double factor,
+                           const time::time_t &time) {
+	auto *t = this->find(target);
+	if (t == nullptr or t->dead or t->inside or not t->stats->attackable() or not(factor > 0.0)) {
+		return false;
+	}
+	this->apply_hit(state, attacker_stats, attacker_id, attacker_owner, *t, factor, time);
+	return true;
+}
+
+bool CombatState::roll_accuracy(double accuracy) {
+	std::uniform_real_distribution<double> roll{0.0, 100.0};
+	return roll_hit(roll(this->rng), accuracy);
+}
+
+bool CombatState::stow(const std::shared_ptr<GameState> &state, entity_id_t id, entity_id_t carrier,
+                       const time::time_t &time) {
+	auto *c = this->find(id);
+	auto *k = this->find(carrier);
+	if (c == nullptr or k == nullptr or c->dead or k->dead or c->inside or id == carrier) {
+		return false;
+	}
+	c->entering.reset();
+	c->inside = carrier;
+	c->target.reset();
+	c->explicit_order = false;
+	c->fleeing = false;
+	if (c->tick) {
+		c->tick->cancel(time);
+		c->tick = nullptr;
+	}
+	this->clear_order(*c);
+	auto pos = component_of<component::Position>(c->entity, component::component_t::POSITION);
+	if (auto activity = component_of<component::Activity>(c->entity, component::component_t::ACTIVITY)) {
+		activity->cancel_events(time);
+	}
+	if (pos) {
+		pos->set_position(time, state->get_map()->on_terrain(this->position_of(k->entity, time)));
+	}
+	this->publish_info(*c);
+	this->publish_hidden();
+	return true;
+}
+
+bool CombatState::unstow(const std::shared_ptr<GameState> &state, entity_id_t id, size_t slot, bool require_spot,
+                         const time::time_t &time) {
+	auto *c = this->find(id);
+	if (c == nullptr or not c->inside) {
+		return false;
+	}
+	const auto *k = this->find(*c->inside);
+	auto map = state->get_map();
+	const Point base_pos = ground(this->position_of(k ? k->entity : c->entity, time));
+	std::optional<path::grid_id_t> grid;
+	if (auto move = component_of<component::Move>(c->entity, component::component_t::MOVE)) {
+		try {
+			auto path_type = move->get_ability().get<nyan::ObjectValue>("Move.path_type");
+			grid = map->get_grid_id(path_type->get_name());
+		}
+		catch (std::exception &) {
+		}
+	}
+	// a free spot around the carrier (golden angle steps, then wider rings), like leaving a building
+	const double carrier_radius = k ? k->stats->radius : 0.0;
+	const double base = carrier_radius + c->stats->radius + 0.45;
+	const auto &size = map->get_size();
+	Point spot = base_pos;
+	bool found = false;
+	for (int ring = 0; ring < 5 and not found; ++ring) {
+		for (int i = 0; i < 24 and not found; ++i) {
+			const double angle = 2.39996323 * static_cast<double>(slot + static_cast<size_t>(i) + static_cast<size_t>(ring) * 7);
+			const double r = base + 0.8 * ring;
+			Point p{base_pos.x + std::cos(angle) * r, base_pos.y + std::sin(angle) * r};
+			if (p.x < 0.5 or p.y < 0.5 or p.x > static_cast<double>(size[0]) - 0.5
+			    or p.y > static_cast<double>(size[1]) - 0.5) {
+				continue;
+			}
+			auto tile = phys(p).to_tile();
+			if (grid and not map->is_passable(*grid, tile)) {
+				continue;
+			}
+			spot = p;
+			found = true;
+		}
+	}
+	if (require_spot and not found) {
+		return false;
+	}
+	c->inside.reset();
+	auto pos = component_of<component::Position>(c->entity, component::component_t::POSITION);
+	if (pos) {
+		pos->set_position(time, map->on_terrain(phys(spot)));
+	}
+	c->post = spot;
+	if (auto activity = component_of<component::Activity>(c->entity, component::component_t::ACTIVITY)) {
+		activity->cancel_events(time);
+		activity->init(time);
+		c->entity->get_manager()->run_activity_system(time);
+	}
+	this->publish_info(*c);
+	this->publish_hidden();
+	return true;
+}
+
+void CombatState::change_owner(const std::shared_ptr<GameState> &state,
+                               entity_id_t id,
+                               player_id_t owner,
+                               const std::shared_ptr<nyan::View> &db_view,
+                               const nyan::fqon_t &nyan_entity,
+                               const time::time_t &time) {
+	auto *c = this->find(id);
+	if (c == nullptr or c->dead) {
+		return;
+	}
+	auto ownership = component_of<component::Ownership>(c->entity, component::component_t::OWNERSHIP);
+	if (ownership == nullptr) {
+		return;
+	}
+	const auto before = ownership->get_owners().get(time);
+	ownership->set_owner(time, owner);
+	if (c->tick) {
+		c->tick->cancel(time);
+		c->tick = nullptr;
+	}
+	c->target.reset();
+	c->explicit_order = false;
+	c->entering.reset();
+	c->fleeing = false;
+	c->attackers.clear();
+	c->locks.clear();
+	c->by_bell = false;
+	c->resume_gather.reset();
+	c->resume_build.reset();
+	this->clear_order(*c);
+	if (c->stats->movable and component_of<component::Activity>(c->entity, component::component_t::ACTIVITY)) {
+		this->halt(c->entity, time);
+	}
+	c->post = ground(this->position_of(c->entity, time));
+	if (not nyan_entity.empty() and db_view != nullptr) {
+		// the new owner's technologies (health scaled with the maximum, like a replacement)
+		this->refresh_entity(c->entity, db_view, nyan_entity, false, true, time);
+	}
+	if (not c->entity->get_animation_path().empty()) {
+		// the player colour of the sprite follows the owner
+		c->entity->render_update(time, c->entity->get_animation_path());
+	}
+	// a building lets the garrison of the old owner out
+	if (not c->occupants.empty()) {
+		this->eject_all(state, *c, false, time);
+	}
+	log::log(INFO << "Combat: " << describe(c->entity, *c->stats, owner) << " changes from player " << before
+	              << " to player " << owner << " at t=" << time.to_double());
+	this->publish_info(*c);
+	this->update_match(time);
+}
+
+void CombatState::halt_entity(entity_id_t id, const time::time_t &time) {
+	auto *c = this->find(id);
+	if (c == nullptr or c->dead or not c->stats->movable
+	    or component_of<component::Activity>(c->entity, component::component_t::ACTIVITY) == nullptr) {
+		return;
+	}
+	this->halt(c->entity, time);
 }
 
 } // namespace openage::gamestate::combat

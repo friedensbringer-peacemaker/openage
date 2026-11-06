@@ -40,6 +40,10 @@ namespace vision {
 class VisionState;
 }
 
+namespace special {
+class SpecialState;
+} // namespace special
+
 namespace food {
 class FoodState;
 }
@@ -112,6 +116,11 @@ public:
 	 * Buildings of round W5 (XR fork): gates, build speed, messages of the build system.
 	 */
 	const std::shared_ptr<building::BuildingState> &get_buildings() const;
+
+	/**
+	 * Special abilities (XR fork W6): monks, relics, area damage, trebuchets, carriers.
+	 */
+	const std::shared_ptr<special::SpecialState> &get_special() const;
 
 	/**
 	 * Add a new player to the index.
@@ -221,6 +230,11 @@ private:
 	 * Buildings (XR fork W5).
 	 */
 	std::shared_ptr<building::BuildingState> buildings;
+
+	/**
+	 * Special abilities (XR fork W6).
+	 */
+	std::shared_ptr<special::SpecialState> special;
 };
 } // namespace gamestate
 } // namespace openage

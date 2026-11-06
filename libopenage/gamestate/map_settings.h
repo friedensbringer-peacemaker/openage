@@ -254,6 +254,10 @@ struct MapSettings {
 	/// a boar and deer per start); placed after everything else, so false gives the map of
 	/// before W3 (regression check of the generator)
 	bool herds = true;
+	/// XR fork W6: relics (gaia) on the random map (gamestate/map_generator.h relic_count); placed after
+	/// the animals with an own random sequence, so false gives the map of before W6 (save games before
+	/// version 6 load without relics)
+	bool relics = true;
 	/// XR fork (save games): restore this save file after the map was generated
 	/// (gamestate/save_game.h); the other fields must be the map settings of the
 	/// file. Empty: a new game.

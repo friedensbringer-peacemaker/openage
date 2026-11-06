@@ -37,6 +37,7 @@
 #include "gamestate/entity_factory.h"
 #include "gamestate/food.h"
 #include "gamestate/food_math.h"
+#include "gamestate/special.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
 #include "gamestate/manager.h"
@@ -342,6 +343,33 @@ SaveData capture(const std::shared_ptr<GameState> &state,
 					e.order.clear();
 				}
 				e.bell = saved->bell;
+			}
+		}
+		// XR fork W6 (version 6): faith, conversion, relics, cargo, trebuchet
+		if (auto special_state = state->get_special()) {
+			if (special_state->stowed_in(id)) {
+				// in a ship, ram, monastery or a monk's hands: the carrier stores it (no W4 garrison)
+				e.garrison.reset();
+				e.garrison_bell = false;
+				e.order.clear();
+				changed = true;
+			}
+			if (special_state->is_relic(id)) {
+				changed = true;  // relics are carried away and dropped elsewhere
+			}
+			if (auto s = special_state->save_entity(id)) {
+				changed = true;
+				e.faith = s->faith;
+				if (s->convert_target) {
+					e.convert_target = *s->convert_target;
+					e.convert_time = s->convert_time;
+				}
+				if (s->relic_carry) {
+					e.relic_carry = *s->relic_carry;
+				}
+				e.relic_store.assign(s->relic_store.begin(), s->relic_store.end());
+				e.cargo.assign(s->cargo.begin(), s->cargo.end());
+				e.siege_mode = s->siege_mode;
 			}
 		}
 		// walking somewhere (last keyframe of the position curve lies in the future)
@@ -700,6 +728,38 @@ RestoreResult restore(const SaveData &data,
 		}
 		if (e->order == "build") {
 			builder->wall_queue.push_back(mapped(e->order_target));
+		}
+	}
+
+	// XR fork W6 (version 6): faith, conversions, relics, cargo, trebuchets (all entities exist)
+	if (auto special_state = state->get_special()) {
+		auto mapped = [&](uint64_t id) -> entity_id_t {
+			auto it = id_map.find(id);
+			return it != id_map.end() ? it->second : id;
+		};
+		size_t special_count = 0;
+		for (auto &[e, entity] : restored) {
+			if (not e->faith and not e->convert_target and not e->relic_carry and e->relic_store.empty()
+			    and e->cargo.empty() and e->siege_mode.empty()) {
+				continue;
+			}
+			special::SavedSpecial s;
+			s.faith = e->faith;
+			if (e->convert_target) {
+				s.convert_target = static_cast<entity_id_t>(*e->convert_target);
+				s.convert_time = e->convert_time;
+			}
+			if (e->relic_carry) {
+				s.relic_carry = static_cast<entity_id_t>(*e->relic_carry);
+			}
+			s.relic_store.assign(e->relic_store.begin(), e->relic_store.end());
+			s.cargo.assign(e->cargo.begin(), e->cargo.end());
+			s.siege_mode = e->siege_mode;
+			special_state->load_entity(state, entity->get_id(), s, mapped, time);
+			special_count += 1;
+		}
+		if (special_count > 0) {
+			log::log(INFO << "Load: special state of " << special_count << " entities (faith, relics, cargo)");
 		}
 	}
 

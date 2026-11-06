@@ -150,6 +150,8 @@ private:
 		bool villager = false;
 		bool military = false;
 		bool town_center = false;
+		/// XR fork W6: siege (rams attack buildings in a wave)
+		bool siege = false;
 	};
 
 	struct World {
@@ -159,6 +161,9 @@ private:
 		std::vector<Seen> enemies;
 		/// own entities that lost health since the last round
 		std::vector<Seen> hurt;
+		/// XR fork W6: own monks and ships (not in the army: they do not join the land waves)
+		std::vector<Seen> monks;
+		std::vector<Seen> fleet;
 		/// home: own town center, else centre of the own entities
 		double home_ne = 0.0;
 		double home_se = 0.0;
@@ -182,6 +187,8 @@ private:
 	/// XR fork W5: villagers repair damaged own buildings (no enemies near them)
 	void repair(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
 	void report(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
+	/// XR fork W6: Castle Age, monastery + monks (follow the army, heal, convert), siege in the waves, ships
+	void special(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time);
 	void schedule(const std::shared_ptr<GameState> &state, const time::time_t &time);
 
 	/// order an attack (cooldown per unit), true if ordered
@@ -231,6 +238,9 @@ private:
 	std::string last_plan;
 	/// last build request per building name (simulation seconds)
 	std::unordered_map<std::string, double> last_build;
+	/// XR fork W6: last special request per wish (simulation seconds), the map has water (once)
+	std::unordered_map<int, double> last_special;
+	std::optional<bool> water{};
 	/// XR fork W1: time of the last research request (simulation seconds)
 	double last_research = -100.0;
 	/// XR fork W3: last herding order per own herdable, last reseed request (simulation seconds)

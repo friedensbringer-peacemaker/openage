@@ -557,6 +557,20 @@ if(OPENAGE_NATIVE_ENTRY)
 		target_link_libraries(openage-building-game-check PRIVATE Qt6::Core Qt6::Gui)
 	endif()
 	# ---- end XR fork W5 ----
+	# ---- XR fork W6: special abilities (monks, healing, area damage) ----
+	# host test: conversion, faith, healing and splash rules (dependency-free, parameter sweep)
+	add_executable(openage-special-check gamestate/special_check.cpp)
+	target_include_directories(openage-special-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-special-check COMMAND openage-special-check)
+	# game state check of monks, relics, siege, ships, save game v6, AI with the converted modpack (--root <dir>, headless)
+	add_executable(openage-special-game-check gamestate/special_game_check.cpp)
+	target_include_directories(openage-special-game-check PRIVATE $<TARGET_PROPERTY:libopenage,INCLUDE_DIRECTORIES>)
+	add_dependencies(openage-special-game-check cppgen)
+	target_link_libraries(openage-special-game-check PRIVATE libopenage nyan::nyan Eigen3::Eigen Threads::Threads)
+	if(OPENAGE_QT)
+		target_link_libraries(openage-special-game-check PRIVATE Qt6::Core Qt6::Gui)
+	endif()
+	# ---- end XR fork W6 ----
 endif()
 
 # XR fork: the in-engine UI (libopenage/ui/agesxr) logs via __android_log_print

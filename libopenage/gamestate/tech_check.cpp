@@ -87,7 +87,8 @@ void check_catalog() {
 			check(std::string{e.missing}.rfind("noch ohne Mechanik", 0) == 0, "reason of hidden " + name);
 		}
 	}
-	check(hidden >= 30 and hidden < prod::CATALOG_SIZE / 2, "some entries hidden, most offered");
+	// W6 freed monks, siege and ships: walls (W5), trade (W7) and wonders/relic victory (W8) stay hidden
+	check(hidden >= 5 and hidden < prod::CATALOG_SIZE / 2, "some entries hidden, most offered (" + std::to_string(hidden) + " hidden)");
 	// what W1 offers and hides
 	for (const char *offered : {"Villager", "Militia", "Knight", "Blacksmith", "University", "TownCenter", "Castle",
 	                            "Monastery", "SiegeWorkshop"}) {
@@ -98,7 +99,7 @@ void check_catalog() {
 		check(prod::has_mechanic(w3), std::string{"offered (W3) "} + w3);
 	}
 	check(prod::has_mechanic("HorseCollar", true) and prod::has_mechanic("HeavyPlow", true), "farm technologies offered (W3)");
-	for (const char *hidden_name : {"Monk", "Ram", "Galley", "TransportShip", "TradeCart", "Market", "Wonder"}) {
+	for (const char *hidden_name : {"TradeCart", "Market", "Wonder"}) {
 		check(not prod::has_mechanic(hidden_name), std::string{"hidden "} + hidden_name);
 	}
 	// XR fork W5: walls, gates and the fortified wall have their mechanic
@@ -106,6 +107,13 @@ void check_catalog() {
 		check(prod::has_mechanic(w5), std::string{"offered (W5) "} + w5);
 	}
 	check(prod::has_mechanic("FortifiedWall", true), "fortified wall offered (W5)");
+	// XR fork W6: monks, siege and ships have their mechanic
+	for (const char *w6 : {"Monk", "Missionary", "Ram", "Mangonel", "Trebuchet", "Galley", "TransportShip", "DemolitionShip"}) {
+		check(prod::has_mechanic(w6), std::string{"offered (W6) "} + w6);
+	}
+	for (const char *t : {"Redemption", "Atonement", "Heresy", "Theocracy", "CappedRam", "Careening"}) {
+		check(prod::has_mechanic(t, true), std::string{"offered tech (W6) "} + t);
+	}
 	for (const char *t : {"Loom", "FeudalAge", "WheelBarrow", "HandCart", "Swordsman", "Crossbowman", "Forging"}) {
 		check(prod::has_mechanic(t, true), std::string{"offered tech "} + t);
 		check(not std::string{prod::catalog_entry(t, true)->effect}.empty(), std::string{"effect "} + t);
@@ -115,7 +123,7 @@ void check_catalog() {
 	for (const char *t : {"GuardTower", "Keep", "HerbalMedicine"}) {
 		check(prod::has_mechanic(t, true), std::string{"W4: offered tech "} + t);
 	}
-	for (const char *t : {"Coinage", "Redemption", "CappedRam", "Careening"}) {
+	for (const char *t : {"Coinage"}) {
 		check(not prod::has_mechanic(t, true), std::string{"hidden tech "} + t);
 	}
 	// civilisations

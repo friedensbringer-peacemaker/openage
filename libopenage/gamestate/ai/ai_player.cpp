@@ -3,6 +3,7 @@
 #include "ai_player.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <sstream>
 
@@ -36,6 +37,7 @@
 #include "gamestate/player.h"
 #include "gamestate/production.h"
 #include "gamestate/production_math.h"
+#include "gamestate/special.h"
 #include "gamestate/vision/vision_state.h"
 
 
@@ -196,6 +198,7 @@ void AiPlayer::think(const std::shared_ptr<GameState> &state, const time::time_t
 	this->produce(state, world, time);
 	this->food_economy(state, world, time);
 	this->fortify(state, world, time);
+	this->special(state, world, time);
 	this->report(state, world, time);
 
 	{
@@ -247,6 +250,10 @@ AiPlayer::World AiPlayer::observe(const std::shared_ptr<GameState> &state, const
 		seen.villager = stats->villager;
 		seen.military = stats->can_attack and stats->movable and not stats->villager;
 		seen.town_center = stats->building and stats->name == "TownCenter";
+		// XR fork W6: monks, siege and ships from the special values of the data
+		const special::SpecialType *st = state->get_special() ? state->get_special()->type_of(state, entity, time)
+		                                                      : nullptr;
+		seen.siege = st != nullptr and st->siege;
 
 		if (owner != this->player) {
 			// vision (XR fork): enemies in sight and remembered buildings (start town centres) only
@@ -254,6 +261,12 @@ AiPlayer::World AiPlayer::observe(const std::shared_ptr<GameState> &state, const
 				continue;
 			}
 			world.enemies.push_back(std::move(seen));
+		}
+		else if (st != nullptr and st->ship and not seen.building) {
+			world.fleet.push_back(std::move(seen));
+		}
+		else if (st != nullptr and st->monk and not seen.building) {
+			world.monks.push_back(std::move(seen));
 		}
 		else if (seen.building) {
 			world.buildings.push_back(std::move(seen));
@@ -270,6 +283,8 @@ AiPlayer::World AiPlayer::observe(const std::shared_ptr<GameState> &state, const
 	std::sort(world.buildings.begin(), world.buildings.end(), by_id);
 	std::sort(world.villagers.begin(), world.villagers.end(), by_id);
 	std::sort(world.army.begin(), world.army.end(), by_id);
+	std::sort(world.monks.begin(), world.monks.end(), by_id);
+	std::sort(world.fleet.begin(), world.fleet.end(), by_id);
 
 	// health changes of own entities (attacked since the last round)
 	std::vector<const Seen *> own;
@@ -1484,6 +1499,268 @@ void AiPlayer::repair(const std::shared_ptr<GameState> &state, const World &worl
 }
 
 // ---------------------------------------------------------------- report
+
+// ---------------------------------------------------------------- special (XR fork W6)
+
+namespace {
+
+/// lower case terrain name of a tile
+std::string terrain_lower(const std::shared_ptr<Map> &map, long x, long y) {
+	auto name = map->terrain_name(coord::tile{static_cast<coord::tile_t>(x), static_cast<coord::tile_t>(y)});
+	std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
+		return static_cast<char>(std::tolower(c));
+	});
+	return name;
+}
+
+} // namespace
+
+void AiPlayer::special(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time) {
+	auto special_state = state->get_special();
+	auto combat = state->get_combat();
+	if (special_state == nullptr or not this->production->enabled()) {
+		return;
+	}
+	const double now = time.to_double();
+	auto map = state->get_map();
+	if (not this->water) {
+		// the map has water (docks, ships): one look at the terrain
+		bool any = false;
+		const auto size = map->get_size();
+		for (size_t y = 0; y < size[1] and not any; y += 2) {
+			for (size_t x = 0; x < size[0] and not any; x += 2) {
+				const auto name = terrain_lower(map, static_cast<long>(x), static_cast<long>(y));
+				any = name.find("water") != std::string::npos and name.find("shallow") == std::string::npos;
+			}
+		}
+		this->water = any;
+		log::log(INFO << "AI P" << this->player << " special: map " << (any ? "with" : "without") << " water");
+	}
+
+	const auto *own_tech = state->get_tech() ? state->get_tech()->find(this->player) : nullptr;
+	SpecialView v;
+	v.age = own_tech ? own_tech->age : tech::DARK_AGE;
+	v.villagers = world.villagers.size();
+	v.water = *this->water;
+	const Seen *town_center = nullptr;
+	const Seen *monastery = nullptr;
+	const Seen *workshop = nullptr;
+	const Seen *dock = nullptr;
+	for (const auto &b : world.buildings) {
+		const bool complete = this->production->is_complete(state, b.id, time);
+		if (b.town_center) {
+			if (complete and town_center == nullptr) {
+				town_center = &b;
+			}
+		}
+		else if (b.name == "Blacksmith" or b.name == "ArcheryRange" or b.name == "Stable" or b.name == "Market") {
+			v.feudal_buildings += complete ? 1 : 0;
+			v.feudal_planned = v.feudal_planned or not complete;
+		}
+		else if (b.name == "Monastery") {
+			(complete ? v.monastery : v.monastery_planned) = true;
+			monastery = complete ? &b : monastery;
+		}
+		else if (b.name == "SiegeWorkshop") {
+			(complete ? v.workshop : v.workshop_planned) = true;
+			workshop = complete ? &b : workshop;
+		}
+		else if (b.name == "Dock") {
+			(complete ? v.dock : v.dock_planned) = true;
+			dock = complete ? &b : dock;
+		}
+	}
+	v.monks = world.monks.size() + (monastery ? this->production->queued(state, monastery->id, time) : 0);
+	for (const auto &u : world.army) {
+		v.rams += u.name.find("Ram") != std::string::npos ? 1 : 0;
+		v.mangonels += u.name == "Mangonel" or u.name == "Onager" ? 1 : 0;
+	}
+	if (workshop) {
+		// queued siege counts as one of each kind
+		const size_t queued = this->production->queued(state, workshop->id, time);
+		v.rams += queued > 0 ? 1 : 0;
+		v.mangonels += queued > 1 ? 1 : 0;
+	}
+	v.galleys = world.fleet.size() + (dock ? this->production->queued(state, dock->id, time) : 0);
+	if (town_center) {
+		auto offered = this->production->offered_research(state, this->player, town_center->id, time);
+		v.castle_offered = std::find(offered.begin(), offered.end(), "CastleAge") != offered.end();
+		v.researching = this->production->researching(state, this->player, time);
+	}
+
+	auto plan = plan_special(v);
+	for (auto wish : plan) {
+		const int key = static_cast<int>(wish);
+		auto last = this->last_special.find(key);
+		if (last != this->last_special.end() and now - last->second < 15.0) {
+			continue;
+		}
+		this->last_special[key] = now;
+		bool done = false;
+		std::string detail;
+		auto build = [&](const std::string &name, double side) {
+			auto spot = this->building_spot(state, world, side, time);
+			if (not spot) {
+				detail = " (no free spot)";
+				return;
+			}
+			auto builders = this->free_builders(state, world, spot->first, spot->second, time);
+			if (builders.empty()) {
+				detail = " (no free villager)";
+				return;
+			}
+			coord::phys3 where{coord::phys_t{spot->first}, coord::phys_t{spot->second}, coord::phys_t{0}};
+			done = this->production->build(state, this->player, name, {builders.front()->id}, where, time);
+			this->last_order[builders.front()->id] = now;
+			detail = " " + name + " at (" + fmt1(spot->first) + ", " + fmt1(spot->second) + ")";
+		};
+		switch (wish) {
+		case special_plan_t::BUILD_FEUDAL_BUILDING: {
+			bool smith = false;
+			for (const auto &b : world.buildings) {
+				smith = smith or b.name == "Blacksmith";
+			}
+			build(smith ? "ArcheryRange" : "Blacksmith", 3.0);
+		} break;
+		case special_plan_t::RESEARCH_CASTLE:
+			if (town_center) {
+				done = this->production->research(state, this->player, town_center->id, "CastleAge", time);
+			}
+			break;
+		case special_plan_t::BUILD_MONASTERY:
+			build("Monastery", 3.0);
+			break;
+		case special_plan_t::BUILD_WORKSHOP:
+			build("SiegeWorkshop", 4.0);
+			break;
+		case special_plan_t::TRAIN_MONK:
+			done = monastery and this->production->train(state, this->player, monastery->id, "Monk", time);
+			break;
+		case special_plan_t::TRAIN_RAM:
+		case special_plan_t::TRAIN_MANGONEL:
+			done = workshop
+			       and this->production->train(state, this->player, workshop->id,
+			                                   wish == special_plan_t::TRAIN_RAM ? "Ram" : "Mangonel", time);
+			break;
+		case special_plan_t::TRAIN_GALLEY:
+			done = dock and this->production->train(state, this->player, dock->id, "Galley", time);
+			break;
+		case special_plan_t::BUILD_DOCK: {
+			// on water next to the shore, nearest to home (the placement rules of the data decide)
+			std::vector<std::pair<double, std::pair<long, long>>> cands;
+			const auto size = map->get_size();
+			for (long dy = -30; dy <= 30; ++dy) {
+				for (long dx = -30; dx <= 30; ++dx) {
+					const long x = static_cast<long>(world.home_ne) + dx;
+					const long y = static_cast<long>(world.home_se) + dy;
+					if (x < 2 or y < 2 or x >= static_cast<long>(size[0]) - 2 or y >= static_cast<long>(size[1]) - 2) {
+						continue;
+					}
+					if (terrain_lower(map, x, y).find("water") == std::string::npos) {
+						continue;
+					}
+					cands.push_back({std::hypot(static_cast<double>(dx), static_cast<double>(dy)), {x, y}});
+				}
+			}
+			std::sort(cands.begin(), cands.end());
+			auto builders = this->free_builders(state, world, world.home_ne, world.home_se, time);
+			if (builders.empty()) {
+				detail = " (no free villager)";
+				break;
+			}
+			for (size_t i = 0; i < cands.size() and i < 24 and not done; ++i) {
+				const auto x = cands[i].second.first;
+				const auto y = cands[i].second.second;
+				coord::phys3 where{coord::phys_t{static_cast<double>(x) + 0.5}, coord::phys_t{static_cast<double>(y) + 0.5},
+				                   coord::phys_t{0}};
+				done = this->production->build(state, this->player, "Dock", {builders.front()->id}, where, time);
+				if (done) {
+					this->last_order[builders.front()->id] = now;
+					detail = " at (" + std::to_string(x) + ", " + std::to_string(y) + ")";
+				}
+			}
+		} break;
+		}
+		log::log(INFO << "AI P" << this->player << " special: " << to_string(wish) << detail << (done ? "" : " [not done]")
+		              << ", age " << v.age << ", t=" << fmt1(now) << " s");
+	}
+
+	// monks: convert when full and an enemy soldier is near, else stay with the army (healing is automatic)
+	double ane = world.home_ne;
+	double ase = world.home_se;
+	size_t n = 0;
+	for (const auto &u : world.army) {
+		if (this->wave.empty() or this->wave.contains(u.id)) {
+			ane = n == 0 ? u.ne : ane + u.ne;
+			ase = n == 0 ? u.se : ase + u.se;
+			n += 1;
+		}
+	}
+	if (n > 0) {
+		ane /= static_cast<double>(n);
+		ase /= static_cast<double>(n);
+	}
+	for (const auto &m : world.monks) {
+		if (special_state->get_job_target(m.id) or special_state->carried_relic(m.id)) {
+			continue;
+		}
+		const double faith = special_state->faith(m.id).value_or(0.0);
+		const auto *mt = special_state->type_of(state, state->get_game_entity(m.id), time);
+		const double range = mt ? mt->convert_range : 9.0;
+		const Seen *target = nullptr;
+		double best = 1e18;
+		for (const auto &e : world.enemies) {
+			const double d = dist(m.ne, m.se, e.ne, e.se);
+			if (ai_should_convert(faith, d, range, e.military) and d < best) {
+				best = d;
+				target = &e;
+			}
+		}
+		if (target) {
+			auto reason = special_state->order_convert(state, m.id, target->id, time);
+			log::log(INFO << "AI P" << this->player << " special: monk " << m.id << " converts " << target->name << " "
+			              << target->id << (reason.empty() ? std::string{} : " [" + reason + "]") << ", t=" << fmt1(now)
+			              << " s");
+			continue;
+		}
+		if (n > 0 and dist(m.ne, m.se, ane, ase) > 6.0) {
+			auto last = this->last_order.find(m.id);
+			if (last != this->last_order.end() and now - last->second < this->params.unit_order_cooldown) {
+				continue;
+			}
+			this->last_order[m.id] = now;
+			auto entity = state->get_game_entity(m.id);
+			auto queue = component_of<component::CommandQueue>(entity, component::component_t::COMMANDQUEUE);
+			if (queue) {
+				queue->add_command(time, std::make_shared<component::command::MoveCommand>(map->on_terrain(
+											 coord::phys3{coord::phys_t{ane}, coord::phys_t{ase}, coord::phys_t{0}})));
+			}
+		}
+	}
+
+	// rams of a wave attack buildings (buildings are no automatic targets, spec 06 §6.2)
+	if (not this->wave.empty()) {
+		for (const auto &u : world.army) {
+			if (not u.siege or not this->wave.contains(u.id) or u.name.find("Ram") == std::string::npos
+			    or combat->get_target(u.id)) {
+				continue;
+			}
+			const Seen *target = nullptr;
+			double best = 1e18;
+			for (const auto &e : world.enemies) {
+				const double d = dist(u.ne, u.se, e.ne, e.se);
+				if (e.building and d < best) {
+					best = d;
+					target = &e;
+				}
+			}
+			if (target and this->order_attack(state, u, *target, time)) {
+				log::log(INFO << "AI P" << this->player << " special: ram " << u.id << " attacks " << target->name << " "
+				              << target->id << ", t=" << fmt1(now) << " s");
+			}
+		}
+	}
+}
 
 void AiPlayer::report(const std::shared_ptr<GameState> &state, const World &world, const time::time_t &time) {
 	const double now = time.to_double();

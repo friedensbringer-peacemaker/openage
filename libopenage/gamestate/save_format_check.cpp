@@ -166,6 +166,28 @@ SaveData sample(uint32_t seed, size_t entities) {
 		default:
 			break;
 		}
+		// XR fork W6 (version 6): faith, conversion, relics, cargo, trebuchet
+		switch ((i + seed) % 5) {
+		case 0:
+			e.faith = 37.5;
+			e.convert_target = 47;
+			e.convert_time = 3.25;
+			break;
+		case 1:
+			e.relic_carry = 48;
+			break;
+		case 2:
+			e.relic_store = {49, 50};
+			break;
+		case 3:
+			e.cargo = {51, 52, 53};
+			break;
+		case 4:
+			e.siege_mode = "unpacked";
+			break;
+		default:
+			break;
+		}
 		d.entities.push_back(e);
 	}
 	for (size_t i = 0; i < entities / 3; ++i) {
@@ -242,6 +264,19 @@ void check_roundtrip() {
 		w4 += a.stance.empty() and not a.garrison and not a.bell ? 0 : 1;
 	}
 	CHECK(w4 >= 6, "W4 fields present (%zu)", w4);
+	// XR fork W6 (version 6): own optional keys
+	size_t w6 = 0;
+	for (size_t i = 0; i < d.entities.size(); ++i) {
+		const auto &a = back.entities[i];
+		const auto &b = d.entities[i];
+		CHECK(a.faith == b.faith and a.convert_target == b.convert_target and a.convert_time == b.convert_time
+		          and a.relic_carry == b.relic_carry and a.relic_store == b.relic_store and a.cargo == b.cargo
+		          and a.siege_mode == b.siege_mode,
+		      "W6 fields of entity %zu", i);
+		w6 += a.faith or a.relic_carry or not a.relic_store.empty() or not a.cargo.empty() or not a.siege_mode.empty() ? 1 : 0;
+	}
+	CHECK(w6 >= 6, "W6 fields present (%zu)", w6);
+	CHECK(back.map.relics, "relics on the map (version 6)");
 	// XR fork W3 (version 4 of W3, version 5): animals on the map, carcasses, reseeds
 	CHECK(back.version == 6 and back.map.herds, "version 6 with herds");
 	CHECK(back.entities[1].dead and not back.entities[5].dead, "carcass flag");
@@ -313,6 +348,13 @@ void check_roundtrip() {
 		}
 		CHECK(empty, "canonical without orders drops the wall queue");
 	}
+	// XR fork W6: maps before version 6 had no relics; version 6 without the key: relics
+	CHECK(parse("[save]\nversion = 5\n[map]\ntype = random\n", old, error) and not old.map.relics, "version 5: no relics");
+	CHECK(parse("[save]\nversion = 6\n[map]\ntype = random\n", old, error) and old.map.relics, "version 6 default: relics");
+	CHECK(parse("[save]\nversion = 5\n[map]\ntype = random\nrelics = 1\n", old, error) and old.map.relics,
+	      "explicit relics kept");
+	CHECK(not parse("[save]\nversion = 6\n[map]\ntype = random\n[entity]\nfqon = x\nsiege_mode = flying\n", old, error),
+	      "bad siege mode rejected");
 	CHECK(parse("[save]\nversion = 3\n[map]\ntype = random\nherds = 1\n", old, error) and old.map.herds,
 	      "explicit herds kept");
 	// version 4 exists twice: W3 (key herds) and W4 (no herds key, maps without animals)

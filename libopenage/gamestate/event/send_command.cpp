@@ -24,6 +24,7 @@
 #include "gamestate/component/api/harvestable.h"
 #include "gamestate/econ.h"
 #include "gamestate/food.h"
+#include "gamestate/special.h"
 #include "gamestate/food_math.h"
 #include "gamestate/game_entity.h"
 #include "gamestate/game_state.h"
@@ -202,6 +203,10 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 		return;
 	}
 
+	// XR fork W6: convert, heal, relics, carriers, trebuchets (handled ids leave the list)
+	if (special::handle_command(gstate, time, command_type, ids, target, params)) {
+		return;
+	}
 	bool enemy_picked = combat::handle_command(gstate, time,
 	                                           plain ? component::command::command_t::IDLE : command_type,
 	                                           ids, target, params);

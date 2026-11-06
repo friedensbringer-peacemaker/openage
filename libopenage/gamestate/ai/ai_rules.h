@@ -594,4 +594,149 @@ inline std::vector<WallDrag> palisade_ring(long cx, long cy, long r, long gap, l
 	return out;
 }
 
+// ---------------------------------------------------------------- XR fork W6: monks, siege, ships
+
+/// wishes of the special round (docs/PLAN-W5-W6.md W6.6)
+enum class special_plan_t {
+	/// a Feudal building more (Blacksmith, then Archery Range): the Castle Age needs two
+	BUILD_FEUDAL_BUILDING,
+	RESEARCH_CASTLE,
+	BUILD_MONASTERY,
+	TRAIN_MONK,
+	BUILD_WORKSHOP,
+	TRAIN_RAM,
+	TRAIN_MANGONEL,
+	BUILD_DOCK,
+	TRAIN_GALLEY,
+};
+
+inline const char *to_string(special_plan_t plan) {
+	switch (plan) {
+	case special_plan_t::BUILD_FEUDAL_BUILDING:
+		return "build feudal building";
+	case special_plan_t::RESEARCH_CASTLE:
+		return "research castle age";
+	case special_plan_t::BUILD_MONASTERY:
+		return "build monastery";
+	case special_plan_t::TRAIN_MONK:
+		return "train monk";
+	case special_plan_t::BUILD_WORKSHOP:
+		return "build siege workshop";
+	case special_plan_t::TRAIN_RAM:
+		return "train ram";
+	case special_plan_t::TRAIN_MANGONEL:
+		return "train mangonel";
+	case special_plan_t::BUILD_DOCK:
+		return "build dock";
+	case special_plan_t::TRAIN_GALLEY:
+		return "train galley";
+	default:
+		return "?";
+	}
+}
+
+/// what the special plan looks at
+struct SpecialView {
+	/// age (1 dark, 2 feudal, 3 castle, 4 imperial)
+	int age = 1;
+	size_t villagers = 0;
+	/// finished or planned buildings of the Feudal Age that count for the Castle Age
+	size_t feudal_buildings = 0;
+	bool feudal_planned = false;
+	/// the town centre offers the Castle Age; a research is running
+	bool castle_offered = false;
+	bool researching = false;
+	/// finished / planned buildings
+	bool monastery = false;
+	bool monastery_planned = false;
+	bool workshop = false;
+	bool workshop_planned = false;
+	bool dock = false;
+	bool dock_planned = false;
+	/// own units, with queued ones
+	size_t monks = 0;
+	size_t rams = 0;
+	size_t mangonels = 0;
+	size_t galleys = 0;
+	/// the map has water (docks and ships only then)
+	bool water = false;
+};
+
+struct SpecialParams {
+	/// villagers before the Castle Age
+	size_t castle_villagers = 20;
+	/// monks that go with the army
+	size_t monks = 2;
+	/// siege for the waves (from the Castle Age)
+	size_t rams = 1;
+	size_t mangonels = 1;
+	/// galleys on maps with water (from the Feudal Age)
+	size_t galleys = 2;
+};
+
+/**
+ * Wishes of the special round for one decision (XR fork W6): the Castle Age through two
+ * Feudal buildings, then a monastery with monks (they follow the army and heal, a simple
+ * conversion rule in ai_player.cpp) and a siege workshop with a ram and a mangonel for the
+ * waves; on maps with water a dock with galleys. At most one building wish at a time.
+ */
+inline std::vector<special_plan_t> plan_special(const SpecialView &v, const SpecialParams &p = {}) {
+	std::vector<special_plan_t> plan;
+	bool building = false;
+	auto build = [&](special_plan_t wish) {
+		if (not building) {
+			plan.push_back(wish);
+			building = true;
+		}
+	};
+	if (v.age == 2 and v.villagers >= p.castle_villagers) {
+		if (v.feudal_buildings < 2 and not v.feudal_planned) {
+			build(special_plan_t::BUILD_FEUDAL_BUILDING);
+		}
+		else if (v.castle_offered and not v.researching) {
+			plan.push_back(special_plan_t::RESEARCH_CASTLE);
+		}
+	}
+	if (v.age >= 3) {
+		if (not v.monastery and not v.monastery_planned) {
+			build(special_plan_t::BUILD_MONASTERY);
+		}
+		else if (v.monastery and v.monks < p.monks) {
+			plan.push_back(special_plan_t::TRAIN_MONK);
+		}
+		if (not v.workshop and not v.workshop_planned) {
+			// the siege workshop needs a blacksmith (data condition): first a Feudal building
+			if (v.feudal_buildings == 0 and not v.feudal_planned) {
+				build(special_plan_t::BUILD_FEUDAL_BUILDING);
+			}
+			else if (v.feudal_buildings > 0) {
+				build(special_plan_t::BUILD_WORKSHOP);
+			}
+		}
+		else if (v.workshop) {
+			if (v.rams < p.rams) {
+				plan.push_back(special_plan_t::TRAIN_RAM);
+			}
+			else if (v.mangonels < p.mangonels) {
+				plan.push_back(special_plan_t::TRAIN_MANGONEL);
+			}
+		}
+	}
+	// ships last: monastery and siege workshop come first in the Castle Age
+	if (v.age >= 2 and v.water) {
+		if (not v.dock and not v.dock_planned) {
+			build(special_plan_t::BUILD_DOCK);
+		}
+		else if (v.dock and v.galleys < p.galleys) {
+			plan.push_back(special_plan_t::TRAIN_GALLEY);
+		}
+	}
+	return plan;
+}
+
+/// the monk converts the enemy (simple rule, W6.6): full faith, enemy military unit within reach + 2
+inline bool ai_should_convert(double faith, double distance, double convert_range, bool enemy_military) {
+	return faith >= 100.0 and enemy_military and distance <= convert_range + 2.0;
+}
+
 } // namespace openage::gamestate::ai

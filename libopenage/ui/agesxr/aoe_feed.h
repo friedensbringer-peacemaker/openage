@@ -117,8 +117,21 @@ public:
             c.deleteArmed = mDeleteArmed;
             c.gate = e.gate;  // W5: Tor verriegeln/entriegeln
             c.gateLocked = e.gate_locked;
-            if (aoeCombatGrid(m, c, cancelTraining, cancelPlacement) && c.military && !c.villager && !c.building) {
+            // W6: Mönch, Transporter, Tribock
+            c.monk = e.monk;
+            c.heals = e.heals;
+            c.relic = e.relic;
+            c.faith = e.faith;
+            c.cargo = e.cargo;
+            c.cargoMax = e.cargo_max;
+            c.transport = e.transport;
+            c.packable = e.packable;
+            c.unpacked = e.unpacked;
+            c.packing = e.packing;
+            const bool special = !c.building && !c.villager && (c.monk || c.transport || c.packable);
+            if (aoeCombatGrid(m, c, cancelTraining, cancelPlacement) && (special || (c.military && !c.villager && !c.building))) {
                 m.tips.assign(static_cast<size_t>(kAoeGridCells), std::string{});
+                if (special) specialTips(m, c);
             }
         }
 
@@ -170,7 +183,49 @@ public:
         const long range = std::lround(std::max(0.0, e.range));
         std::snprintf(buf, sizeof(buf), "Angriff %lld · Rüstung %lld/%lld · Reichw. %ld", static_cast<long long>(e.attack),
                       static_cast<long long>(e.armor_melee), static_cast<long long>(e.armor_pierce), range);
-        return buf;
+        std::string line = buf;
+        const std::string special = specialLine(e);
+        if (!special.empty()) {
+            // W6: Mönche haben keinen Angriff – dann nur die Spezialzeile
+            line = e.monk ? special : line + " · " + special;
+        }
+        return line;
+    }
+
+    // W6: Glaube, Reliquie, Ladung, Tribock („Glaube 87/100 · Konvertiert“, „Reliquien 2 (+1,0 Gold/s)“).
+    static std::string specialLine(const openage::engine::HudEntity& e) {
+        std::string out;
+        auto add = [&](const std::string& s) {
+            if (s.empty()) return;
+            if (!out.empty()) out += " · ";
+            out += s;
+        };
+        if (e.monk) add("Glaube " + std::to_string(e.faith) + "/100");
+        if (e.relic) add("trägt Reliquie");
+        if (e.relics > 0) {
+            char buf[48];
+            std::snprintf(buf, sizeof(buf), "Reliquien %d (+%.1f Gold/s)", e.relics, e.relic_gold);
+            add(buf);
+        }
+        if (e.cargo_max > 0) add("Ladung " + std::to_string(e.cargo) + "/" + std::to_string(e.cargo_max));
+        if (e.packable) add(e.unpacked ? "aufgebaut" : "abgebaut");
+        add(e.special_job);
+        return out;
+    }
+
+    // W6: Erklärungen der Spezialbefehle beim Zielen (Spec 05 §5.7–5.9, 06 §6.5).
+    static void specialTips(AoeModel& m, const AoeCombat& c) {
+        if (m.tips.size() < static_cast<size_t>(kAoeGridCells)) m.tips.resize(static_cast<size_t>(kAoeGridCells));
+        if (c.monk) {
+            m.tips[0] = c.relic ? "Reliquie ablegen: legt die getragene Reliquie hier ab"
+                                : "Konvertieren (C): gegnerische Einheit wählen – nur mit vollem Glauben (100)";
+            if (!c.relic) m.tips[1] = "Heilen (E): eigene verwundete Einheit wählen (nicht Gebäude, Schiffe, Belagerung)";
+        }
+        if (c.transport) {
+            m.tips[0] = "Entladen (L): Uferstelle wählen – das Schiff fährt hin und lässt alle an Land";
+            m.tips[4] = "Hier raus: alle an Land, wenn das Schiff am Ufer liegt";
+        }
+        if (c.packable) m.tips[4] = c.unpacked ? "Packen (P): abbauen, um zu fahren" : "Entpacken (U): aufbauen, um zu schießen";
     }
 
     // Garnisonsplätze je Gebäude (S3: Felder ausgegraut, nur die Kapazität wird angezeigt).
