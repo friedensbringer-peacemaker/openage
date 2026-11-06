@@ -937,46 +937,49 @@ std::optional<std::pair<double, double>> AiPlayer::building_spot(const std::shar
 		}
 	}
 	std::sort(keep_clear.begin(), keep_clear.end());
-	auto spots = building_spots(world.home_ne, world.home_se, 5.0, 10.0, side, this->rng);
-	for (const auto &[x, y] : spots) {
-		bool ok = true;
-		long t0x = static_cast<long>(std::floor(x - side / 2.0 + 0.01));
-		long t0y = static_cast<long>(std::floor(y - side / 2.0 + 0.01));
-		long n = static_cast<long>(std::lround(side));
-		// the footprint and a ring of one tile around it must be free (no enclosed villagers)
-		for (long ty = t0y - 1; ok and ty < t0y + n + 1; ++ty) {
-			for (long tx = t0x - 1; ok and tx < t0x + n + 1; ++tx) {
-				if (tx < 0 or ty < 0 or tx >= static_cast<long>(size[0]) or ty >= static_cast<long>(size[1])) {
-					ok = false;
-					continue;
-				}
-				coord::tile tile{static_cast<coord::tile_t>(tx), static_cast<coord::tile_t>(ty)};
-				if (this->land_grid >= 0) {
-					ok = map->is_passable(static_cast<path::grid_id_t>(this->land_grid), tile);
-				}
-				// landscapes: no foundations on ice or fords (same rule as the production check)
-				bool inside = tx >= t0x and tx < t0x + n and ty >= t0y and ty < t0y + n;
-				if (ok and inside) {
-					ok = prod::terrain_buildable(map->terrain_name(tile));
+	// near the town first; on hills or in a full town the outer rings (flat ground for large buildings)
+	for (const auto &[r_min, r_max] : {std::pair{5.0, 10.0}, std::pair{11.0, 20.0}}) {
+		auto spots = building_spots(world.home_ne, world.home_se, r_min, r_max, side, this->rng);
+		for (const auto &[x, y] : spots) {
+			bool ok = true;
+			long t0x = static_cast<long>(std::floor(x - side / 2.0 + 0.01));
+			long t0y = static_cast<long>(std::floor(y - side / 2.0 + 0.01));
+			long n = static_cast<long>(std::lround(side));
+			// the footprint and a ring of one tile around it must be free (no enclosed villagers)
+			for (long ty = t0y - 1; ok and ty < t0y + n + 1; ++ty) {
+				for (long tx = t0x - 1; ok and tx < t0x + n + 1; ++tx) {
+					if (tx < 0 or ty < 0 or tx >= static_cast<long>(size[0]) or ty >= static_cast<long>(size[1])) {
+						ok = false;
+						continue;
+					}
+					coord::tile tile{static_cast<coord::tile_t>(tx), static_cast<coord::tile_t>(ty)};
+					if (this->land_grid >= 0) {
+						ok = map->is_passable(static_cast<path::grid_id_t>(this->land_grid), tile);
+					}
+					// landscapes: no foundations on ice or fords (same rule as the production check)
+					bool inside = tx >= t0x and tx < t0x + n and ty >= t0y and ty < t0y + n;
+					if (ok and inside) {
+						ok = prod::terrain_buildable(map->terrain_name(tile));
+					}
 				}
 			}
-		}
-		// at least 3 tiles from mines and bushes
-		for (size_t i = 0; ok and i < keep_clear.size(); ++i) {
-			ok = dist(x, y, keep_clear[i].first, keep_clear[i].second) >= side / 2.0 + 3.0;
-		}
-		// keep a lane free around own buildings
-		for (size_t i = 0; ok and i < world.buildings.size(); ++i) {
-			const auto &b = world.buildings[i];
-			ok = dist(x, y, b.ne, b.se) >= b.radius + side / 2.0 + 1.0;
-		}
-		// last and most expensive: the rules of the production itself (elevation, explored, units)
-		if (ok and not world.villagers.empty()) {
-			coord::phys3 where{coord::phys_t{x}, coord::phys_t{y}, coord::phys_t{0}};
-			ok = this->production->can_place(state, name, world.villagers.front().id, where, time);
-		}
-		if (ok) {
-			return std::pair{x, y};
+			// at least 3 tiles from mines and bushes
+			for (size_t i = 0; ok and i < keep_clear.size(); ++i) {
+				ok = dist(x, y, keep_clear[i].first, keep_clear[i].second) >= side / 2.0 + 3.0;
+			}
+			// keep a lane free around own buildings
+			for (size_t i = 0; ok and i < world.buildings.size(); ++i) {
+				const auto &b = world.buildings[i];
+				ok = dist(x, y, b.ne, b.se) >= b.radius + side / 2.0 + 1.0;
+			}
+			// last and most expensive: the rules of the production itself (elevation, explored, units)
+			if (ok and not world.villagers.empty()) {
+				coord::phys3 where{coord::phys_t{x}, coord::phys_t{y}, coord::phys_t{0}};
+				ok = this->production->can_place(state, name, world.villagers.front().id, where, time);
+			}
+			if (ok) {
+				return std::pair{x, y};
+			}
 		}
 	}
 	return std::nullopt;
