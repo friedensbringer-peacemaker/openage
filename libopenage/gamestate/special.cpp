@@ -1357,8 +1357,7 @@ std::string SpecialState::board_check(const std::shared_ptr<GameState> &state, e
 	if (not us->unit or us->building or not us->movable or ut->ship or ut->cargo != cargo_t::NONE) {
 		return "kann nicht einsteigen";
 	}
-	if (ct->cargo == cargo_t::RAM
-	    and combat::garrison_kind(us->unit_class, us->villager) != combat::garrison_kind_t::INFANTRY) {
+	if (ct->cargo == cargo_t::RAM and (us->villager or not combat::ram_accepts(us->unit_class))) {
 		return "Rammbock nimmt nur Infanterie auf";
 	}
 	return {};

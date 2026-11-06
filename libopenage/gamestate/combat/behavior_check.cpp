@@ -272,6 +272,9 @@ void target_sweep() {
 
 void garrison_sweep() {
 	// town center 11 = villager + infantry + monk; castle 15 = all
+	check(ram_accepts(6) and ram_accepts(35) and not ram_accepts(0) and not ram_accepts(44) and not ram_accepts(4)
+	          and not ram_accepts(12),
+	      "ram: foot soldiers only, no archers, villagers or cavalry");
 	check(garrison_accepts(11, garrison_kind_t::VILLAGER) and garrison_accepts(11, garrison_kind_t::INFANTRY)
 	          and garrison_accepts(11, garrison_kind_t::MONK) and not garrison_accepts(11, garrison_kind_t::CAVALRY),
 	      "mask 11");

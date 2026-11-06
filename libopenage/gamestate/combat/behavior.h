@@ -601,6 +601,14 @@ inline garrison_kind_t garrison_kind(int unit_class, bool villager) {
 }
 
 /**
+ * Does a ram take a unit of this class? Foot soldiers only (infantry 6, pikemen 35), unlike
+ * garrison_kind_t::INFANTRY, which counts foot archers for the buildings (spec 06).
+ */
+inline bool ram_accepts(int unit_class) {
+	return unit_class == 6 or unit_class == 35;
+}
+
+/**
  * Does a building with garrison type \p mask accept a unit of \p kind?
  */
 inline bool garrison_accepts(int mask, garrison_kind_t kind) {
