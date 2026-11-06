@@ -319,8 +319,8 @@ std::optional<entity_id_t> CombatState::choose_target(const Combatant &self, con
 		if (edge > radius) {
 			continue;
 		}
-		if (not self.stats->movable or not stance_moves(stance)) {
-			// fixed attackers (buildings, stand ground) only what is in range now
+		if (not self.stats->movable or not stance_moves(stance) or self.stats->packs) {
+			// fixed attackers (buildings, stand ground, trebuchets) only what is in range now
 			if (not in_attack_range(edge, self.stats->min_range, self.stats->max_range)) {
 				continue;
 			}
@@ -1478,6 +1478,17 @@ void CombatState::tick(const std::shared_ptr<GameState> &state, entity_id_t atta
 		}
 		a->chase_destination.reset();
 		a->chase_failures = 0;
+		if (a->stats->packs and this->siege_gate) {
+			const auto gate = this->siege_gate(attacker_id, true, a->explicit_order, time);
+			if (gate == siege_gate_t::DROP) {
+				this->drop_target(*a, time);
+				return;
+			}
+			if (gate == siege_gate_t::WAIT) {
+				this->schedule_tick(state, *a, time + seconds(CHASE_PERIOD));
+				return;
+			}
+		}
 		if (a->stats->movable) {
 			auto pos = std::dynamic_pointer_cast<component::Position>(
 				a->entity->get_component(component::component_t::POSITION));
@@ -1509,6 +1520,17 @@ void CombatState::tick(const std::shared_ptr<GameState> &state, entity_id_t atta
 	if (not a->stats->movable) {
 		this->drop_target(*a, time);
 		return;
+	}
+	if (a->stats->packs and this->siege_gate) {
+		const auto gate = this->siege_gate(attacker_id, false, a->explicit_order, time);
+		if (gate == siege_gate_t::DROP) {
+			this->drop_target(*a, time);
+			return;
+		}
+		if (gate == siege_gate_t::WAIT) {
+			this->schedule_tick(state, *a, time + seconds(CHASE_PERIOD));
+			return;
+		}
 	}
 	// XR fork W4: stances (06 §6.2) – stand ground does not chase, defensive gives up far from the post
 	if (not a->explicit_order) {
@@ -1645,7 +1667,10 @@ void CombatState::launch(const std::shared_ptr<GameState> &state, Combatant &att
 		Point point = aim;
 		if (i == 0) {
 			// the first one is a normal shot with the hit roll (05 §5.3)
-			if (roll_hit(roll(this->rng), ps.accuracy)) {
+			// trebuchets against small buildings, towers and walls: accuracy 80 (05 §5.3)
+			const int tc = target.stats->unit_class;
+			const bool small_building = (tc == 3 or tc == 52 or tc == 27) and target.stats->radius < 1.0;
+			if (roll_hit(roll(this->rng), s.packs and small_building ? 80.0 : ps.accuracy)) {
 				p.target = target.entity->get_id();
 			}
 			else {
@@ -2114,7 +2139,7 @@ void CombatState::scan(const std::shared_ptr<GameState> &state, const time::time
 	for (auto id : ids) {
 		auto c = this->find(id);
 		// units attacking a building look for a better target (06 §6.2: typically an attacking unit)
-		if (c and not c->dead and c->target and c->stats->movable and not c->stats->villager) {
+		if (c and not c->dead and c->target and c->stats->movable and not c->stats->villager and not c->stats->packs) {
 			const auto *t = this->find(*c->target);
 			if (t and t->stats->building) {
 				if (auto better = this->choose_target(*c, time); better and this->target_allowed(id, *better)) {
@@ -2141,6 +2166,10 @@ void CombatState::scan(const std::shared_ptr<GameState> &state, const time::time
 			}
 		}
 		else if (c->stats->building and arrow_count(this->running_arrows(*c, time), c->stats->max_projectiles) <= 0) {
+			continue;
+		}
+		// a packed trebuchet looks for nothing on its own
+		if (c->stats->packs and this->siege_gate and this->siege_gate(id, true, false, time) != siege_gate_t::GO) {
 			continue;
 		}
 		auto enemy = this->choose_target(*c, time);
@@ -2481,6 +2510,10 @@ bool CombatState::target_allowed(entity_id_t attacker, entity_id_t target) const
 		}
 	}
 	return true;
+}
+
+void CombatState::on_siege_gate(siege_gate_fn_t gate) {
+	this->siege_gate = std::move(gate);
 }
 
 void CombatState::on_target(target_filter_t filter) {

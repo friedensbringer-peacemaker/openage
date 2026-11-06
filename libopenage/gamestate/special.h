@@ -22,6 +22,7 @@
 #include "event/eventhandler.h"
 #include "gamestate/component/internal/commands/types.h"
 #include "gamestate/special_math.h"
+#include "gamestate/combat/combat_state.h"
 #include "gamestate/resources.h"
 #include "gamestate/types.h"
 #include "time/time.h"
@@ -235,6 +236,10 @@ public:
 	 */
 	std::string order_repair(const std::shared_ptr<GameState> &state, entity_id_t villager, entity_id_t target,
 	                         const time::time_t &time);
+	/// the attack rule of a trebuchet: unpacks to shoot, packs to walk; packed no automatic targets
+	combat::CombatState::siege_gate_t siege_gate(const std::shared_ptr<GameState> &state, entity_id_t id, bool in_range,
+	                                             bool explicit_order, const time::time_t &time);
+
 	/// an unpacked trebuchet packs before it walks to \p destination
 	bool pack_and_move(const std::shared_ptr<GameState> &state, entity_id_t id, const coord::phys3 &destination,
 	                   const time::time_t &time);

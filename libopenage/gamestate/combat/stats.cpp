@@ -193,6 +193,7 @@ void read_types(CombatStats &stats, const std::shared_ptr<nyan::View> &db_view, 
 struct GenieValues {
 	bool present = false;
 	int unit_class = -1;
+	bool packs = false;
 	int garrison_capacity = 0;
 	int garrison_mask = 0;
 	double garrison_heal = 0.0;
@@ -205,6 +206,7 @@ struct GenieValues {
 void read_genie(GenieValues &g, const nyan::Object &data, bool head) {
 	if (head) {
 		g.unit_class = static_cast<int>(integer(data, "GenieUnitData.unit_class", -1));
+		g.packs = g.unit_class == 51 and integer(data, "GenieUnitData.transform_unit_id", -1) >= 0;
 		g.accuracy = number(data, "GenieUnitData.accuracy", 100.0);
 		g.defense_terrain = static_cast<int>(integer(data, "GenieUnitData.defense_terrain_bonus", -1));
 	}
@@ -365,6 +367,7 @@ std::shared_ptr<const CombatStats> read_combat_stats(const std::shared_ptr<nyan:
 	// XR fork W4: values of the data (engine.xr, modpack tcfix4)
 	if (genie.present) {
 		stats->unit_class = genie.unit_class;
+		stats->packs = genie.packs;
 		stats->accuracy = std::clamp(genie.accuracy, 0.0, 100.0);
 		stats->defense_terrain = genie.defense_terrain;
 		if (genie.garrison_capacity > 0) {

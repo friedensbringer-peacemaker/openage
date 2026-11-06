@@ -62,6 +62,8 @@ struct CombatStats {
 
 	/// ApplyDiscreteEffect or ShootProjectile with at least one projectile
 	bool can_attack = false;
+	/// XR fork: packs and unpacks (trebuchet, class 51 with a transform unit of the data)
+	bool packs = false;
 	/// ShootProjectile (instant hit at range, no projectile flight yet)
 	bool ranged = false;
 	AttackProfile attack{};

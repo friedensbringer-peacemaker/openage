@@ -365,6 +365,21 @@ public:
 	/// add a target rule (W6: rams attack buildings only)
 	void on_target(target_filter_t filter);
 
+	/// XR fork: what a unit that packs (trebuchet) does this tick
+	enum class siege_gate_t {
+		/// shoot or walk as usual
+		GO,
+		/// packing or unpacking: try again next tick
+		WAIT,
+		/// give up the target
+		DROP,
+	};
+	/// unit, target in range, explicit order, time
+	using siege_gate_fn_t = std::function<siege_gate_t(entity_id_t, bool, bool, const time::time_t &)>;
+
+	/// the rule for units that pack, asked before they shoot or walk to a target
+	void on_siege_gate(siege_gate_fn_t gate);
+
 	/// damage of an attack against a target without elevation/terrain factors (area attacks)
 	int64_t damage_against(const CombatStats &attacker, entity_id_t target) const;
 
@@ -683,6 +698,7 @@ private:
 	std::vector<impact_handler_t> impact_handlers;
 	/// XR fork W6: target rules
 	std::vector<target_filter_t> target_filters;
+	siege_gate_fn_t siege_gate;
 	/// fog of war (XR fork), may be nullptr
 	std::shared_ptr<vision::VisionState> vision;
 	/// players that ever had units or buildings

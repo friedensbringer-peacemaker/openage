@@ -1032,6 +1032,73 @@ void check_gaps(const Options &opt) {
 	      "the ram unloads the infantry");
 }
 
+/// S13: the trebuchet shoots (projectile of its unpacked form), unpacks and packs for it
+void check_trebuchet_fire(const Options &opt) {
+	std::cout << "== S13 Tribock schießt" << std::endl;
+	World w{opt, quiet_map()};
+	w.advance(0.5);
+	// everything towards the middle of the map (64 x 64)
+	const auto tc = w.position(w.town_center(0));
+	const double dne = tc.ne.to_double() < 32.0 ? 1.0 : -1.0;
+	const double dse = tc.se.to_double() < 32.0 ? 1.0 : -1.0;
+	auto c = scene_spot(w, 6.0 * dne, 0.0);
+	auto treb = w.unit_near(0, "trebuchet", "Trebuchet", c.first, c.second);
+	auto militia = w.unit_near(1, "militia", "Militia", c.first, c.second + 6.0 * dse);
+	auto near_spot = w.land_near(c.first + 22.0 * dne, c.second, 4);
+	if (treb == nullptr or militia == nullptr or not near_spot) {
+		check(false, "scene for the trebuchet");
+		return;
+	}
+	auto house = w.spawn_at(1, ge("house", "House"), std::floor(near_spot->first) + 1.0, std::floor(near_spot->second) + 1.0);
+	if (house == nullptr) {
+		check(false, "house for the trebuchet");
+		return;
+	}
+	w.passive(militia);
+	w.advance(0.5);
+	const auto stats = w.combat()->get_stats(treb->get_id());
+	check(stats != nullptr and stats->can_attack and stats->ranged and stats->packs,
+	      "the trebuchet can shoot (data of its unpacked form)");
+	if (stats == nullptr or not stats->can_attack) {
+		return;
+	}
+	std::cout << "  trebuchet: range " << stats->min_range << " to " << stats->max_range << ", reload "
+	          << stats->reload_time << " s" << std::endl;
+
+	// packed: no automatic target, it stays packed next to an enemy
+	w.advance(8.0);
+	check(not w.special()->is_unpacked(treb->get_id()) and w.distance(treb, militia) < 8.0,
+	      "a packed trebuchet does not unpack on its own");
+
+	// the order: too far away, so it walks, unpacks in range and hits
+	const auto h0 = w.health(house);
+	const auto d0 = w.distance(treb, house);
+	w.combat()->order_attack(w.state, treb->get_id(), house->get_id(), w.now);
+	check(w.advance_until(40.0, [&]() { return w.distance(treb, house) < d0 - 0.5; }),
+	      "a far target: the packed trebuchet walks");
+	check(w.advance_until(120.0, [&]() { return w.special()->is_unpacked(treb->get_id()); }), "in range it unpacks");
+	const auto spot = w.position(treb);
+	check(w.advance_until(120.0, [&]() { return not w.alive(house) or w.health(house) <= h0 - 50; }),
+	      "the trebuchet hits the building hard (its own attack values, at least 50)");
+	std::cout << "  house: " << h0 << " -> " << (w.alive(house) ? w.health(house) : 0) << std::endl;
+	const auto now_at = w.position(treb);
+	check(std::hypot(now_at.ne.to_double() - spot.ne.to_double(), now_at.se.to_double() - spot.se.to_double()) < 0.01,
+	      "unpacked it does not move");
+
+	// a target out of range: it packs first
+	w.combat()->stop(w.state, treb->get_id(), w.now);
+	auto far_spot = w.land_near(spot.ne.to_double(), spot.se.to_double() + 22.0 * dse, 4);
+	if (not far_spot) {
+		check(false, "scene for the far target");
+		return;
+	}
+	auto far = w.spawn_at(1, ge("house", "House"), std::floor(far_spot->first) + 1.0, std::floor(far_spot->second) + 1.0);
+	w.advance(0.5);
+	w.combat()->order_attack(w.state, treb->get_id(), far->get_id(), w.now);
+	check(w.advance_until(10.0, [&]() { return not w.special()->is_unpacked(treb->get_id()); }),
+	      "a target out of range: it packs first");
+}
+
 /// S12: a save during a conversion goes on after loading
 void check_save_converting(const Options &opt) {
 	std::cout << "== S12 Spielstand während einer Konvertierung" << std::endl;
@@ -1289,6 +1356,9 @@ int main(int argc, char **argv) {
 		}
 		if (only.empty() or only == "gaps") {
 			check_gaps(opt);
+		}
+		if (only.empty() or only == "gaps" or only == "trebuchet") {
+			check_trebuchet_fire(opt);
 		}
 		if (only.empty() or only == "ai") {
 			check_ai(opt);

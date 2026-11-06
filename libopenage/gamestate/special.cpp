@@ -446,6 +446,14 @@ void SpecialState::start(const std::shared_ptr<GameState> &state,
 		}
 	});
 	// rams attack buildings only (spec 05 §5.5 "Rammen: nur Gebäude"): orders and automatic targets
+	combat->on_siege_gate([weak_state, weak_self](entity_id_t id, bool in_range, bool explicit_order, const time::time_t &t) {
+		auto s = weak_state.lock();
+		auto self = weak_self.lock();
+		if (not s or not self) {
+			return combat::CombatState::siege_gate_t::GO;
+		}
+		return self->siege_gate(s, id, in_range, explicit_order, t);
+	});
 	combat->on_target([weak_state, weak_self](entity_id_t attacker, entity_id_t target) {
 		auto s = weak_state.lock();
 		auto self = weak_self.lock();
@@ -1633,6 +1641,28 @@ std::string SpecialState::set_packed(const std::shared_ptr<GameState> &state, en
 	return {};
 }
 
+combat::CombatState::siege_gate_t SpecialState::siege_gate(const std::shared_ptr<GameState> &state, entity_id_t id,
+                                                           bool in_range, bool explicit_order, const time::time_t &time) {
+	using gate_t = combat::CombatState::siege_gate_t;
+	const auto *t = this->type_of(state, find_entity(state, id), time);
+	if (t == nullptr or not t->packable) {
+		return gate_t::GO;
+	}
+	auto &u = this->unit(id);
+	if (not explicit_order) {
+		// on its own a trebuchet only shoots what is in range, and only when it stands unpacked
+		return in_range and u.unpacked and not u.pack_until ? gate_t::GO : gate_t::DROP;
+	}
+	if (u.pack_until) {
+		return gate_t::WAIT;
+	}
+	if (in_range == u.unpacked) {
+		return gate_t::GO;
+	}
+	this->set_packed(state, id, u.unpacked, time);
+	return gate_t::WAIT;
+}
+
 bool SpecialState::pack_and_move(const std::shared_ptr<GameState> &state, entity_id_t id,
                                  const coord::phys3 &destination, const time::time_t &time) {
 	auto *u = this->find_unit(id);
@@ -2118,6 +2148,10 @@ bool handle_command(const std::shared_ptr<GameState> &state,
 	case command_t::PACK:
 	case command_t::UNPACK:
 		for (auto id : ids) {
+			if (type == command_t::PACK) {
+				// packing by hand ends an attack, it would unpack again
+				state->get_combat()->stop(state, id, time);
+			}
 			note(special->set_packed(state, id, type == command_t::PACK, time));
 		}
 		report(type == command_t::PACK ? "pack" : "unpack");
