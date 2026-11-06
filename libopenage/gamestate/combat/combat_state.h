@@ -601,6 +601,8 @@ private:
 	/// distance from the post (or route, guarded object) for the stance rules
 	double from_post(const Combatant &self, const Point &p, const time::time_t &time) const;
 
+	/// the target rules (on_target) allow this target
+	bool target_allowed(entity_id_t attacker, entity_id_t target) const;
 	void engage(const std::shared_ptr<GameState> &state, Combatant &attacker, entity_id_t target,
 	            bool explicit_order, const time::time_t &time);
 	void schedule_tick(const std::shared_ptr<GameState> &state, Combatant &attacker, const time::time_t &time);

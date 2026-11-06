@@ -700,8 +700,8 @@ void check_siege(const Options &opt) {
 	auto c2 = scene_spot(w, -10.0, 6.0);
 	auto house = w.spawn_at(1, ge("house", "House"), std::floor(c2.first) + 1.0, std::floor(c2.second) + 1.0);
 	auto guard = w.unit_near(1, "militia", "Militia", c2.first + 2.5, c2.second);
-	// next to the house: the ram needs no path (movement is the engine's, not W6)
-	auto ram = w.spawn_at(0, ge("ram", "Ram"), std::floor(c2.first) + 2.9, std::floor(c2.second) + 1.0);
+	// some tiles away: the ram walks there, also if the side next to it is blocked
+	auto ram = w.spawn_at(0, ge("ram", "Ram"), std::floor(c2.first) + 6.0, std::floor(c2.second) + 1.0);
 	if (house == nullptr or guard == nullptr or ram == nullptr) {
 		check(false, "scene for the ram");
 		return;
@@ -710,7 +710,7 @@ void check_siege(const Options &opt) {
 	w.advance(0.3);
 	const auto house_h0 = w.health(house);
 	w.combat()->order_attack(w.state, ram->get_id(), house->get_id(), w.now);
-	const bool rammed = w.advance_until(30.0, [&]() { return w.health(house) < house_h0; });
+	const bool rammed = w.advance_until(60.0, [&]() { return w.health(house) < house_h0; });
 	std::cout << "  ram at " << fmt(w.distance(ram, house)) << " tiles from the house, target "
 	          << (w.combat()->get_target(ram->get_id()) ? std::to_string(*w.combat()->get_target(ram->get_id())) : std::string{"-"})
 	          << ", house " << w.health(house) << "/" << w.max_health(house) << std::endl;

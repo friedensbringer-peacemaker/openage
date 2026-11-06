@@ -1247,10 +1247,8 @@ void CombatState::engage(const std::shared_ptr<GameState> &state,
                          bool explicit_order,
                          const time::time_t &time) {
 	// XR fork W6: target rules of the special abilities (automatic targets too)
-	for (const auto &filter : this->target_filters) {
-		if (not filter(attacker.entity->get_id(), target)) {
-			return;
-		}
+	if (not this->target_allowed(attacker.entity->get_id(), target)) {
+		return;
 	}
 	if (not attacker.post and attacker.stats->movable and not attacker.inside) {
 		attacker.post = ground(this->position_of(attacker.entity, time));
@@ -1425,7 +1423,7 @@ void CombatState::tick(const std::shared_ptr<GameState> &state, entity_id_t atta
 			auto apos = ground(this->position_of(a->entity, time));
 			Point dest = approach_point(apos, a->stats->radius, footprint(*b->stats, this->position_of(b->entity, time)),
 			                            0.2, 0.785398 * a->chase_failures);
-			if (a->chase_destination and time - a->chase_ordered > seconds(0.5)) {
+			if (a->chase_destination and time - a->chase_ordered >= seconds(CHASE_PERIOD)) {
 				a->chase_failures += 1;
 			}
 			if (a->chase_failures > 2 * MAX_CHASE_FAILURES) {
@@ -1533,7 +1531,8 @@ void CombatState::tick(const std::shared_ptr<GameState> &state, entity_id_t atta
 	}
 
 	bool moving = this->is_moving(a->entity, time);
-	if (a->chase_destination and not moving and time - a->chase_ordered > seconds(0.5)) {
+	// >= the tick period: every tick without movement renews the order, a longer wait would never count
+	if (a->chase_destination and not moving and time - a->chase_ordered >= seconds(CHASE_PERIOD)) {
 		// the last move order did not get us there (no path, blocked destination)
 		if (edge >= a->last_edge - 0.05) {
 			a->chase_failures += 1;
@@ -2118,7 +2117,7 @@ void CombatState::scan(const std::shared_ptr<GameState> &state, const time::time
 		if (c and not c->dead and c->target and c->stats->movable and not c->stats->villager) {
 			const auto *t = this->find(*c->target);
 			if (t and t->stats->building) {
-				if (auto better = this->choose_target(*c, time)) {
+				if (auto better = this->choose_target(*c, time); better and this->target_allowed(id, *better)) {
 					log::log(INFO << "Combat: " << describe(c->entity, *c->stats, this->owner_of(c->entity, time))
 					              << " leaves the building for a unit");
 					this->engage(state, *c, *better, false, time);
@@ -2473,6 +2472,15 @@ void CombatState::on_match_over(std::function<void(const MatchStatus &)> callbac
 
 void CombatState::on_impact(impact_handler_t handler) {
 	this->impact_handlers.push_back(std::move(handler));
+}
+
+bool CombatState::target_allowed(entity_id_t attacker, entity_id_t target) const {
+	for (const auto &filter : this->target_filters) {
+		if (not filter(attacker, target)) {
+			return false;
+		}
+	}
+	return true;
 }
 
 void CombatState::on_target(target_filter_t filter) {
