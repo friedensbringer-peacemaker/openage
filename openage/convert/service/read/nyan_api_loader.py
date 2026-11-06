@@ -5262,6 +5262,7 @@ def _insert_xr_members(api_objects: dict[str, NyanObject]) -> None:
     api_object = api_objects["engine.xr.ability.GenieUnit"]
     _xr_member(api_object, "line_unit_ids", int_set, [])
     _xr_member(api_object, "variants", ordered("engine.xr.util.GenieUnitData"), [])
+    _xr_member(api_object, "form_overrides", ordered("engine.util.animation_override.AnimationOverride"), [])
 
     # engine.xr.property.GenieTasks
     api_object = api_objects["engine.xr.property.GenieTasks"]

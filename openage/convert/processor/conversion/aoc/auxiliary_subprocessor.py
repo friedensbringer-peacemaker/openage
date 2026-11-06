@@ -911,7 +911,9 @@ class AoCXrSubprocessor:
 
         variants_units = []
         line_unit_ids = []
+        transform_unit = None
         if genie_unit is None:
+            transform_unit = getattr(line, "transform_unit", None)
             genie_unit = line.get_head_unit()
             variants_units = cls._variant_units(line)
             for unit in getattr(line, "line", []):
@@ -941,6 +943,33 @@ class AoCXrSubprocessor:
 
         ability_raw_api_object.add_raw_member("variants", variants, "engine.xr.ability.GenieUnit")
         ability_raw_api_object.add_raw_member("line_unit_ids", line_unit_ids, "engine.xr.ability.GenieUnit")
+
+        # the other form of a transform group (trebuchet: unpacked) stands with its own graphic
+        form_overrides = []
+        if transform_unit is not None:
+            form_idle_id = transform_unit["idle_graphic0"].value
+            if form_idle_id > -1 and form_idle_id != genie_unit["idle_graphic0"].value:
+                # pylint: disable=import-outside-toplevel,cyclic-import
+                from .ability_subprocessor import AoCAbilitySubprocessor
+
+                override_ref = f"{ability_ref}.FormIdleOverride"
+                override_raw_api_object = RawAPIObject(override_ref, "FormIdleOverride", dataset.nyan_api_objects)
+                override_raw_api_object.add_raw_parent("engine.util.animation_override.AnimationOverride")
+                override_raw_api_object.set_location(ForwardRef(line, ability_ref))
+                line.add_raw_api_object(override_raw_api_object)
+                origin = "engine.util.animation_override.AnimationOverride"
+                override_raw_api_object.add_raw_member("ability", ForwardRef(line, f"{entity_ref}.Idle"), origin)
+                override_raw_api_object.add_raw_member(
+                    "animations",
+                    [AoCAbilitySubprocessor.create_animation(
+                        line, form_idle_id, override_ref, "Idle", "idle_form_override_"
+                    )],
+                    origin,
+                )
+                override_raw_api_object.add_raw_member("priority", 1, origin)
+                form_overrides.append(ForwardRef(line, override_ref))
+
+        ability_raw_api_object.add_raw_member("form_overrides", form_overrides, "engine.xr.ability.GenieUnit")
 
         return ForwardRef(line, ability_ref)
 
