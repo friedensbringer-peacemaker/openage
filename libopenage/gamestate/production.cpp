@@ -1612,6 +1612,28 @@ PlayerPopulation population_of(const std::shared_ptr<GameState> &state,
 	return {it->second.used(), it->second.cap()};
 }
 
+bool can_place(const std::shared_ptr<GameState> &state,
+               entity_id_t builder,
+               const std::string &id,
+               const coord::phys3 &where,
+               const time::time_t &time) {
+	const auto &entities = state->get_game_entities();
+	auto it = entities.find(builder);
+	if (it == entities.end()) {
+		return true;
+	}
+	auto comp = component_of<BuilderComp>(it->second, component::component_t::BUILDER);
+	if (comp == nullptr) {
+		return true;
+	}
+	for (const auto &buildable : comp->get_buildables()) {
+		if (buildable.name == id) {
+			return check_place(state, it->second, buildable, where, time).ok;
+		}
+	}
+	return true;
+}
+
 size_t queued_in(const std::shared_ptr<GameEntity> &building) {
 	auto production = component_of<ProductionComp>(building, component::component_t::PRODUCTION_QUEUE);
 	return production == nullptr ? 0 : production->get_queue().size();

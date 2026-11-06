@@ -202,9 +202,10 @@ private:
 	/// candidates for choose_objective()/choose_unit_target() seen from a point
 	std::vector<TargetCandidate> candidates(const World &world, double ne, double se) const;
 	const Seen *find_enemy(const World &world, entity_id_t id) const;
-	/// spot for a building next to home (passable tiles), nothing if none found
+	/// spot for the building \p name next to home (the production accepts it), nothing if none found
 	std::optional<std::pair<double, double>> building_spot(const std::shared_ptr<GameState> &state,
 	                                                       const World &world,
+	                                                       const std::string &name,
 	                                                       double side,
 	                                                       const time::time_t &time);
 

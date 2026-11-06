@@ -78,6 +78,19 @@ public:
 	                   const time::time_t &time) = 0;
 
 	/**
+	 * XR fork: the production would accept a foundation of \p building at \p where with the
+	 * villager \p builder (default: yes, e.g. the stub). build() is asynchronous and cannot
+	 * report a rejection, so the AI asks before it chooses a spot.
+	 */
+	virtual bool can_place(const std::shared_ptr<GameState> & /* state */,
+	                       const std::string & /* building */,
+	                       entity_id_t /* builder */,
+	                       const coord::phys3 & /* where */,
+	                       const time::time_t & /* time */) {
+		return true;
+	}
+
+	/**
 	 * Units queued in a building (0 without production).
 	 */
 	virtual size_t queued(const std::shared_ptr<GameState> &state,

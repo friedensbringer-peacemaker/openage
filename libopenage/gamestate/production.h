@@ -123,6 +123,18 @@ PlayerPopulation population_of(const std::shared_ptr<GameState> &state,
                                player_id_t player,
                                const time::time_t &time);
 
+/**
+ * XR fork: a foundation of the building \p id would be accepted at \p where with the
+ * villager \p builder: the same placement rules as a placement order (terrain, occupied
+ * tiles, explored, elevation), without its costs and unlock conditions.
+ * True if the villager does not know the building (the order reports that).
+ */
+bool can_place(const std::shared_ptr<GameState> &state,
+               entity_id_t builder,
+               const std::string &id,
+               const coord::phys3 &where,
+               const time::time_t &time);
+
 /// units queued in a building (0 without a training queue)
 size_t queued_in(const std::shared_ptr<GameEntity> &building);
 

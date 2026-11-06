@@ -107,6 +107,14 @@ public:
 		return true;
 	}
 
+	bool can_place(const std::shared_ptr<GameState> &state,
+	               const std::string &building,
+	               entity_id_t builder,
+	               const coord::phys3 &where,
+	               const time::time_t &time) override {
+		return prod::can_place(state, builder, building, where, time);
+	}
+
 	size_t queued(const std::shared_ptr<GameState> &state,
 	              entity_id_t building,
 	              const time::time_t & /* time */) override {

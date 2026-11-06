@@ -896,6 +896,7 @@ void AiPlayer::gather(const std::shared_ptr<GameState> &state, const World &worl
 
 std::optional<std::pair<double, double>> AiPlayer::building_spot(const std::shared_ptr<GameState> &state,
                                                                  const World &world,
+                                                                 const std::string &name,
                                                                  double side,
                                                                  const time::time_t &time) {
 	if (not world.has_home) {
@@ -968,6 +969,11 @@ std::optional<std::pair<double, double>> AiPlayer::building_spot(const std::shar
 		for (size_t i = 0; ok and i < world.buildings.size(); ++i) {
 			const auto &b = world.buildings[i];
 			ok = dist(x, y, b.ne, b.se) >= b.radius + side / 2.0 + 1.0;
+		}
+		// last and most expensive: the rules of the production itself (elevation, explored, units)
+		if (ok and not world.villagers.empty()) {
+			coord::phys3 where{coord::phys_t{x}, coord::phys_t{y}, coord::phys_t{0}};
+			ok = this->production->can_place(state, name, world.villagers.front().id, where, time);
 		}
 		if (ok) {
 			return std::pair{x, y};
@@ -1159,7 +1165,7 @@ void AiPlayer::produce(const std::shared_ptr<GameState> &state, const World &wor
 			}
 			this->last_build[name] = now;
 			double side = house ? 2.0 : 3.0;
-			auto spot = this->building_spot(state, world, side, time);
+			auto spot = this->building_spot(state, world, name, side, time);
 			if (not spot) {
 				detail = " (no free spot)";
 				break;
@@ -1221,7 +1227,7 @@ void AiPlayer::produce(const std::shared_ptr<GameState> &state, const World &wor
 		if (feudal_locked and not has_camp and stock[static_cast<size_t>(resource_t::WOOD)] >= 100.0
 		    and (last_camp == this->last_build.end() or now - last_camp->second >= 15.0)) {
 			this->last_build["LumberCamp"] = now;
-			auto spot = this->building_spot(state, world, 2.0, time);
+			auto spot = this->building_spot(state, world, "LumberCamp", 2.0, time);
 			std::vector<const Seen *> by_distance;
 			if (spot) {
 				by_distance = this->free_builders(state, world, spot->first, spot->second, time);
@@ -1367,7 +1373,7 @@ void AiPlayer::food_economy(const std::shared_ptr<GameState> &state, const World
 			return;
 		}
 		this->last_build[name] = now;
-		auto spot = this->building_spot(state, world, side, time);
+		auto spot = this->building_spot(state, world, name, side, time);
 		if (not spot) {
 			log::log(INFO << "AI P" << this->player << ": no spot for a " << name << ", t=" << fmt1(now) << " s");
 			return;
@@ -1599,7 +1605,7 @@ void AiPlayer::special(const std::shared_ptr<GameState> &state, const World &wor
 		bool done = false;
 		std::string detail;
 		auto build = [&](const std::string &name, double side) {
-			auto spot = this->building_spot(state, world, side, time);
+			auto spot = this->building_spot(state, world, name, side, time);
 			if (not spot) {
 				detail = " (no free spot)";
 				return;
@@ -1668,11 +1674,15 @@ void AiPlayer::special(const std::shared_ptr<GameState> &state, const World &wor
 				detail = " (no free villager)";
 				break;
 			}
-			for (size_t i = 0; i < cands.size() and i < 24 and not done; ++i) {
+			// the order is asynchronous: only a spot the production accepts counts as done
+			for (size_t i = 0; i < cands.size() and i < 64 and not done; ++i) {
 				const auto x = cands[i].second.first;
 				const auto y = cands[i].second.second;
 				coord::phys3 where{coord::phys_t{static_cast<double>(x) + 0.5}, coord::phys_t{static_cast<double>(y) + 0.5},
 				                   coord::phys_t{0}};
+				if (not this->production->can_place(state, "Dock", builders.front()->id, where, time)) {
+					continue;
+				}
 				done = this->production->build(state, this->player, "Dock", {builders.front()->id}, where, time);
 				if (done) {
 					this->last_order[builders.front()->id] = now;

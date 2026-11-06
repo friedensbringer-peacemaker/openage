@@ -1153,7 +1153,9 @@ void SpecialState::auto_heal(const std::shared_ptr<GameState> &state, entity_id_
 			continue;
 		}
 		auto ts = combat->get_stats(id);
-		if (ts == nullptr or not ts->unit or ts->building or owner_of(entity, time) != owner) {
+		// herd animals are food: a villager slaughtering a sheep must not fight a healing monk
+		if (ts == nullptr or not ts->unit or ts->building or ts->animal or ts->ambient
+		    or owner_of(entity, time) != owner) {
 			continue;
 		}
 		const double d = combat::distance(here, ground_of(entity, time));
@@ -1361,6 +1363,9 @@ std::string SpecialState::order_heal(const std::shared_ptr<GameState> &state, en
 	}
 	if (owner_of(e, time) != owner_of(m, time)) {
 		return "nur eigene Einheiten";
+	}
+	if (ts->animal or ts->ambient) {
+		return "nicht heilbar (Tiere)";
 	}
 	if (not healable(ts->alive, ts->building, tt->ship, tt->siege)) {
 		return "nicht heilbar (Gebäude, Schiffe, Belagerung)";
