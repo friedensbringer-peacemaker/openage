@@ -18,6 +18,8 @@
 #include "gamestate/api/ability.h"
 #include "gamestate/api/animation.h"
 #include "gamestate/api/property.h"
+#include "gamestate/building_place.h"
+#include "gamestate/buildings.h"
 #include "gamestate/combat/behavior.h"
 #include "gamestate/combat/combat_state.h"
 #include "gamestate/combat/rules.h"
@@ -37,6 +39,7 @@
 #include "gamestate/pick.h"
 #include "gamestate/player.h"
 #include "gamestate/production.h"
+#include "gamestate/production_math.h"
 #include "gamestate/resources.h"
 #include "gamestate/tech.h"
 
@@ -841,6 +844,30 @@ void SpecialState::run_job(const std::shared_ptr<GameState> &state, entity_id_t 
 		this->heal_step(state, id, u, dt, time);
 		return;
 	}
+	case job_t::REPAIR: {
+		auto target = find_entity(state, u.job.target);
+		auto ts = combat->get_stats(u.job.target);
+		auto tt = this->type_of(state, target, time);
+		auto live = component_of<component::Live>(target, component::component_t::LIVE);
+		if (target == nullptr or ts == nullptr or tt == nullptr or live == nullptr or combat->is_dead(u.job.target)
+		    or combat->garrisoned_in(u.job.target) or owner_of(target, time) != owner_of(entity, time)) {
+			end("repair target gone");
+			return;
+		}
+		auto health = live->get_attribute(time, ts->health_attribute);
+		if (not health or *health >= ts->max_health) {
+			end("repaired");
+			return;
+		}
+		// a ship lies off the shore: own assumption, the data have no repair range
+		if (not this->approach(state, id, u.job, u.job.target, tt->ship ? 1.5 : 0.6, time)) {
+			return;
+		}
+		if (not this->repair_step(state, id, u, dt, time)) {
+			end("owner cannot pay the repair");
+		}
+		return;
+	}
 	case job_t::PICKUP: {
 		auto relic = find_entity(state, u.job.target);
 		if (relic == nullptr or this->inside.contains(u.job.target) or u.relic) {
@@ -1098,6 +1125,56 @@ void SpecialState::attempt_conversion(const std::shared_ptr<GameState> &state, e
 	}
 	combat->change_owner(state, target_id, *mo, view_of(state, *mo), fqon_of(e), time);
 	this->stats.conversions += 1;
+}
+
+bool SpecialState::repair_step(const std::shared_ptr<GameState> &state, entity_id_t villager, Unit &u, double dt,
+                               const time::time_t &time) {
+	auto combat = state->get_combat();
+	auto v = find_entity(state, villager);
+	auto target = find_entity(state, u.job.target);
+	auto ts = combat->get_stats(u.job.target);
+	auto live = component_of<component::Live>(target, component::component_t::LIVE);
+	auto owner = owner_of(target, time);
+	auto health = live and ts ? live->get_attribute(time, ts->health_attribute) : std::nullopt;
+	if (v == nullptr or not owner or not health) {
+		return true;
+	}
+	int workers = 0;
+	for (const auto &[id, other] : this->units) {
+		if (other.job.kind == job_t::REPAIR and other.job.target == u.job.target and not other.job.move_dest) {
+			workers += 1;
+		}
+	}
+	// the rate of a building (12.5 HP/s) with the factor of units, spec 04 §4.5
+	double gain = building::repair_hp(12.5, 1.0, dt, std::max(1, workers), true);
+	gain = std::min(gain, static_cast<double>(ts->max_health - *health) - u.job.heal_carry);
+	if (gain <= 0.0) {
+		return true;
+	}
+	const auto cost = prod::unit_cost(state, *owner, prod::entity_name(target), time);
+	const auto due = building::repair_due(u.job.repair_owed, cost, gain, static_cast<double>(ts->max_health));
+	resource_amounts_t pay{};
+	for (size_t i = 0; i < RESOURCE_COUNT and i < due.size(); ++i) {
+		pay[i] = due[i];
+	}
+	if (state->has_player(*owner) and not state->get_player(*owner)->get_resources().spend(pay)) {
+		auto missing = prod::missing_resource(state->get_player(*owner)->get_resources().get(), pay);
+		const std::string text = "Reparatur abgebrochen: "
+		                         + (missing ? prod::missing_message(*missing) : std::string{"Nicht genug Rohstoffe"});
+		if (auto buildings = state->get_buildings()) {
+			buildings->post(*owner, text, true);
+		}
+		return false;
+	}
+	u.job.heal_carry += gain;
+	const auto add = static_cast<int64_t>(std::floor(u.job.heal_carry + 1e-9));
+	if (add > 0) {
+		u.job.heal_carry -= static_cast<double>(add);
+		const int64_t value = std::min(ts->max_health, *health + add);
+		live->set_attribute(time, ts->health_attribute, value);
+		combat->health_changed(u.job.target, value);
+	}
+	return true;
 }
 
 void SpecialState::heal_step(const std::shared_ptr<GameState> &state, entity_id_t monk, Unit &u, double dt,
@@ -1379,6 +1456,45 @@ std::string SpecialState::order_heal(const std::shared_ptr<GameState> &state, en
 	u.job.target = target;
 	u.job.explicit_order = true;
 	u.job.started = time.to_double();
+	return {};
+}
+
+std::string SpecialState::order_repair(const std::shared_ptr<GameState> &state, entity_id_t villager, entity_id_t target,
+                                       const time::time_t &time) {
+	auto combat = state->get_combat();
+	auto v = find_entity(state, villager);
+	auto e = find_entity(state, target);
+	auto ts = combat->get_stats(target);
+	const auto *tt = this->type_of(state, e, time);
+	if (v == nullptr or not v->has_component(component::component_t::BUILDER)) {
+		return "kann nicht reparieren";
+	}
+	if (e == nullptr or ts == nullptr or tt == nullptr or combat->is_dead(target)) {
+		return "kein Ziel";
+	}
+	if (owner_of(e, time) != owner_of(v, time)) {
+		return "nur eigene Einheiten";
+	}
+	if (not tt->siege and not tt->ship) {
+		return "nicht reparierbar (nur Belagerung und Schiffe)";
+	}
+	auto live = component_of<component::Live>(e, component::component_t::LIVE);
+	auto health = live ? live->get_attribute(time, ts->health_attribute) : std::nullopt;
+	if (not health or not building::can_repair(static_cast<double>(*health))) {
+		return "kein Ziel";
+	}
+	if (*health >= ts->max_health) {
+		return "nicht beschädigt";
+	}
+	auto &u = this->unit(villager);
+	u.job = Job{};
+	u.job.kind = job_t::REPAIR;
+	u.job.target = target;
+	u.job.explicit_order = true;
+	u.job.started = time.to_double();
+	combat->halt_entity(villager, time);
+	log::log(INFO << "Special: " << describe(v, time) << " repairs " << describe(e, time) << " at t="
+	              << fmt1(time.to_double()));
 	return {};
 }
 
@@ -1888,6 +2004,49 @@ std::shared_ptr<GameEntity> pick(const std::shared_ptr<GameState> &state,
 }
 
 } // namespace
+
+bool repair_command(const std::shared_ptr<GameState> &state,
+                    const time::time_t &time,
+                    const std::vector<entity_id_t> &ids,
+                    const coord::phys3 &target,
+                    const openage::event::EventHandler::param_map &params) {
+	auto special = state->get_special();
+	auto combat = state->get_combat();
+	if (special == nullptr or combat == nullptr) {
+		return false;
+	}
+	std::vector<entity_id_t> villagers;
+	for (auto id : ids) {
+		auto e = find_entity(state, id);
+		if (e != nullptr and e->has_component(component::component_t::BUILDER)) {
+			villagers.push_back(id);
+		}
+	}
+	if (villagers.empty()) {
+		return false;
+	}
+	const auto owner = owner_of(state->get_game_entity(villagers.front()), time);
+	auto entity = pick(state, time, target, params, [&](const std::shared_ptr<GameEntity> &e) {
+		const auto *t = special->type_of(state, e, time);
+		auto stats = combat->get_stats(e->get_id());
+		auto live = component_of<component::Live>(e, component::component_t::LIVE);
+		if (t == nullptr or stats == nullptr or live == nullptr or owner_of(e, time) != owner or not(t->siege or t->ship)) {
+			return false;
+		}
+		auto health = live->get_attribute(time, stats->health_attribute);
+		return health and *health < stats->max_health;
+	});
+	if (entity == nullptr) {
+		return false;
+	}
+	size_t done = 0;
+	for (auto id : villagers) {
+		done += special->order_repair(state, id, entity->get_id(), time).empty() ? 1 : 0;
+	}
+	log::log(INFO << "Special command repair of " << entity->get_id() << ": " << done << " of " << villagers.size()
+	              << " villagers");
+	return done > 0;
+}
 
 bool handle_command(const std::shared_ptr<GameState> &state,
                     const time::time_t &time,

@@ -1612,6 +1612,25 @@ PlayerPopulation population_of(const std::shared_ptr<GameState> &state,
 	return {it->second.used(), it->second.cap()};
 }
 
+resource_amounts_t unit_cost(const std::shared_ptr<GameState> &state,
+                             player_id_t player,
+                             const std::string &name,
+                             const time::time_t &time) {
+	const ProductionComp::Creatable *other = nullptr;
+	for (const auto &[id, entity] : state->get_game_entities()) {
+		auto comp = component_of<ProductionComp>(entity, component::component_t::PRODUCTION_QUEUE);
+		const auto *creatable = comp == nullptr ? nullptr : comp->find(name);
+		if (creatable == nullptr) {
+			continue;
+		}
+		if (owner_of(entity, time) == player) {
+			return creatable->cost;
+		}
+		other = creatable;
+	}
+	return other == nullptr ? resource_amounts_t{} : other->cost;
+}
+
 bool can_place(const std::shared_ptr<GameState> &state,
                entity_id_t builder,
                const std::string &id,

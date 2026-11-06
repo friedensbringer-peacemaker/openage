@@ -175,6 +175,15 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 		if (ids.empty()) {
 			return;
 		}
+		if (auto special_state = gstate->get_special()) {
+			for (auto id : ids) {
+				special_state->cancel_job(id);
+			}
+		}
+		// siege and ships are no foundations: the repair job of the special state
+		if (special::repair_command(gstate, time, ids, params.get("target", coord::phys3{0, 0, 0}), params)) {
+			return;
+		}
 		auto owner = std::dynamic_pointer_cast<component::Ownership>(
 			gstate->get_game_entity(ids.front())->get_component(component::component_t::OWNERSHIP));
 		std::optional<entity_id_t> picked;
@@ -204,6 +213,11 @@ void SendCommandHandler::invoke(openage::event::EventLoop & /* loop */,
 	}
 
 	// XR fork W6: convert, heal, relics, carriers, trebuchets (handled ids leave the list)
+	// XR fork: a right click of villagers on an own damaged siege unit or ship repairs it
+	if (command_type == component::command::command_t::MOVE and not plain
+	    and special::repair_command(gstate, time, ids, params.get("target", coord::phys3{0, 0, 0}), params)) {
+		return;
+	}
 	if (special::handle_command(gstate, time, command_type, ids, target, params)) {
 		return;
 	}

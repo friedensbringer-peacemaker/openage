@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -225,6 +226,14 @@ public:
 	                       const time::time_t &time);
 	/// a player command: the special job of the entity ends (moves elsewhere, stop, attack)
 	void cancel_job(entity_id_t id);
+
+	/**
+	 * A villager repairs an own damaged siege unit or ship (spec 04 §4.5, buildings: system/build.cpp).
+	 *
+	 * @return empty if ordered, otherwise the reason.
+	 */
+	std::string order_repair(const std::shared_ptr<GameState> &state, entity_id_t villager, entity_id_t target,
+	                         const time::time_t &time);
 	/// an unpacked trebuchet packs before it walks to \p destination
 	bool pack_and_move(const std::shared_ptr<GameState> &state, entity_id_t id, const coord::phys3 &destination,
 	                   const time::time_t &time);
@@ -302,6 +311,7 @@ private:
 		DELIVER,
 		BOARD,
 		UNLOAD,
+		REPAIR,
 	};
 
 	struct Job {
@@ -312,8 +322,10 @@ private:
 		/// conversion: faith time t starts with the prayer (in range); next attempt
 		std::optional<double> prayer_since{};
 		double next_attempt = 0.0;
-		/// heal: fractional HP not yet applied
+		/// heal and repair: fractional HP not yet applied
 		double heal_carry = 0.0;
+		/// repair: fractional costs not yet paid (spec 04 §4.5)
+		std::array<double, 4> repair_owed{};
 		/// walking: last move order, its destination, failed tries
 		double moved_at = -1.0e9;
 		std::optional<std::pair<double, double>> move_dest{};
@@ -346,6 +358,9 @@ private:
 	              const time::time_t &time);
 	void attempt_conversion(const std::shared_ptr<GameState> &state, entity_id_t monk, Unit &u,
 	                        const time::time_t &time);
+	/// one repair step of a villager, false if the owner cannot pay
+	bool repair_step(const std::shared_ptr<GameState> &state, entity_id_t villager, Unit &u, double dt,
+	                 const time::time_t &time);
 	void heal_step(const std::shared_ptr<GameState> &state, entity_id_t monk, Unit &u, double dt,
 	               const time::time_t &time);
 	void auto_heal(const std::shared_ptr<GameState> &state, entity_id_t monk, Unit &u, const time::time_t &time);
@@ -399,6 +414,18 @@ bool handle_command(const std::shared_ptr<GameState> &state,
                     const time::time_t &time,
                     component::command::command_t type,
                     std::vector<entity_id_t> &ids,
+                    const coord::phys3 &target,
+                    const openage::event::EventHandler::param_map &params);
+
+/**
+ * Villagers among \p ids repair the own damaged siege unit or ship of the command ("target_entity"
+ * or under the cursor).
+ *
+ * @return true if there is such a target and at least one villager takes it.
+ */
+bool repair_command(const std::shared_ptr<GameState> &state,
+                    const time::time_t &time,
+                    const std::vector<entity_id_t> &ids,
                     const coord::phys3 &target,
                     const openage::event::EventHandler::param_map &params);
 

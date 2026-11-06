@@ -725,6 +725,49 @@ void check_siege(const Options &opt) {
 	});
 	check(not ram_on_unit, "ram does not take a unit as target (ordered or on its own)");
 
+	// repair of siege units by villagers (spec 04 §4.5): a quarter of the building rate, costs of the owner
+	{
+		w.production->grant_resources(0, 2000.0);
+		auto c4 = scene_spot(w, 6.0, 10.0);
+		auto wreck = w.unit_near(0, "ram", "Ram", c4.first, c4.second);
+		auto worker = w.unit_near(0, "villager", "Villager", c4.first + 2.0, c4.second);
+		if (wreck == nullptr or worker == nullptr) {
+			check(false, "scene for the repair");
+			return;
+		}
+		w.passive(wreck);
+		const auto max = w.max_health(wreck);
+		w.set_health(wreck, max / 2);
+		w.advance(0.3);
+		const auto wood0 = w.resource(0, resource_t::WOOD);
+		const auto gold0 = w.resource(0, resource_t::GOLD);
+		w.command(component::command::command_t::REPAIR, {worker}, wreck->get_id(), w.position(wreck));
+		check(w.advance_until(30.0, [&]() { return w.health(wreck) > max / 2; }), "villager repairs the ram");
+		const auto h1 = w.health(wreck);
+		w.advance(8.0);
+		const auto gain = w.health(wreck) - h1;
+		std::cout << "  repair: " << gain << " HP in 8 s, wood " << wood0 - w.resource(0, resource_t::WOOD) << ", gold "
+		          << gold0 - w.resource(0, resource_t::GOLD) << std::endl;
+		check(gain >= 22 and gain <= 28, "one villager repairs a unit at 12.5 / 4 HP/s: " + std::to_string(gain));
+		check(wood0 - w.resource(0, resource_t::WOOD) + gold0 - w.resource(0, resource_t::GOLD) > 0.0,
+		      "the repair costs resources");
+		w.set_health(wreck, max);
+		w.advance(1.0);
+		check(not w.special()->order_repair(w.state, worker->get_id(), wreck->get_id(), w.now).empty(),
+		      "an undamaged unit is no repair target");
+		check(not w.special()->order_repair(w.state, worker->get_id(), guard->get_id(), w.now).empty(),
+		      "an enemy unit is no repair target");
+		// nothing to pay: the repair stops
+		auto &stock = w.state->get_player(0)->get_resources();
+		stock.spend(stock.get());
+		w.set_health(wreck, max / 2);
+		w.advance(0.3);
+		check(w.special()->order_repair(w.state, worker->get_id(), wreck->get_id(), w.now).empty(),
+		      "repair ordered without resources");
+		w.advance(20.0);
+		check(w.health(wreck) < max / 2 + 15, "the repair stops if the owner cannot pay: " + std::to_string(w.health(wreck)));
+	}
+
 	// trebuchet: unpack / pack (transform unit of the data)
 	auto c3 = scene_spot(w, -6.0, -10.0);
 	auto treb = w.unit_near(0, "trebuchet", "Trebuchet", c3.first, c3.second);
@@ -878,6 +921,23 @@ void check_ships(const Options &opt) {
 		galley = galley or (o.id == "Galley" and o.available);
 	}
 	check(galley, "dock trains galleys in the Feudal Age");
+
+	// repair of a ship from the shore, right click like the user interface (spec 04 §4.5)
+	{
+		auto hull = w.spawn_at(0, ge("galley", "Galley"), shore->water_ne, shore->water_se);
+		auto worker = w.unit_near(0, "villager", "Villager", shore->land_ne, shore->land_se);
+		if (hull == nullptr or worker == nullptr) {
+			check(false, "scene for the ship repair");
+		}
+		else {
+			w.passive(hull);
+			const auto max = w.max_health(hull);
+			w.set_health(hull, max / 2);
+			w.advance(0.3);
+			w.command(component::command::command_t::MOVE, {worker}, hull->get_id(), w.position(hull));
+			check(w.advance_until(30.0, [&]() { return w.health(hull) > max / 2; }), "villager at the shore repairs the ship");
+		}
+	}
 
 	// restore the cargo from the save
 	save::SaveData parsed;

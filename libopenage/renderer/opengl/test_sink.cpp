@@ -509,6 +509,8 @@ void TestFrameSink::consumer_loop() {
 					this->size = pack_size(step.width, step.height);
 				}
 				else if (step.what == Step::kind::camera) {
+					// a capture after the movement shows a frame rendered after it (as for inputs)
+					capture_from_sequence = this->published + 3;
 					log::log(MSG(info) << "Test sink: camera channel " << step.camera_dx << ", "
 					                   << step.camera_dy << " px, zoom " << step.camera_zoom
 					                   << " at " << elapsed << " s");
@@ -518,6 +520,7 @@ void TestFrameSink::consumer_loop() {
 					this->camera_zoom += step.camera_zoom;
 				}
 				else if (step.what == Step::kind::background) {
+					capture_from_sequence = this->published + 3;
 					log::log(MSG(info) << "Test sink: background (" << step.background[0] << ", "
 					                   << step.background[1] << ", " << step.background[2] << "), alpha "
 					                   << step.background[3] << " at " << elapsed << " s");

@@ -124,6 +124,15 @@ PlayerPopulation population_of(const std::shared_ptr<GameState> &state,
                                const time::time_t &time);
 
 /**
+ * XR fork: training cost of the unit \p name from a building that trains it, those of
+ * \p player first (repair of siege and ships, spec 04 §4.5). Zero if nothing trains it.
+ */
+resource_amounts_t unit_cost(const std::shared_ptr<GameState> &state,
+                             player_id_t player,
+                             const std::string &name,
+                             const time::time_t &time);
+
+/**
  * XR fork: a foundation of the building \p id would be accepted at \p where with the
  * villager \p builder: the same placement rules as a placement order (terrain, occupied
  * tiles, explored, elevation), without its costs and unlock conditions.
