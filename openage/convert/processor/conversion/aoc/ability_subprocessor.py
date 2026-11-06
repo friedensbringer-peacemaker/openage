@@ -549,7 +549,7 @@ class AoCAbilitySubprocessor:
         if command_id == 7:
             # Attack
             if projectile != 1:
-                effects = AoCEffectSubprocessor.get_attack_effects(line, batch_ref)
+                effects = AoCEffectSubprocessor.get_attack_effects(line, batch_ref, projectile=projectile)
 
             else:
                 effects = AoCEffectSubprocessor.get_attack_effects(line, batch_ref, projectile=1)
