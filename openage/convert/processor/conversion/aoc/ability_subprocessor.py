@@ -549,7 +549,7 @@ class AoCAbilitySubprocessor:
         if command_id == 7:
             # Attack
             if projectile != 1:
-                effects = AoCEffectSubprocessor.get_attack_effects(line, batch_ref)
+                effects = AoCEffectSubprocessor.get_attack_effects(line, batch_ref, projectile=projectile)
 
             else:
                 effects = AoCEffectSubprocessor.get_attack_effects(line, batch_ref, projectile=1)
@@ -4195,12 +4195,12 @@ class AoCAbilitySubprocessor:
 
         if position == 0:
             current_unit_id = line.get_head_unit_id()
-            projectile_id = line.get_head_unit()["projectile_id0"].value
+            projectile_id = line.get_shooter_unit()["projectile_id0"].value
             current_unit = dataset.genie_units[projectile_id]
 
         elif position == 1:
             current_unit_id = line.get_head_unit_id()
-            projectile_id = line.get_head_unit()["projectile_id1"].value
+            projectile_id = line.get_shooter_unit()["projectile_id1"].value
             current_unit = dataset.genie_units[projectile_id]
 
         else:
@@ -4504,7 +4504,7 @@ class AoCAbilitySubprocessor:
         :returns: The forward reference for the ability.
         :rtype: ...dataformat.forward_ref.ForwardRef
         """
-        current_unit = line.get_head_unit()
+        current_unit = line.get_shooter_unit()
         current_unit_id = line.get_head_unit_id()
         dataset = line.data
 
@@ -5538,7 +5538,7 @@ class AoCAbilitySubprocessor:
         :returns: The forward reference for the ability.
         :rtype: ...dataformat.forward_ref.ForwardRef
         """
-        current_unit = line.get_head_unit()
+        current_unit = line.get_shooter_unit()
         current_unit_id = line.get_head_unit_id()
         dataset = line.data
         api_objects = dataset.nyan_api_objects

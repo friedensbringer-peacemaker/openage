@@ -1214,7 +1214,7 @@ class AoCNyanSubprocessor:
         :param line: Line for which the projectiles are extracted.
         :type line: ..dataformat.converter_object.ConverterObjectGroup
         """
-        current_unit = line.get_head_unit()
+        current_unit = line.get_shooter_unit()
         current_unit_id = line.get_head_unit_id()
         dataset = line.data
 

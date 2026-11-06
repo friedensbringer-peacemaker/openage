@@ -269,7 +269,7 @@ class AoCUpgradeAttributeSubprocessor:
         class_name = armor_lookup_dict[armor_class]
 
         if line.is_projectile_shooter():
-            primary_projectile_id = line.get_head_unit()["projectile_id0"].value
+            primary_projectile_id = line.get_shooter_unit()["projectile_id0"].value
             if primary_projectile_id == -1:
                 # Upgrade is skipped if the primary projectile is not defined
                 return patches
