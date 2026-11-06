@@ -13,6 +13,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "log/log.h"
@@ -1616,19 +1617,37 @@ resource_amounts_t unit_cost(const std::shared_ptr<GameState> &state,
                              player_id_t player,
                              const std::string &name,
                              const time::time_t &time) {
-	const ProductionComp::Creatable *other = nullptr;
+	std::unordered_set<nyan::fqon_t> buildings;
 	for (const auto &[id, entity] : state->get_game_entities()) {
-		auto comp = component_of<ProductionComp>(entity, component::component_t::PRODUCTION_QUEUE);
-		const auto *creatable = comp == nullptr ? nullptr : comp->find(name);
-		if (creatable == nullptr) {
+		if (owner_of(entity, time) != player) {
 			continue;
 		}
-		if (owner_of(entity, time) == player) {
+		auto comp = component_of<ProductionComp>(entity, component::component_t::PRODUCTION_QUEUE);
+		if (const auto *creatable = comp == nullptr ? nullptr : comp->find(name)) {
 			return creatable->cost;
 		}
-		other = creatable;
+		if (auto builder = component_of<BuilderComp>(entity, component::component_t::BUILDER)) {
+			for (const auto &buildable : builder->get_buildables()) {
+				buildings.insert(buildable.fqon);
+			}
+		}
 	}
-	return other == nullptr ? resource_amounts_t{} : other->cost;
+	const auto &view = state->get_db_view();
+	for (const auto &fqon : buildings) {
+		for (const auto &ability_val : view->get_object(fqon).get_set("GameEntity.abilities")) {
+			auto ability = view->get_object(object_name(ability_val));
+			if (ability.get_parents()[0] != "engine.ability.type.Create") {
+				continue;
+			}
+			for (const auto &creatable_val : ability.get_set("Create.creatables")) {
+				auto creatable = view->get_object(object_name(creatable_val));
+				if (short_name(creatable.get_object("CreatableGameEntity.game_entity").get_name()) == name) {
+					return cost_of(view, creatable.get_object("CreatableGameEntity.cost"));
+				}
+			}
+		}
+	}
+	return {};
 }
 
 bool can_place(const std::shared_ptr<GameState> &state,

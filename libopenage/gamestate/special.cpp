@@ -1151,8 +1151,7 @@ bool SpecialState::repair_step(const std::shared_ptr<GameState> &state, entity_i
 	if (gain <= 0.0) {
 		return true;
 	}
-	const auto cost = prod::unit_cost(state, *owner, prod::entity_name(target), time);
-	const auto due = building::repair_due(u.job.repair_owed, cost, gain, static_cast<double>(ts->max_health));
+	const auto due = building::repair_due(u.job.repair_owed, u.job.repair_cost, gain, static_cast<double>(ts->max_health));
 	resource_amounts_t pay{};
 	for (size_t i = 0; i < RESOURCE_COUNT and i < due.size(); ++i) {
 		pay[i] = due[i];
@@ -1490,6 +1489,7 @@ std::string SpecialState::order_repair(const std::shared_ptr<GameState> &state, 
 	u.job = Job{};
 	u.job.kind = job_t::REPAIR;
 	u.job.target = target;
+	u.job.repair_cost = prod::unit_cost(state, *owner_of(v, time), prod::entity_name(e), time);
 	u.job.explicit_order = true;
 	u.job.started = time.to_double();
 	combat->halt_entity(villager, time);

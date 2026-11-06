@@ -124,8 +124,9 @@ PlayerPopulation population_of(const std::shared_ptr<GameState> &state,
                                const time::time_t &time);
 
 /**
- * XR fork: training cost of the unit \p name from a building that trains it, those of
- * \p player first (repair of siege and ships, spec 04 §4.5). Zero if nothing trains it.
+ * XR fork: training cost of the unit \p name (repair of siege and ships, spec 04 §4.5): from a
+ * standing building of \p player, else from the data of the buildings villagers can build (the
+ * workshop may be gone). Zero if nothing trains it.
  */
 resource_amounts_t unit_cost(const std::shared_ptr<GameState> &state,
                              player_id_t player,

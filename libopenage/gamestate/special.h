@@ -22,6 +22,7 @@
 #include "event/eventhandler.h"
 #include "gamestate/component/internal/commands/types.h"
 #include "gamestate/special_math.h"
+#include "gamestate/resources.h"
 #include "gamestate/types.h"
 #include "time/time.h"
 
@@ -324,7 +325,8 @@ private:
 		double next_attempt = 0.0;
 		/// heal and repair: fractional HP not yet applied
 		double heal_carry = 0.0;
-		/// repair: fractional costs not yet paid (spec 04 §4.5)
+		/// repair: training cost of the target, fractional costs not yet paid (spec 04 §4.5)
+		resource_amounts_t repair_cost{};
 		std::array<double, 4> repair_owed{};
 		/// walking: last move order, its destination, failed tries
 		double moved_at = -1.0e9;
