@@ -2043,33 +2043,39 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		box_select(3.5, mp, 30);
 		capture(4.2, "-sync-s1");
 		click(4.5, pixel((*foe1)[0], (*foe1)[1], 0.6), E::kRightButton);
-		capture(16.0, "-s2-konvertieren");
+		// the walk (up to 12 s after a slow first frame) and the conversion (up to 10 s) come before the next scene
+		capture(28.0, "-s2-konvertieren");
 		auto gp = pixel((*mangonel)[0], (*mangonel)[1], 0.6);
 		log_px("mangonel", gp);
-		box_select(18.5, gp, 30);
-		capture(19.2, "-sync-s2");
-		click(19.5, pixel((*foe2)[0], (*foe2)[1], 0.6), E::kRightButton);
-		capture(32.0, "-s3-mange");
+		box_select(30.5, gp, 30);
+		capture(31.2, "-sync-s2");
+		click(31.5, pixel((*foe2)[0], (*foe2)[1], 0.6), E::kRightButton);
+		capture(44.0, "-s3-mange");
 		auto tp = pixel((*treb)[0], (*treb)[1], 0.8);
 		log_px("trebuchet", tp);
-		box_select(32.5, tp, 30);
-		capture(33.5, "-s4-tribock");
+		box_select(44.5, tp, 30);
+		capture(45.5, "-s4-tribock");
 		auto cp = pixel((*carrier)[0], (*carrier)[1], 0.6);
 		log_px("carrier", cp);
-		box_select(34.0, cp, 30);
-		click(34.8, pixel((*relic)[0], (*relic)[1], 0.3), E::kRightButton);
-		capture(42.0, "-s5-reliquie");
-		click(42.2, pixel((*away)[0], (*away)[1], 0.0), E::kRightButton);
-		capture(43.2, "-s6-traegt");
-		box_select(43.6, tp, 30);
+		box_select(46.0, cp, 30);
+		click(46.8, pixel((*relic)[0], (*relic)[1], 0.3), E::kRightButton);
+		capture(54.0, "-s5-reliquie");
+		click(54.2, pixel((*away)[0], (*away)[1], 0.0), E::kRightButton);
+		capture(55.2, "-s6-traegt");
+		box_select(55.6, tp, 30);
 		// the command grid needs the selection in the production snapshot
-		add(45.0, E::kKeyDown, 0, 0, 0, 0, 'U');
-		add(45.05, E::kKeyUp, 0, 0, 0, 0, 'U');
-		capture(50.0, "-s7-aufgebaut");
-		click(50.2, pixel((*target)[0], (*target)[1], 0.5), E::kRightButton);
-		capture(51.0, "-s8-schuss");
-		capture(52.0, "-s9-schuss");
-		capture(53.0, nullptr);
+		add(57.0, E::kKeyDown, 0, 0, 0, 0, 'U');
+		add(57.05, E::kKeyUp, 0, 0, 0, 0, 'U');
+		// the button of the command grid, in case the key was not taken
+		agesxr::AoeUi unpack_layout;
+		unpack_layout.resize(width, height);
+		const auto unpack_cell = unpack_layout.gridRect(4);
+		click(58.5, {unpack_cell.cx(), unpack_cell.cy()}, E::kLeftButton);
+		capture(64.0, "-s7-aufgebaut");
+		click(64.2, pixel((*target)[0], (*target)[1], 0.5), E::kRightButton);
+		capture(65.0, "-s8-schuss");
+		capture(66.0, "-s9-schuss");
+		capture(67.0, nullptr);
 		return steps;
 	}
 	if (args.replay_fish) {
