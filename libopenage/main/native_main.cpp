@@ -1955,7 +1955,8 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 	if (args.replay_special) {
 		// XR fork W6 (--replay-special): a monk converts an enemy militia (faith in the info line), a mangonel
 		// shoots into an enemy group next to an own militia (area damage), a trebuchet shows its commands.
-		// Captures -s1-start, -s2-konvertieren, -s3-mange, -s4-tribock.
+		// A second monk picks up a relic and walks away with it (carry graphics).
+		// Captures -s1-start, -s2-konvertieren, -s3-mange, -s4-tribock, -s5-reliquie, -s6-traegt.
 		const auto gaia_less = static_cast<openage::gamestate::player_id_t>(1);
 		auto monastery = near_square(tc[0] + 5.0, tc[1] + 5.0, 3, false, 5.0);
 		if (monastery) {
@@ -1989,7 +1990,20 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 			}
 			treb = near_square(tc[0] - 4.0, tc[1] + 4.0, 1, false, 3.5);
 		}
-		if (not monastery or not monk or not foe1 or not foe3 or not own or not mangonel or not treb) {
+		std::optional<std::array<double, 2>> carrier, relic, away;
+		if (treb) {
+			mark(*treb, 1);
+			carrier = near_square(tc[0] - 1.0, tc[1] + 7.0, 1, false, 1.0);
+		}
+		if (carrier) {
+			mark(*carrier, 1);
+			relic = near_square((*carrier)[0] + 2.0, (*carrier)[1] - 1.0, 1, false, 0.0);
+		}
+		if (relic) {
+			mark(*relic, 1);
+			away = near_square((*carrier)[0] - 1.0, (*carrier)[1] + 4.0, 1, false, 0.0);
+		}
+		if (not monastery or not monk or not foe1 or not foe3 or not own or not mangonel or not treb or not relic or not away) {
 			log::log(WARN << "special replay: map lacks free spots");
 			capture(2.0, nullptr);
 			return steps;
@@ -2004,6 +2018,8 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		// after the conversion as well: its shots would make the militia walk away from the right click
 		plan.spawns.push_back({"-s2-konvertieren", 0, "Mangonel", (*mangonel)[0], (*mangonel)[1]});
 		plan.spawns.push_back({"-sync-0", 0, "Trebuchet", (*treb)[0], (*treb)[1]});
+		plan.spawns.push_back({"-s4-tribock", 0, "Monk", (*carrier)[0], (*carrier)[1]});
+		plan.spawns.push_back({"-s4-tribock", gaia_less, "Relic", (*relic)[0], (*relic)[1]});
 		capture(3.0, "-s1-start");
 		auto mp = pixel((*monk)[0], (*monk)[1], 0.6);
 		log_px("monk", mp);
@@ -2030,7 +2046,14 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		log_px("trebuchet", tp);
 		box_select(32.5, tp, 30);
 		capture(33.5, "-s4-tribock");
-		capture(34.0, nullptr);
+		auto cp = pixel((*carrier)[0], (*carrier)[1], 0.6);
+		log_px("carrier", cp);
+		box_select(34.0, cp, 30);
+		click(34.8, pixel((*relic)[0], (*relic)[1], 0.3), E::kRightButton);
+		capture(42.0, "-s5-reliquie");
+		click(42.2, pixel((*away)[0], (*away)[1], 0.0), E::kRightButton);
+		capture(43.2, "-s6-traegt");
+		capture(44.0, nullptr);
 		return steps;
 	}
 	if (args.replay_fish) {
