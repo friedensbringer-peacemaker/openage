@@ -2432,9 +2432,14 @@ bool handle_command(const std::shared_ptr<GameState> &state,
 		if (done > 0 or not why.empty()) {
 			report("unload at the shore (right click)");
 		}
-		// --- unpacked trebuchets pack before they walk
+		// --- unpacked trebuchets pack before they walk; an enemy under the click is an attack (the combat
+		// rule decides whether it has to pack for it)
+		const bool on_enemy = pick(state, time, target, params, [&](const std::shared_ptr<GameEntity> &e) {
+			const auto eo = owner_of(e, time);
+			return eo and owner and *eo != *owner and not special->neutral_player(*eo);
+		}) != nullptr;
 		std::erase_if(ids, [&](entity_id_t id) {
-			return type == command_t::MOVE and special->pack_and_move(state, id, target, time);
+			return type == command_t::MOVE and not on_enemy and special->pack_and_move(state, id, target, time);
 		});
 		return false;
 	}

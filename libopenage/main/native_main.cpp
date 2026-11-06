@@ -2066,11 +2066,6 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		// the command grid needs the selection in the production snapshot
 		add(57.0, E::kKeyDown, 0, 0, 0, 0, 'U');
 		add(57.05, E::kKeyUp, 0, 0, 0, 0, 'U');
-		// the button of the command grid, in case the key was not taken
-		agesxr::AoeUi unpack_layout;
-		unpack_layout.resize(width, height);
-		const auto unpack_cell = unpack_layout.gridRect(4);
-		click(58.5, {unpack_cell.cx(), unpack_cell.cy()}, E::kLeftButton);
 		capture(64.0, "-s7-aufgebaut");
 		click(64.2, pixel((*target)[0], (*target)[1], 0.5), E::kRightButton);
 		capture(65.0, "-s8-schuss");

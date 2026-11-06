@@ -1118,6 +1118,20 @@ void check_trebuchet_fire(const Options &opt) {
 	check(std::hypot(now_at.ne.to_double() - spot.ne.to_double(), now_at.se.to_double() - spot.se.to_double()) < 0.01,
 	      "unpacked it does not move");
 
+	// a right click on the enemy while it stands unpacked: it stays and goes on shooting
+	if (w.alive(house)) {
+		w.combat()->stop(w.state, treb->get_id(), w.now);
+		const auto h1 = w.health(house);
+		w.command(component::command::command_t::MOVE, {treb}, house->get_id(), w.position(house));
+		w.advance(special::SpecialState::PACK_TIME + 0.5);
+		check(w.special()->is_unpacked(treb->get_id()), "a right click on an enemy in range: it stays unpacked");
+		check(w.advance_until(40.0, [&]() { return not w.alive(house) or w.health(house) < h1; }),
+		      "and it hits again after the right click");
+	}
+	else {
+		check(false, "the house survives the first hit");
+	}
+
 	// a target out of range: it packs first
 	w.combat()->stop(w.state, treb->get_id(), w.now);
 	auto far_spot = w.land_near(spot.ne.to_double(), spot.se.to_double() + 22.0 * dse, 4);
