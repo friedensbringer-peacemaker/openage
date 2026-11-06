@@ -5,7 +5,7 @@
  * modpack but without renderer:
  *
  *   openage-special-game-check --root <dir> [--modpack hd_base] [--seed N] [--coast-seed N] [--size N]
- *                              [--ai-limit S] [--only map|monks|relics|siege|ships|save|ai]
+ *                              [--ai-limit S] [--only map|monks|relics|siege|ships|save|gaps|ai]
  *
  * Random maps (64 tiles), simulated time advances in steps of 50 ms through the event loop
  * with the production of the simulation (like GameSimulation::run).
@@ -953,6 +953,129 @@ void check_ships(const Options &opt) {
 
 // ------------------------------------------------------------------ S9
 
+/// S11: what the first scenes do not reach (warships, demolition ship, petard, ram with infantry)
+void check_gaps(const Options &opt) {
+	std::cout << "== S11 Kriegsschiffe, Sprengschiff, Petarde, Rammbock mit Infanterie" << std::endl;
+	MapSettings base = quiet_map();
+	base.biome = map_biome_t::COAST;
+	World w{opt, base, opt.coast_seed};
+	w.advance(0.5);
+	auto shore = find_shore(w);
+	check(shore.has_value(), "coast for the warships");
+	if (not shore) {
+		return;
+	}
+	const std::string water = "hd_base.data.util.path_type.types.Water";
+	auto spot_a = w.free_near(shore->water_ne, shore->water_se, water, 3);
+	auto spot_b = w.free_near(shore->water_ne + 4.0, shore->water_se, water, 8);
+	auto spot_c = w.free_near(shore->water_ne, shore->water_se + 4.0, water, 8);
+	if (not spot_a or not spot_b or not spot_c) {
+		check(false, "water for the warships");
+		return;
+	}
+	// warships fight with the combat logic on the water grid
+	auto own_galley = w.spawn_at(0, ge("galley", "Galley"), spot_a->first, spot_a->second);
+	auto enemy_galley = w.spawn_at(1, ge("galley", "Galley"), spot_b->first, spot_b->second);
+	w.passive(enemy_galley);
+	w.advance(0.5);
+	const auto galley_h0 = w.health(enemy_galley);
+	w.combat()->order_attack(w.state, own_galley->get_id(), enemy_galley->get_id(), w.now);
+	check(w.advance_until(40.0, [&]() { return not w.alive(enemy_galley) or w.health(enemy_galley) < galley_h0; }),
+	      "a galley hits an enemy galley");
+	w.combat()->stop(w.state, own_galley->get_id(), w.now);
+	// demolition ship: area damage, destroys itself
+	auto victim = w.spawn_at(1, ge("galley", "Galley"), spot_c->first, spot_c->second);
+	auto demo = w.spawn_at(0, ge("demo_ship", "DemolitionShip"), spot_a->first, spot_a->second);
+	w.passive(victim);
+	w.advance(0.5);
+	const auto *dt = w.special()->type_of(w.state, demo, w.now);
+	check(dt and dt->self_destruct and dt->blast_range > 0.0, "demolition ship: area attack, destroys itself");
+	const auto victim_h0 = w.health(victim);
+	w.combat()->order_attack(w.state, demo->get_id(), victim->get_id(), w.now);
+	check(w.advance_until(60.0, [&]() { return not w.alive(demo); }), "demolition ship destroys itself");
+	check(not w.alive(victim) or w.health(victim) < victim_h0, "demolition ship damages its target");
+
+	// petard: goes to the building, destroys itself
+	auto c1 = scene_spot(w, 10.0, -6.0);
+	auto house = w.spawn_at(1, ge("house", "House"), std::floor(c1.first) + 1.0, std::floor(c1.second) + 1.0);
+	auto petard = w.unit_near(0, "petard", "Petard", c1.first + 5.0, c1.second);
+	if (house == nullptr or petard == nullptr) {
+		check(false, "scene for the petard");
+		return;
+	}
+	w.advance(0.5);
+	const auto house_h0 = w.health(house);
+	w.combat()->order_attack(w.state, petard->get_id(), house->get_id(), w.now);
+	check(w.advance_until(60.0, [&]() { return not w.alive(petard); }), "petard destroys itself");
+	check(not w.alive(house) or w.health(house) < house_h0, "petard damages the building");
+
+	// ram with infantry: boards by right click, archers are refused, unload
+	auto c2 = scene_spot(w, -8.0, 8.0);
+	auto ram = w.unit_near(0, "ram", "Ram", c2.first, c2.second);
+	auto soldier = w.unit_near(0, "militia", "Militia", c2.first + 2.0, c2.second);
+	auto archer = w.unit_near(0, "archer", "Archer", c2.first, c2.second + 2.0);
+	if (ram == nullptr or soldier == nullptr or archer == nullptr) {
+		check(false, "scene for the ram with infantry");
+		return;
+	}
+	w.passive(ram);
+	w.passive(soldier);
+	w.passive(archer);
+	w.advance(0.5);
+	check(not w.special()->order_board(w.state, archer->get_id(), ram->get_id(), w.now).empty(),
+	      "an archer does not board the ram");
+	w.command(component::command::command_t::MOVE, {soldier}, ram->get_id(), w.position(ram));
+	check(w.advance_until(30.0, [&]() { return w.special()->stowed(ram->get_id()).size() == 1; }),
+	      "infantry boards the ram");
+	check(w.special()->unload(w.state, ram->get_id(), std::nullopt, w.now).empty(), "unload ordered");
+	check(w.advance_until(20.0, [&]() { return w.special()->stowed(ram->get_id()).empty(); }) and w.alive(soldier),
+	      "the ram unloads the infantry");
+}
+
+/// S12: a save during a conversion goes on after loading
+void check_save_converting(const Options &opt) {
+	std::cout << "== S12 Spielstand während einer Konvertierung" << std::endl;
+	World w{opt, quiet_map()};
+	w.advance(0.5);
+	auto c = scene_spot(w, 8.0, 8.0);
+	auto monk = w.unit_near(0, "monk", "Monk", c.first, c.second);
+	auto enemy = w.unit_near(1, "militia", "Militia", c.first + 3.0, c.second);
+	if (monk == nullptr or enemy == nullptr) {
+		check(false, "scene for the save during a conversion");
+		return;
+	}
+	w.passive(monk);
+	w.passive(enemy);
+	w.advance(0.3);
+	check(w.special()->order_convert(w.state, monk->get_id(), enemy->get_id(), w.now).empty(), "conversion ordered");
+	w.advance(0.5);
+	const auto monk_id = monk->get_id();
+	const auto enemy_id = enemy->get_id();
+	check(w.special()->get_job_target(monk_id) == enemy_id and w.owner(enemy) == 1, "conversion runs at the save");
+	auto data = save::capture(w.state, w.settings, w.game->get_generated_entity_range(), w.now, "S12");
+	const auto text = save::serialize(data);
+	check(text.find("convert_target = ") != std::string::npos, "convert_target stored");
+	save::SaveData parsed;
+	std::string error;
+	check(save::parse(text, parsed, error), "parsed " + error);
+	World l{opt, quiet_map()};
+	auto result = save::restore(parsed, l.state, l.loop, l.factory, l.production, l.game->get_generated_entity_range(), l.now);
+	check(result.ok, "restored " + result.error);
+	l.advance(0.5);
+	auto monks = l.of(0, "Monk");
+	if (monks.empty()) {
+		check(false, "monk after loading");
+		return;
+	}
+	auto target = l.special()->get_job_target(monks.front()->get_id());
+	check(target.has_value(), "the monk goes on converting after loading");
+	if (target) {
+		auto militia = l.state->get_game_entity(*target);
+		check(l.advance_until(60.0, [&]() { return not l.alive(militia) or l.owner(militia) == 0; }),
+		      "the conversion ends after loading");
+	}
+}
+
 void check_save(const Options &opt) {
 	std::cout << "== S9 Spielstand Version 6" << std::endl;
 	World w{opt, quiet_map()};
@@ -1134,7 +1257,7 @@ int main(int argc, char **argv) {
 		}
 		else {
 			std::cerr << "usage: openage-special-game-check --root <dir> [--modpack id] [--seed n] [--coast-seed n]"
-			             " [--size n] [--ai-limit s] [--only map|monks|relics|siege|ships|save|ai]"
+			             " [--size n] [--ai-limit s] [--only map|monks|relics|siege|ships|save|gaps|ai]"
 			          << std::endl;
 			return 2;
 		}
@@ -1162,6 +1285,10 @@ int main(int argc, char **argv) {
 		}
 		if (only.empty() or only == "save") {
 			check_save(opt);
+			check_save_converting(opt);
+		}
+		if (only.empty() or only == "gaps") {
+			check_gaps(opt);
 		}
 		if (only.empty() or only == "ai") {
 			check_ai(opt);

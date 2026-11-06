@@ -390,7 +390,8 @@ SpecialType read_type(const std::shared_ptr<nyan::View> &view, const nyan::fqon_
 		t.cargo_slots = 0;
 	}
 	// demolition ships (class 22 with an area attack) and petards blow up with their attack
-	t.self_destruct = t.name == "DemolitionShip" or t.name == "Petard" or t.name.find("DemolitionRaft") != std::string::npos;
+	t.self_destruct = t.name == "Petard" or t.name.find("DemolitionShip") != std::string::npos
+	                  or t.name.find("DemolitionRaft") != std::string::npos;
 	t.ram = t.siege and t.melee and t.unit_class == 13;
 	if (t.search_range <= 0.0) {
 		t.search_range = t.heal_range + 5.0;
