@@ -105,6 +105,9 @@ struct SpecialType {
 	double faith_rate = 0.0;
 	/// CollectStorage: picks up relics
 	bool carries_relics = false;
+	/// graphics while carrying (Storage -> EntityContainer.carry_progress -> Animated overrides)
+	std::string carry_idle_animation;
+	std::string carry_move_animation;
 
 	// ---- area damage (05 §5.5)
 	double blast_range = 0.0;
@@ -374,6 +377,9 @@ private:
 	void relic_gold(const std::shared_ptr<GameState> &state, const time::time_t &time);
 	void stow_into(const std::shared_ptr<GameState> &state, entity_id_t id, entity_id_t carrier,
 	               const time::time_t &time);
+	/// switch a monk between its normal graphics and the ones with the relic
+	void show_carrying(const std::shared_ptr<GameState> &state, entity_id_t monk, bool carrying,
+	                   const time::time_t &time);
 	bool release(const std::shared_ptr<GameState> &state, entity_id_t id, size_t slot, bool require_spot,
 	             const time::time_t &time);
 	std::string board_check(const std::shared_ptr<GameState> &state, entity_id_t unit, entity_id_t carrier,

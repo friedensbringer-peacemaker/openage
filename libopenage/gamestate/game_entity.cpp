@@ -70,6 +70,22 @@ const std::string &GameEntity::get_animation_path() const {
 	return this->last_animation_path;
 }
 
+void GameEntity::set_animation_overrides(const time::time_t &time,
+                                         const std::unordered_map<std::string, std::string> &overrides) {
+	if (overrides == this->animation_overrides) {
+		return;
+	}
+	this->animation_overrides = overrides;
+	if (not this->last_animation_path.empty()) {
+		this->render_update(time, this->last_animation_path);
+	}
+}
+
+const std::string &GameEntity::get_shown_animation_path() const {
+	auto replaced = this->animation_overrides.find(this->last_animation_path);
+	return replaced != this->animation_overrides.end() ? replaced->second : this->last_animation_path;
+}
+
 void GameEntity::render_update(const time::time_t &time,
                                const std::string &animation_path) {
 	this->last_animation_path = animation_path;
@@ -87,7 +103,7 @@ void GameEntity::render_update(const time::time_t &time,
 			auto ownership = dynamic_pointer_cast<component::Ownership>(owner->second);
 			this->render_entity->set_player(static_cast<uint32_t>(ownership->get_owners().get(time)));
 		}
-		this->render_entity->update(this->id, pos, angle, animation_path, time);
+		this->render_entity->update(this->id, pos, angle, this->get_shown_animation_path(), time);
 	}
 }
 

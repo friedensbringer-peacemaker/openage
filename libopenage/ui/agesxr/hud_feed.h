@@ -295,6 +295,7 @@ public:
         else if (e.villager) icon = HudIcon::Villager;
         else if (e.building) icon = has("Tower") || has("Castle") || has("Outpost") ? HudIcon::Tower : HudIcon::House;
         else if (e.ranged) icon = HudIcon::Bow;
+        else if (has("Monk")) icon = HudIcon::Monk;
         else if (has("Knight") || has("Cavalry") || has("Scout") || has("Camel") || has("Cataphract") ||
                  has("Rider") || has("Elephant"))
             icon = HudIcon::Horse;
@@ -305,6 +306,7 @@ public:
     // Symbol-Hinweis der Produktion → HUD-Symbol (unbekannt = Hammer).
     static HudIcon iconFor(const std::string& hint) {
         if (hint == "villager") return HudIcon::Villager;
+        if (hint == "monk") return HudIcon::Monk;
         if (hint == "house") return HudIcon::House;
         if (hint == "sword") return HudIcon::Sword;
         if (hint == "bow") return HudIcon::Bow;

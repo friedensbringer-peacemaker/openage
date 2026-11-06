@@ -125,6 +125,56 @@ bool has_parent(const nyan::Object &obj, const std::string &part) {
 	return false;
 }
 
+/// Idle and Move graphics of a carrier: EntityContainer.carry_progress ->
+/// Progress.properties[Animated].overrides[*] (AnimationOverride.ability, .animations)
+void carry_animations_of(const std::shared_ptr<nyan::View> &view, const nyan::Object &container, SpecialType &t) {
+	try {
+		for (const auto &progress_value : container.get_set("EntityContainer.carry_progress")) {
+			auto progress = view->get_object(object_name(progress_value));
+			for (const auto &[key, value] : progress.get_dict("Progress.properties")) {
+				if (object_name(key) != "engine.util.progress.property.type.Animated") {
+					continue;
+				}
+				auto animated = view->get_object(object_name(value));
+				for (const auto &override_value : animated.get_set("Animated.overrides")) {
+					auto override_obj = view->get_object(object_name(override_value));
+					auto ability = view->get_object(override_obj.get_object("AnimationOverride.ability").get_name());
+					for (const auto &animation_value : override_obj.get_set("AnimationOverride.animations")) {
+						auto path = api::APIAnimation::get_animation_path(view->get_object(object_name(animation_value)));
+						if (has_parent(ability, "engine.ability.type.Idle")) {
+							t.carry_idle_animation = path;
+						}
+						else if (has_parent(ability, "engine.ability.type.Move")) {
+							t.carry_move_animation = path;
+						}
+					}
+				}
+			}
+		}
+	}
+	catch (const std::exception &err) {
+		log::log(WARN << "Special: carry graphics of " << t.name << " not usable: " << err.what());
+	}
+}
+
+/// first animation of an Animated ability (empty if none)
+std::string ability_animation(const std::shared_ptr<GameEntity> &entity, component::component_t kind) {
+	if (not entity->has_component(kind)) {
+		return {};
+	}
+	auto component = std::dynamic_pointer_cast<component::APIComponent>(entity->get_component(kind));
+	if (component == nullptr) {
+		return {};
+	}
+	auto ability = component->get_ability();
+	if (not api::APIAbility::check_property(ability, api::ability_property_t::ANIMATED)) {
+		return {};
+	}
+	auto property = api::APIAbility::get_property(ability, api::ability_property_t::ANIMATED);
+	auto paths = api::APIAnimation::get_animation_paths(api::APIAbilityProperty::get_animations(property));
+	return paths.empty() ? std::string{} : paths[0];
+}
+
 double float_or(const nyan::Object &obj, const std::string &member, double fallback) {
 	try {
 		return obj.get_float(member);
@@ -326,6 +376,7 @@ SpecialType read_type(const std::shared_ptr<nyan::View> &view, const nyan::fqon_
 			else if (has_parent(ability, "engine.ability.type.Storage")) {
 				auto container = view->get_object(ability.get_object("Storage.container").get_name());
 				t.cargo_slots = std::max(t.cargo_slots, static_cast<int>(int_or(container, "EntityContainer.slots", 0)));
+				carry_animations_of(view, container, t);
 			}
 			else if (has_parent(ability, "engine.xr.ability.GenieUnit")) {
 				t.unit_class = static_cast<int>(int_or(ability, "GenieUnitData.unit_class", -1));
@@ -888,6 +939,7 @@ void SpecialState::run_job(const std::shared_ptr<GameState> &state, entity_id_t 
 		}
 		this->stow_into(state, u.job.target, id, time);
 		u.relic = u.job.target;
+		this->show_carrying(state, id, true, time);
 		this->stats.relics_picked += 1;
 		log::log(INFO << "Special: " << describe(entity, time) << " picks up relic " << u.job.target << " at t="
 		              << fmt1(time.to_double()));
@@ -908,6 +960,7 @@ void SpecialState::run_job(const std::shared_ptr<GameState> &state, entity_id_t 
 		this->release(state, relic, 0, false, time);
 		this->stow_into(state, relic, u.job.target, time);
 		u.relic.reset();
+		this->show_carrying(state, id, false, time);
 		this->stats.relics_delivered += 1;
 		log::log(INFO << "Special: " << describe(entity, time) << " brings relic " << relic << " into "
 		              << describe(monastery, time) << " (" << this->stowed(u.job.target).size() << " relics) at t="
@@ -1381,6 +1434,27 @@ std::optional<entity_id_t> SpecialState::stowed_in(entity_id_t id) const {
 	return it == this->inside.end() ? std::nullopt : std::optional<entity_id_t>{it->second};
 }
 
+void SpecialState::show_carrying(const std::shared_ptr<GameState> &state, entity_id_t monk, bool carrying,
+                                 const time::time_t &time) {
+	auto entity = find_entity(state, monk);
+	if (entity == nullptr) {
+		return;
+	}
+	std::unordered_map<std::string, std::string> overrides;
+	const auto *t = carrying ? this->type_of(state, entity, time) : nullptr;
+	if (t != nullptr) {
+		const auto idle = ability_animation(entity, component::component_t::IDLE);
+		const auto move = ability_animation(entity, component::component_t::MOVE);
+		if (not idle.empty() and not t->carry_idle_animation.empty()) {
+			overrides[idle] = t->carry_idle_animation;
+		}
+		if (not move.empty() and not t->carry_move_animation.empty()) {
+			overrides[move] = t->carry_move_animation;
+		}
+	}
+	entity->set_animation_overrides(time, overrides);
+}
+
 std::optional<entity_id_t> SpecialState::carried_relic(entity_id_t monk) const {
 	const auto *u = this->find_unit(monk);
 	return u ? u->relic : std::nullopt;
@@ -1559,6 +1633,7 @@ std::string SpecialState::drop_relic(const std::shared_ptr<GameState> &state, en
 	const auto relic = *u->relic;
 	this->release(state, relic, 0, false, time);
 	u->relic.reset();
+	this->show_carrying(state, monk, false, time);
 	this->stats.relics_dropped += 1;
 	log::log(INFO << "Special: monk " << monk << " drops relic " << relic << " at t=" << fmt1(time.to_double()));
 	return {};
@@ -1706,6 +1781,7 @@ bool SpecialState::on_death(const std::shared_ptr<GameState> &state, const std::
 	if (auto *u = this->find_unit(id); u and u->relic) {
 		const auto relic = *u->relic;
 		u->relic.reset();
+		this->show_carrying(state, id, false, time);
 		this->release(state, relic, 0, false, time);
 		this->stats.relics_dropped += 1;
 		log::log(INFO << "Special: relic " << relic << " falls from dying " << prod::entity_name(entity) << " " << id);
@@ -1973,6 +2049,7 @@ void SpecialState::load_entity(const std::shared_ptr<GameState> &state, entity_i
 		this->stow_into(state, relic, id, time);
 		if (this->inside.contains(relic)) {
 			u.relic = relic;
+			this->show_carrying(state, id, true, time);
 		}
 	}
 	for (auto inner : saved.relic_store) {

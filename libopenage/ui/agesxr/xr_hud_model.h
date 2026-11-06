@@ -34,6 +34,7 @@ enum class HudIcon : uint8_t {
     // W1: Forschung (aufgeschlagenes Buch), Zeitalter-Aufstieg (Pfeil nach oben über einem Sockel),
     // nächste Befehlsseite (Pfeil nach rechts)
     Tech, AgeUp, Next,
+    Monk,  // Mönch: Kopf, Kutte mit ausgespartem Kreuz
     Count,
 };
 

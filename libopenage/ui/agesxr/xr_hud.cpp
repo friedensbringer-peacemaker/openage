@@ -165,6 +165,11 @@ float hudIconShape(HudIcon icon, float px, float py) {
         static const float head[6] = {14.0f, 0.0f, 2.0f, -10.0f, 2.0f, 10.0f};
         return std::min(triangle(px, py, head), box(px - 6.0f, py, 8.0f, 3.5f, 1.0f));
     }
+    case HudIcon::Monk: {  // Kopf über einer Kutte, Kreuz ausgespart
+        static const float robe[6] = {-13.0f, 15.0f, 13.0f, 15.0f, 0.0f, -7.0f};
+        const float cross = std::min(segment(px, py, 0, 0, 0, 11, 1.4f), segment(px, py, -4, 4, 4, 4, 1.4f));
+        return std::min(lengthOf(px, py + 11.0f) - 4.5f, std::max(triangle(px, py, robe) - 1.0f, -cross));
+    }
     case HudIcon::None:
     case HudIcon::Count: break;
     }

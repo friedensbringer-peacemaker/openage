@@ -128,6 +128,22 @@ public:
 	 */
 	const std::string &get_animation_path() const;
 
+	/**
+	 * Replace animations in the render updates of this entity (XR fork: a monk
+	 * carrying a relic). The game keeps working with the original paths, so every
+	 * later idle or move update shows the replacement. Shows the change at once.
+	 *
+	 * @param time Time of the change.
+	 * @param overrides Original animation path -> shown path (empty: none).
+	 */
+	void set_animation_overrides(const time::time_t &time,
+	                             const std::unordered_map<std::string, std::string> &overrides);
+
+	/**
+	 * Animation shown by the last render update, after the overrides.
+	 */
+	const std::string &get_shown_animation_path() const;
+
 protected:
 	/**
 	 * A game entity cannot be default copied because of their unique ID.
@@ -170,6 +186,11 @@ private:
 	 * renderer (random maps).
 	 */
 	std::string last_animation_path;
+
+	/**
+	 * Animations replaced in render updates (XR fork, see set_animation_overrides).
+	 */
+	std::unordered_map<std::string, std::string> animation_overrides;
 	time::time_t last_render_time;
 
 	/**

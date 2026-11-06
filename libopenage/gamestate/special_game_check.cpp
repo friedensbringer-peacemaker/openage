@@ -622,11 +622,25 @@ void check_relics(const Options &opt) {
 	check(w.combat()->garrisoned_in(relic->get_id()).has_value(), "carried relic is hidden");
 	auto info = w.special()->get_info(monk->get_id());
 	check(info and info->relic, "HUD info: monk carries a relic");
+	// the graphics follow the relic; the game keeps the original paths
+	const auto carries = [](const std::shared_ptr<GameEntity> &e, const std::string &part) {
+		return e->get_shown_animation_path().find(part) != std::string::npos;
+	};
+	const auto *mt = w.special()->type_of(w.state, monk, w.now);
+	check(mt and mt->carry_idle_animation.find("idle_carry_override_monk") != std::string::npos
+	          and mt->carry_move_animation.find("move_carry_override_monk") != std::string::npos,
+	      "monk: carry graphics from the data");
+	std::cout << "   shown after the pick-up: " << monk->get_shown_animation_path() << std::endl;
+	check(carries(monk, "carry_override_monk"), "carry graphics right after the pick-up");
+	check(monk->get_animation_path().find("carry") == std::string::npos, "the game keeps the normal path");
 	reason = w.special()->order_deliver(w.state, monk->get_id(), monastery->get_id(), w.now);
 	check(reason.empty(), "monk sent to the monastery" + (reason.empty() ? std::string{} : ": " + reason));
+	w.advance(0.5);
+	check(carries(monk, "move_carry_override_monk"), "walks with the relic: " + monk->get_shown_animation_path());
 	check(w.advance_until(40.0, [&]() { return w.special()->stowed(monastery->get_id()).size() == 1; }),
 	      "relic in the monastery");
 	check(not w.special()->carried_relic(monk->get_id()), "monk hands the relic over");
+	check(not carries(monk, "carry_override_monk"), "normal graphics after the hand-over: " + monk->get_shown_animation_path());
 	w.advance(1.5);
 	const double g0 = w.resource(0, resource_t::GOLD);
 	w.advance(20.0);
@@ -644,6 +658,14 @@ void check_relics(const Options &opt) {
 		w.special()->order_pickup(w.state, monk2->get_id(), second->get_id(), w.now);
 		check(w.advance_until(30.0, [&]() { return w.special()->carried_relic(monk2->get_id()).has_value(); }),
 		      "second monk carries a relic");
+		check(carries(monk2, "carry_override_monk"), "second monk shows the carry graphics");
+		// put down by hand, picked up again
+		reason = w.special()->drop_relic(w.state, monk2->get_id(), w.now);
+		check(reason.empty() and not carries(monk2, "carry_override_monk"), "normal graphics after putting it down");
+		w.special()->order_pickup(w.state, monk2->get_id(), second->get_id(), w.now);
+		check(w.advance_until(30.0, [&]() { return w.special()->carried_relic(monk2->get_id()).has_value(); })
+		          and carries(monk2, "carry_override_monk"),
+		      "carry graphics again after the second pick-up");
 		w.combat()->kill(w.state, monk2->get_id(), w.now);
 		w.advance(0.5);
 		check(not w.combat()->garrisoned_in(second->get_id()).has_value() and w.state->get_game_entities().contains(second->get_id()),
@@ -1212,7 +1234,11 @@ void check_save(const Options &opt) {
 	size_t carrying = 0;
 	double faith_after = -1.0;
 	for (const auto &m : l.of(0, "Monk")) {
-		carrying += l.special()->carried_relic(m->get_id()) ? 1 : 0;
+		if (l.special()->carried_relic(m->get_id())) {
+			carrying += 1;
+			check(m->get_shown_animation_path().find("carry_override_monk") != std::string::npos,
+			      "carry graphics after loading: " + m->get_shown_animation_path());
+		}
 		auto f = l.special()->faith(m->get_id());
 		if (f and *f < 99.0) {
 			faith_after = *f;

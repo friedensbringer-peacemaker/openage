@@ -93,7 +93,7 @@ constexpr CatalogEntry CATALOG[] = {
 	{"PlumedArcher", "Federbogenschütze", 127, false, "bow", detail::U, nullptr, ""},
 	{"Tarkan", "Tarkan", 128, false, "horse", detail::U, nullptr, ""},
 	{"WarWaggon", "Kriegswagen", 129, false, "horse", detail::U, nullptr, ""},
-	{"Monk", "Mönch", 140, false, "villager", detail::U, nullptr, ""},
+	{"Monk", "Mönch", 140, false, "monk", detail::U, nullptr, ""},
 	{"Missionary", "Missionar", 141, false, "horse", detail::U, nullptr, ""},
 	{"Ram", "Rammbock", 142, false, "hammer", detail::U, nullptr, ""},
 	{"Mangonel", "Mangonel", 143, false, "hammer", detail::U, nullptr, ""},
