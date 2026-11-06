@@ -2484,7 +2484,7 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> vision_replay_steps(
  * the town centre is selected and rings the town bell (B): the villagers run inside (-w3), the
  * selection panel shows the garrison and the arrows (-w4); the wave of the computer arrives, the
  * town centre shoots its garrison arrows and the armies fight (projectiles in flight, -w5a ...
- * -w5f, -w7). Captures <png stem>-w1 ... -w7.
+ * -w5j, -w7). Captures <png stem>-w1 ... -w7.
  */
 std::vector<openage::renderer::opengl::TestFrameSink::Step> war_replay_steps(const native_args &args,
                                                                               openage::gamestate::MapSettings &map_settings,
@@ -2650,14 +2650,16 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> war_replay_steps(con
 	key(36.6, 'B');
 	capture(40.0, "-w3-glocke");
 	capture(46.0, "-w4-garnison");
-	// 5. the wave of the computer at the town centre: garrison arrows, fight with projectiles (several
-	//    captures: the fight lasts some 20 s and software GL moves the timing)
-	const char *fight[] = {"-w5a-pfeile", "-w5b-pfeile", "-w5c-pfeile", "-w5d-pfeile", "-w5e-pfeile", "-w5f-pfeile"};
-	for (int i = 0; i < 6; ++i) {
-		capture(150.0 + 8.0 * i, fight[i]);
+	// 5. the wave of the computer (first attack at 120 s, the steps start 15 s after the first frame):
+	//    garrison arrows, fight with projectiles. The fight can be over after some 40 s, so the
+	//    captures cover it from its start instead of the time after it.
+	const char *fight[] = {"-w5a-pfeile", "-w5b-pfeile", "-w5c-pfeile", "-w5d-pfeile", "-w5e-pfeile",
+	                       "-w5f-pfeile", "-w5g-pfeile", "-w5h-pfeile", "-w5i-pfeile", "-w5j-pfeile"};
+	for (int i = 0; i < 10; ++i) {
+		capture(110.0 + 5.0 * i, fight[i]);
 	}
-	capture(205.0, "-w7-kampf");
-	capture(206.0, nullptr);
+	capture(160.0, "-w7-kampf");
+	capture(165.0, nullptr);
 	return steps;
 }
 
