@@ -571,6 +571,12 @@ if(OPENAGE_NATIVE_ENTRY)
 		target_link_libraries(openage-special-game-check PRIVATE Qt6::Core Qt6::Gui)
 	endif()
 	# ---- end XR fork W6 ----
+	# ---- XR fork W7: market, tribute, trade ----
+	# host test: market prices, tribute fee and trade gold (dependency-free, parameter sweep)
+	add_executable(openage-trade-check gamestate/trade_check.cpp)
+	target_include_directories(openage-trade-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-trade-check COMMAND openage-trade-check)
+	# ---- end XR fork W7 ----
 endif()
 
 # XR fork: the in-engine UI (libopenage/ui/agesxr) logs via __android_log_print
