@@ -576,6 +576,10 @@ if(OPENAGE_NATIVE_ENTRY)
 	add_executable(openage-trade-check gamestate/trade_check.cpp)
 	target_include_directories(openage-trade-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 	add_test(NAME openage-trade-check COMMAND openage-trade-check)
+	# host test: stances, target choice, stray shots, vision, tribute button (dependency-free, truth tables)
+	add_executable(openage-diplomacy-check gamestate/diplomacy_check.cpp)
+	target_include_directories(openage-diplomacy-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-diplomacy-check COMMAND openage-diplomacy-check)
 	# ---- end XR fork W7 ----
 	# ---- XR fork W8: victory and defeat ----
 	# host test: conquest defeat, wonder countdown, relics (dependency-free, parameter sweep)
