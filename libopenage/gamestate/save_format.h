@@ -55,10 +55,11 @@ namespace openage::gamestate::save {
 ///    round W6 ("relics" of the map, "faith", "convert_target", "relic_carry", "relic_store", "cargo",
 ///    "siege_mode" per entity); a missing key means its default.
 /// 7: XR fork W7, optional key "market" (price and net counter per good); missing: base prices.
+/// 8: XR fork W7, optional key "trade" per entity (home, partner, heading to the partner, goods).
 /// Older versions still load (missing fields: no civilisation, nothing researched, vision NORMAL with nothing
 /// explored, aggressive stance, no garrison; maps without a "herds" key before 5 had no animals: herds off;
 /// maps without a "relics" key before 6 had no relics: relics off).
-constexpr int FORMAT_VERSION = 7;
+constexpr int FORMAT_VERSION = 8;
 
 /// slots 1..SLOT_COUNT are chosen by the player, slot 0 is the autosave,
 /// QUICK_SLOT the quick save (F5/F9)
@@ -165,6 +166,11 @@ struct SavedEntity {
 	std::vector<uint64_t> relic_store{};
 	std::vector<uint64_t> cargo{};
 	std::string siege_mode{};
+	/// trade unit (version 8): its two buildings, where it is heading, value of the goods
+	std::optional<uint64_t> trade_home{};
+	uint64_t trade_partner = 0;
+	bool trade_to_partner = false;
+	double trade_goods = 0.0;
 };
 
 /// whole save game
@@ -441,6 +447,10 @@ inline std::string serialize(const SaveData &d) {
 		list("cargo", e.cargo);
 		if (not e.siege_mode.empty()) {
 			out << "siege_mode = " << e.siege_mode << "\n";
+		}
+		if (e.trade_home) {
+			out << "trade = " << *e.trade_home << " " << e.trade_partner << " " << (e.trade_to_partner ? 1 : 0) << " "
+			    << e.trade_goods << "\n";
 		}
 	}
 	if (not d.removed.empty()) {
@@ -902,6 +912,15 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 					return fail("siege_mode");
 				}
 				e.siege_mode = value;
+			}
+			else if (key == "trade") {
+				uint64_t home = 0;
+				int heading = 0;
+				if (not(v >> home >> e.trade_partner >> heading >> e.trade_goods) or not std::isfinite(e.trade_goods)) {
+					return fail("Handel");
+				}
+				e.trade_home = home;
+				e.trade_to_partner = heading != 0;
 			}
 		}
 		else if (section == "removed") {

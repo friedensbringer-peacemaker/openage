@@ -268,7 +268,7 @@ public:
             {"Villager", "Dorfbewohner"}, {"VillagerMale", "Dorfbewohner"}, {"VillagerFemale", "Dorfbewohnerin"},
             {"Militia", "Milizsoldat"}, {"ManAtArms", "Schwertkämpfer"}, {"Spearman", "Speerträger"},
             {"Archer", "Bogenschütze"}, {"Skirmisher", "Plänkler"}, {"Knight", "Ritter"},
-            {"ScoutCavalry", "Späher"}, {"Monk", "Mönch"}, {"Trebuchet", "Tribock"}, {"TradeCart", "Handelskarren"},
+            {"ScoutCavalry", "Späher"}, {"Monk", "Mönch"}, {"Trebuchet", "Tribock"}, {"TradeCart", "Handelskarren"}, {"TradeCog", "Handelskogge"},
             {"TownCenter", "Dorfzentrum"}, {"House", "Haus"}, {"Barracks", "Kaserne"},
             {"ArcheryRange", "Schießanlage"}, {"Stable", "Stall"}, {"Mill", "Mühle"},
             {"LumberCamp", "Holzfällerlager"}, {"MiningCamp", "Bergbaulager"}, {"Farm", "Farm"},
@@ -298,7 +298,7 @@ public:
         else if (e.ranged) icon = HudIcon::Bow;
         else if (has("Monk")) icon = HudIcon::Monk;
         else if (has("Knight") || has("Cavalry") || has("Scout") || has("Camel") || has("Cataphract") ||
-                 has("Rider") || has("Elephant"))
+                 has("Rider") || has("Elephant") || has("TradeCart"))
             icon = HudIcon::Horse;
         else if (e.unit) icon = HudIcon::Sword;
         return {name, icon};

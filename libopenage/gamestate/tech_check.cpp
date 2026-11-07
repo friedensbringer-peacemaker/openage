@@ -87,8 +87,8 @@ void check_catalog() {
 			check(std::string{e.missing}.rfind("noch ohne Mechanik", 0) == 0, "reason of hidden " + name);
 		}
 	}
-	// W6 freed monks, siege and ships: walls (W5), trade (W7) and wonders/relic victory (W8) stay hidden
-	check(hidden >= 5 and hidden < prod::CATALOG_SIZE / 2, "some entries hidden, most offered (" + std::to_string(hidden) + " hidden)");
+	// W7 freed the trade: spies and cartography (need teams) and wonders/relic victory (W8) stay hidden
+	check(hidden >= 3 and hidden < prod::CATALOG_SIZE / 2, "some entries hidden, most offered (" + std::to_string(hidden) + " hidden)");
 	// what W1 offers and hides
 	for (const char *offered : {"Villager", "Militia", "Knight", "Blacksmith", "University", "TownCenter", "Castle",
 	                            "Monastery", "SiegeWorkshop"}) {
@@ -99,7 +99,8 @@ void check_catalog() {
 		check(prod::has_mechanic(w3), std::string{"offered (W3) "} + w3);
 	}
 	check(prod::has_mechanic("HorseCollar", true) and prod::has_mechanic("HeavyPlow", true), "farm technologies offered (W3)");
-	for (const char *hidden_name : {"TradeCart", "Wonder"}) {
+	check(prod::has_mechanic("TradeCart") and prod::has_mechanic("Caravan", true), "trade offered (W7)");
+	for (const char *hidden_name : {"Wonder"}) {
 		check(not prod::has_mechanic(hidden_name), std::string{"hidden "} + hidden_name);
 	}
 	// XR fork W5: walls, gates and the fortified wall have their mechanic

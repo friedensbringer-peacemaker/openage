@@ -329,6 +329,7 @@ inline HudIcon aoeIconForName(const std::string& name, bool building, bool villa
     if (villager || name.rfind("Dorfbewohner", 0) == 0) return HudIcon::Villager;
     if (name.rfind("Mönch", 0) == 0) return HudIcon::Monk;
     if (name.rfind("Tribock", 0) == 0) return HudIcon::Trebuchet;
+    if (name.rfind("Handelskarren", 0) == 0) return HudIcon::Horse;
     if (name == "Mühle") return HudIcon::Mill;
     if (name == "Holzfällerlager") return HudIcon::LumberCamp;
     if (name == "Bergbaulager") return HudIcon::MiningCamp;
@@ -526,8 +527,8 @@ inline bool aoeCombatGrid(AoeModel& m, const AoeCombat& c, bool cancelTraining, 
                 m.grid[6] = {kAoeCmdTributeTo, HudIcon::Villager,
                              someone ? "An Sp. " + std::to_string(c.tributeReceiver + 1) : std::string{"An –"}, someone, someone ? "" : "kein anderer Spieler"};
             } else {
-            static const int kOfferCells[3] = {4, 8, 9};
-            for (size_t i = 0; i < offered.size() && i < 3; ++i) {
+            static const int kOfferCells[5] = {4, 8, 9, 10, 11};
+            for (size_t i = 0; i < offered.size() && i < 5; ++i) {
                 m.grid[static_cast<size_t>(kOfferCells[i])] = offered[i];
                 if (static_cast<size_t>(kOfferCells[i]) < m.tips.size()) m.tips[static_cast<size_t>(kOfferCells[i])] = offeredTips[i];
             }
@@ -544,10 +545,10 @@ inline bool aoeCombatGrid(AoeModel& m, const AoeCombat& c, bool cancelTraining, 
             m.grid[10] = c.bell ? AoeCommand{kAoeCmdBell, HudIcon::Villager, "Zur Arbeit", true, "", 'B', true}
                                 : AoeCommand{kAoeCmdBell, HudIcon::Age, "Stadtglocke", true, "", 'B'};
         }
-        else {
+        else if (!c.market || c.tributePage) {
             m.grid[10] = AoeCommand{};
         }
-        m.grid[11] = AoeCommand{};
+        if (!c.market || c.tributePage) m.grid[11] = AoeCommand{};
         m.grid[12] = del;
         m.grid[13] = c.garrisonMax > 0 ? AoeCommand{kAoeCmdUnload, HudIcon::Unload, "Alle raus", c.garrison > 0,
                                                     c.garrison > 0 ? "" : "niemand in der Garnison"}

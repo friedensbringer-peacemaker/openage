@@ -128,6 +128,8 @@ struct SpecialType {
 	std::string unpacked_idle_animation;
 	/// death graphic of the unpacked form (empty in modpacks before tcfix7)
 	std::string unpacked_death_animation;
+	/// trade cart or trade cog: shuttles between two markets or docks (W7, spec 02 §2.9)
+	bool trader = false;
 	/// melee attack (ApplyDiscreteEffect "Attack"); rams = melee siege: they attack buildings only
 	bool melee = false;
 	bool ram = false;
@@ -185,6 +187,11 @@ struct SavedSpecial {
 	std::vector<entity_id_t> cargo{};
 	/// trebuchet: "packed" or "unpacked" (empty: packed)
 	std::string siege_mode{};
+	/// trade unit (W7): its two buildings, where it is heading and the value of its goods
+	std::optional<entity_id_t> trade_home{};
+	entity_id_t trade_partner = 0;
+	bool trade_to_partner = false;
+	double trade_goods = 0.0;
 };
 
 /**
@@ -250,6 +257,16 @@ public:
 	                       const time::time_t &time);
 	/// a player command: the special job of the entity ends (moves elsewhere, stop, attack)
 	void cancel_job(entity_id_t id);
+
+	/**
+	 * A trade unit shuttles between the nearest other own market (dock for a cog) and \p target
+	 * (W7, spec 02 §2.9). It loads at home, the arrival at \p target pays the gold, it returns empty.
+	 * Own buildings only, as long as there are no allies.
+	 *
+	 * @return empty if ordered, otherwise the reason.
+	 */
+	std::string order_trade(const std::shared_ptr<GameState> &state, entity_id_t unit, entity_id_t target,
+	                        const time::time_t &time);
 
 	/**
 	 * A villager repairs an own damaged siege unit or ship (spec 04 §4.5, buildings: system/build.cpp).
@@ -344,6 +361,8 @@ public:
 		size_t relics_delivered = 0;
 		size_t relics_dropped = 0;
 		double relic_gold = 0.0;
+		size_t trade_trips = 0;
+		double trade_gold = 0.0;
 		size_t splash_hits = 0;
 		size_t friendly_hits = 0;
 		size_t boarded = 0;
@@ -369,6 +388,7 @@ private:
 		BOARD,
 		UNLOAD,
 		REPAIR,
+		TRADE,
 	};
 
 	struct Job {
@@ -391,6 +411,13 @@ private:
 		double started = 0.0;
 		/// unload: point of the order
 		std::optional<coord::phys3> point{};
+		/// trade: the two buildings and the value of the goods on board (target = where it is heading)
+		entity_id_t trade_home = 0;
+		entity_id_t trade_partner = 0;
+		double trade_goods = 0.0;
+		/// trade: smallest distance to the destination on this leg and when it was reached (no progress: unreachable)
+		double trade_best = -1.0;
+		double trade_best_at = 0.0;
 	};
 
 	struct Unit {

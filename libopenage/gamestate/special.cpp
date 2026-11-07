@@ -450,6 +450,7 @@ SpecialType read_type(const std::shared_ptr<nyan::View> &view, const nyan::fqon_
 		t.relic = t.relic or t.unit_class == 42;
 	}
 	t.monastery = t.unit_id == 104 or t.name == "Monastery";
+	t.trader = t.name == "TradeCart" or t.name == "TradeCog";
 	t.scout_line = scout_unit(t.unit_id);
 	t.never_converted = t.name == "TownCenter" or t.name == "Castle" or t.name == "Wonder" or t.name == "Farm"
 	                    or t.name == "FishingTrap" or t.name.find("Wall") != std::string::npos
@@ -860,6 +861,31 @@ bool SpecialState::approach(const std::shared_ptr<GameState> &state, entity_id_t
 	return false;
 }
 
+/// seconds without getting a tile closer until a trade unit gives up its route
+static constexpr double TRADE_NO_PROGRESS = 40.0;
+
+/// gold of one trip between two buildings (spec 02 §2.9); the preview prices the goods at the loading,
+/// the delivery pays. The caravan multiplies speed and work rate, so the gold stays the same.
+static double trade_trip_gold(const std::shared_ptr<GameState> &state, const SpecialType &t, entity_id_t home,
+                              entity_id_t partner, bool delivery, const time::time_t &time) {
+	auto combat = state->get_combat();
+	auto a = find_entity(state, home);
+	auto b = find_entity(state, partner);
+	auto as = combat->get_stats(home);
+	auto bs = combat->get_stats(partner);
+	if (a == nullptr or b == nullptr or as == nullptr or bs == nullptr) {
+		return 0.0;
+	}
+	const auto pa = ground_of(a, time);
+	const auto pb = ground_of(b, time);
+	const trade::Footprint fa{pa.x, pa.y, as->radius, as->radius};
+	const trade::Footprint fb{pb.x, pb.y, bs->radius, bs->radius};
+	const double d = delivery ? trade::trade_distance_delivery(fa, fb) : trade::trade_distance_preview(fa, fb);
+	const double speed = t.name == "TradeCog" ? trade::TRADE_SPEED_COG : trade::TRADE_SPEED_CART;
+	const double width = static_cast<double>(state->get_map()->get_size()[0]);
+	return trade::trade_gold(d, trade::TRADE_WORK_RATE, speed, width);
+}
+
 void SpecialState::run_job(const std::shared_ptr<GameState> &state, entity_id_t id, Unit &u, double dt,
                            const time::time_t &time) {
 	auto combat = state->get_combat();
@@ -993,6 +1019,58 @@ void SpecialState::run_job(const std::shared_ptr<GameState> &state, entity_id_t 
 		              << describe(monastery, time) << " (" << this->stowed(u.job.target).size() << " relics) at t="
 		              << fmt1(time.to_double()));
 		end("");
+		return;
+	}
+	case job_t::TRADE: {
+		const auto own = owner_of(entity, time);
+		auto usable = [&](entity_id_t building) {
+			auto b = find_entity(state, building);
+			return b != nullptr and not combat->is_dead(building) and finished(b) and owner_of(b, time) == own;
+		};
+		if (t == nullptr or not usable(u.job.trade_home) or not usable(u.job.trade_partner)) {
+			end("trade building gone");
+			return;
+		}
+		// the path finder leaves a cart moving towards a building on the other bank: no progress ends the route
+		auto own_stats = combat->get_stats(id);
+		auto goal_stats = combat->get_stats(u.job.target);
+		if (own_stats != nullptr and goal_stats != nullptr) {
+			const double edge = combat::edge_distance(footprint_of(entity, *own_stats, time),
+			                                          footprint_of(find_entity(state, u.job.target), *goal_stats, time));
+			const double now = time.to_double();
+			if (u.job.trade_best < 0.0 or edge < u.job.trade_best - 1.0) {
+				u.job.trade_best = edge;
+				u.job.trade_best_at = now;
+			}
+			else if (now - u.job.trade_best_at > TRADE_NO_PROGRESS) {
+				combat->halt_entity(id, time);
+				end("trade building not reachable");
+				return;
+			}
+		}
+		if (not this->approach(state, id, u.job, u.job.target, 0.5, time)) {
+			return;
+		}
+		if (u.job.target == u.job.trade_partner) {
+			// the delivery pays with its own distance (02 §2.9), it counts as gathered gold
+			if (u.job.trade_goods > 0.0 and own and state->has_player(*own)) {
+				const double gold = trade_trip_gold(state, *t, u.job.trade_home, u.job.trade_partner, true, time);
+				state->get_player(*own)->get_resources().add(resource_t::GOLD, gold);
+				this->stats.trade_trips += 1;
+				this->stats.trade_gold += gold;
+				log::log(INFO << "Trade: player " << *own << " earns " << fmt1(gold) << " gold, goods were worth "
+				              << fmt1(u.job.trade_goods) << " at t=" << fmt1(time.to_double()));
+			}
+			u.job.trade_goods = 0.0;
+			u.job.target = u.job.trade_home;
+		}
+		else {
+			u.job.trade_goods = trade_trip_gold(state, *t, u.job.trade_home, u.job.trade_partner, false, time);
+			u.job.target = u.job.trade_partner;
+		}
+		u.job.move_dest.reset();
+		u.job.moved_at = -1.0e9;
+		u.job.trade_best = -1.0;
 		return;
 	}
 	case job_t::BOARD: {
@@ -1828,6 +1906,52 @@ std::string SpecialState::drop_relic(const std::shared_ptr<GameState> &state, en
 	return {};
 }
 
+std::string SpecialState::order_trade(const std::shared_ptr<GameState> &state, entity_id_t unit, entity_id_t target,
+                                      const time::time_t &time) {
+	auto combat = state->get_combat();
+	auto entity = find_entity(state, unit);
+	auto building = find_entity(state, target);
+	const auto *t = this->type_of(state, entity, time);
+	if (t == nullptr or not t->trader) {
+		return "kann nicht handeln";
+	}
+	const bool cog = t->name == "TradeCog";
+	const std::string kind = cog ? "Dock" : "Market";
+	if (building == nullptr or prod::entity_name(building) != kind or combat->is_dead(target) or not finished(building)) {
+		return cog ? "nur mit einem fertigen Hafen" : "nur mit einem fertigen Markt";
+	}
+	const auto own = owner_of(entity, time);
+	if (owner_of(building, time) != own) {
+		return "nur mit eigenen Gebäuden, solange es keine Verbündeten gibt";
+	}
+	const auto here = ground_of(entity, time);
+	std::optional<entity_id_t> home;
+	double best = 0.0;
+	for (const auto &[id, other] : state->get_game_entities()) {
+		if (id == target or prod::entity_name(other) != kind or combat->is_dead(id) or not finished(other)
+		    or owner_of(other, time) != own) {
+			continue;
+		}
+		const double distance = combat::distance(here, ground_of(other, time));
+		if (not home or distance < best) {
+			home = id;
+			best = distance;
+		}
+	}
+	if (not home) {
+		return cog ? "braucht einen zweiten eigenen Hafen" : "braucht einen zweiten eigenen Markt";
+	}
+	auto &u = this->unit(unit);
+	u.job = Job{};
+	u.job.kind = job_t::TRADE;
+	u.job.target = *home;
+	u.job.trade_home = *home;
+	u.job.trade_partner = target;
+	u.job.explicit_order = true;
+	u.job.started = time.to_double();
+	return {};
+}
+
 std::string SpecialState::order_board(const std::shared_ptr<GameState> &state, entity_id_t unit_id,
                                       entity_id_t carrier, const time::time_t &time) {
 	auto reason = this->board_check(state, unit_id, carrier, time);
@@ -2131,6 +2255,12 @@ void SpecialState::publish(const std::shared_ptr<GameState> &state, const time::
 		info.packable = t and t->packable;
 		info.unpacked = u.unpacked;
 		info.packing = u.pack_until.has_value();
+		if (u.job.kind == job_t::TRADE and t != nullptr) {
+			const auto gold = trade_trip_gold(state, *t, u.job.trade_home, u.job.trade_partner, true, time);
+			auto amount = fmt1(gold);
+			std::replace(amount.begin(), amount.end(), '.', ',');
+			info.job = "Handelt: " + amount + " Gold je Fahrt";
+		}
 		if (info.packing) {
 			info.job = u.pack_target ? "Baut ab" : "Baut auf";
 		}
@@ -2214,6 +2344,13 @@ std::optional<SavedSpecial> SpecialState::save_entity(entity_id_t id) const {
 			s.siege_mode = "unpacked";
 			any = true;
 		}
+		if (u->job.kind == job_t::TRADE) {
+			s.trade_home = u->job.trade_home;
+			s.trade_partner = u->job.trade_partner;
+			s.trade_to_partner = u->job.target == u->job.trade_partner;
+			s.trade_goods = u->job.trade_goods;
+			any = true;
+		}
 	}
 	if (auto it = this->carried.find(id); it != this->carried.end() and not it->second.empty()) {
 		for (auto inner : it->second) {
@@ -2253,6 +2390,16 @@ void SpecialState::load_entity(const std::shared_ptr<GameState> &state, entity_i
 		u.job.kind = job_t::HEAL;
 		u.job.target = mapped(*saved.heal_target);
 		u.job.explicit_order = true;
+	}
+	if (saved.trade_home) {
+		u.job = Job{};
+		u.job.kind = job_t::TRADE;
+		u.job.trade_home = mapped(*saved.trade_home);
+		u.job.trade_partner = mapped(saved.trade_partner);
+		u.job.target = saved.trade_to_partner ? u.job.trade_partner : u.job.trade_home;
+		u.job.trade_goods = saved.trade_goods;
+		u.job.explicit_order = true;
+		u.job.started = time.to_double();
 	}
 	if (saved.relic_carry) {
 		const auto relic = mapped(*saved.relic_carry);
@@ -2575,6 +2722,31 @@ bool handle_command(const std::shared_ptr<GameState> &state,
 				});
 				log::log(INFO << "Special command (right click) " << action << ": " << ordered << " of " << monks.size()
 				              << " monks" << (why.empty() ? std::string{} : " (" + why + ")"));
+				done = 0;
+				why.clear();
+			}
+		}
+		// --- trade units: a market (dock for a cog) under the click is the other end of their route
+		const bool any_trader = std::any_of(ids.begin(), ids.end(), [&](entity_id_t id) {
+			const auto *t = type_of(id);
+			return t and t->trader;
+		});
+		if (any_trader) {
+			auto post = pick(state, time, target, params, [&](const std::shared_ptr<GameEntity> &e) {
+				const auto name = prod::entity_name(e);
+				return name == "Market" or name == "Dock";
+			});
+			if (post != nullptr) {
+				std::erase_if(ids, [&](entity_id_t id) {
+					const auto *t = type_of(id);
+					if (t == nullptr or not t->trader) {
+						return false;
+					}
+					auto r = special->order_trade(state, id, post->get_id(), time);
+					note(r);
+					return r.empty();
+				});
+				report("trade (right click)");
 				done = 0;
 				why.clear();
 			}

@@ -373,6 +373,12 @@ SaveData capture(const std::shared_ptr<GameState> &state,
 				e.relic_store.assign(s->relic_store.begin(), s->relic_store.end());
 				e.cargo.assign(s->cargo.begin(), s->cargo.end());
 				e.siege_mode = s->siege_mode;
+				if (s->trade_home) {
+					e.trade_home = *s->trade_home;
+					e.trade_partner = s->trade_partner;
+					e.trade_to_partner = s->trade_to_partner;
+					e.trade_goods = s->trade_goods;
+				}
 			}
 		}
 		// walking somewhere (last keyframe of the position curve lies in the future)
@@ -747,7 +753,7 @@ RestoreResult restore(const SaveData &data,
 		size_t special_count = 0;
 		for (auto &[e, entity] : restored) {
 			if (not e->faith and not e->convert_target and not e->relic_carry and e->relic_store.empty()
-			    and e->cargo.empty() and e->siege_mode.empty()) {
+			    and e->cargo.empty() and e->siege_mode.empty() and not e->trade_home) {
 				continue;
 			}
 			special::SavedSpecial s;
@@ -762,6 +768,12 @@ RestoreResult restore(const SaveData &data,
 			s.relic_store.assign(e->relic_store.begin(), e->relic_store.end());
 			s.cargo.assign(e->cargo.begin(), e->cargo.end());
 			s.siege_mode = e->siege_mode;
+			if (e->trade_home) {
+				s.trade_home = static_cast<entity_id_t>(*e->trade_home);
+				s.trade_partner = static_cast<entity_id_t>(e->trade_partner);
+				s.trade_to_partner = e->trade_to_partner;
+				s.trade_goods = e->trade_goods;
+			}
 			special_state->load_entity(state, entity->get_id(), s, mapped, time);
 			special_count += 1;
 		}

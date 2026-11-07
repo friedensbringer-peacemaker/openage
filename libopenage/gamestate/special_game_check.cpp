@@ -1269,6 +1269,118 @@ void check_market(const Options &opt) {
 	check(l.special()->market_sell_revenue(1, 0.3) == w.special()->market_sell_revenue(1, 0.3), "wood price after loading");
 }
 
+/// S15: trade carts shuttle between two own markets, the caravan makes the trips faster (spec 02 §2.9)
+void check_trade(const Options &opt) {
+	std::cout << "== S15 Handel" << std::endl;
+	using component::command::command_t;
+	World w{opt, quiet_map()};
+	w.advance(0.5);
+	auto spot = scene_spot(w, 8.0, -8.0);
+	auto home = w.spawn_at(0, ge("market", "Market"), spot.first, spot.second);
+	// along the river of the map, on the same bank
+	const auto far_spot = w.land_near(spot.first + 8.0, spot.second + 14.0, 8).value_or(std::pair{spot.first + 8.0, spot.second + 14.0});
+	auto far = w.spawn_at(0, ge("market", "Market"), far_spot.first, far_spot.second);
+	auto enemy_market = w.spawn_at(1, ge("market", "Market"), spot.first - 10.0, spot.second - 2.0);
+	// on the other bank of the river: the cart cannot get there
+	auto tc_enemy = w.town_center(1);
+	const auto other_bank = w.land_near(w.position(tc_enemy).ne.to_double() - 8.0, w.position(tc_enemy).se.to_double() + 8.0, 10);
+	auto across = other_bank ? w.spawn_at(0, ge("market", "Market"), other_bank->first, other_bank->second) : nullptr;
+	auto cart = w.unit_near(0, "trade_cart", "TradeCart", spot.first + 3.5, spot.second);
+	auto militia = w.unit_near(0, "militia", "Militia", spot.first + 3.5, spot.second + 4.0);
+	if (home == nullptr or far == nullptr or enemy_market == nullptr or across == nullptr or cart == nullptr or militia == nullptr) {
+		check(false, "markets and cart for the check");
+		return;
+	}
+	w.advance(0.3);
+	const auto *type = w.special()->type_of(w.state, cart, w.now);
+	check(type and type->trader, "the cart is a trade unit");
+	check(type and std::abs(type->work_rate - trade::TRADE_WORK_RATE) < 1e-6, "work rate of the data is the one of the rules");
+	check(not w.special()->order_trade(w.state, militia->get_id(), far->get_id(), w.now).empty(), "a militia does not trade");
+	check(not w.special()->order_trade(w.state, cart->get_id(), enemy_market->get_id(), w.now).empty(), "no trade with an enemy market");
+	check(not w.special()->order_trade(w.state, cart->get_id(), cart->get_id(), w.now).empty(), "a cart is no market");
+
+	// by right click (through the command handling)
+	w.command(command_t::MOVE, {cart}, far->get_id(), w.position(far));
+	w.advance(0.3);
+	const auto job = w.special()->get_info(cart->get_id());
+	check(job and job->job.find("Handelt") == 0, "the HUD shows the trade: " + (job ? job->job : std::string{}));
+	check(w.special()->get_job_target(cart->get_id()).has_value(), "the right click on the market starts the route");
+
+	// expected gold of one trip with the sizes of the data
+	auto hs = w.state->get_combat()->get_stats(home->get_id());
+	auto fs = w.state->get_combat()->get_stats(far->get_id());
+	const auto ph = w.position(home);
+	const auto pf = w.position(far);
+	const double dx = std::max(0.0, std::abs(ph.ne.to_double() - pf.ne.to_double()) - 2.0 * fs->radius - 2.0 * hs->radius);
+	const double dy = std::max(0.0, std::abs(ph.se.to_double() - pf.se.to_double()) - 2.0 * fs->radius - 2.0 * hs->radius);
+	const double width = static_cast<double>(w.state->get_map()->get_size()[0]);
+	const double expected = trade::trade_gold(std::max(0.1, std::sqrt(dx * dx + dy * dy)), trade::TRADE_WORK_RATE, trade::TRADE_SPEED_CART, width);
+
+	w.state->get_player(0)->get_resources().set({0.0, 0.0, 0.0, 0.0});
+	const auto before = w.special()->counters();
+	check(w.advance_until(60.0, [&]() { return w.special()->counters().trade_trips >= before.trade_trips + 1; }),
+	      "the cart arrives and is paid");
+	const double gold1 = w.resource(0, resource_t::GOLD);
+	check(std::abs(gold1 - expected) < 0.01, "gold of the trip: " + std::to_string(gold1) + " expected " + std::to_string(expected));
+	w.advance(1.0);
+	check(w.resource(0, resource_t::GOLD) == gold1, "the arrival pays only once");
+
+	// the way back pays nothing; the second arrival pays again
+	const auto mid = w.now.to_double();
+	check(w.advance_until(80.0, [&]() { return w.special()->counters().trade_trips >= before.trade_trips + 2; }),
+	      "a second trip after the return");
+	const double round_trip = w.now.to_double() - mid;
+	check(std::abs(w.resource(0, resource_t::GOLD) - 2.0 * expected) < 0.01, "two trips pay twice, the return pays nothing");
+
+	// the caravan shortens the round trip, the gold of a trip stays
+	w.production->grant_research(0, "Caravan");
+	w.advance(0.3);
+	check(w.advance_until(60.0, [&]() { return w.special()->counters().trade_trips >= before.trade_trips + 3; }), "third trip");
+	const double t3 = w.now.to_double();
+	const double gold3 = w.resource(0, resource_t::GOLD);
+	check(w.advance_until(60.0, [&]() { return w.special()->counters().trade_trips >= before.trade_trips + 4; }), "fourth trip");
+	const double fast_trip = w.now.to_double() - t3;
+	check(fast_trip < round_trip * 0.8, "caravan: round trip " + std::to_string(fast_trip) + " s instead of " + std::to_string(round_trip) + " s");
+	check(std::abs(w.resource(0, resource_t::GOLD) - gold3 - expected) < 0.01, "caravan: same gold per trip");
+
+	// the route comes back with the save game
+	const auto text = save::serialize(save::capture(w.state, w.settings, w.game->get_generated_entity_range(), w.now, "W7"));
+	check(text.find("trade = ") != std::string::npos, "the save game has the route");
+	save::SaveData parsed;
+	std::string error;
+	check(save::parse(text, parsed, error), "parsed " + error);
+	World l{opt, quiet_map()};
+	auto result = save::restore(parsed, l.state, l.loop, l.factory, l.production, l.game->get_generated_entity_range(), l.now);
+	check(result.ok, "restored " + result.error);
+	l.advance(0.5);
+	const auto carts = l.of(0, "TradeCart");
+	check(carts.size() == 1 and l.special()->get_job_target(carts.front()->get_id()).has_value(), "the cart goes on after loading");
+	if (not carts.empty()) {
+		const double loaded_gold = l.resource(0, resource_t::GOLD);
+		check(l.advance_until(60.0, [&]() { return l.resource(0, resource_t::GOLD) > loaded_gold; }), "it earns gold after loading");
+	}
+
+	// an unreachable market ends the route instead of keeping the cart busy for ever
+	check(w.special()->order_trade(w.state, cart->get_id(), across->get_id(), w.now).empty(), "route to the other bank ordered");
+	const bool gave_up = w.advance_until(120.0, [&]() { return not w.special()->get_job_target(cart->get_id()).has_value(); });
+	check(gave_up, "the route to the other bank ends, cart at (" + std::to_string(w.position(cart).ne.to_double()) + ", "
+	                   + std::to_string(w.position(cart).se.to_double()) + ")");
+
+	w.combat()->kill(w.state, across->get_id(), w.now);
+	w.advance(0.3);
+
+	// a new order ends the route, a lost market as well
+	w.command(command_t::MOVE, {cart}, std::nullopt, w.position(militia));
+	w.advance(0.3);
+	check(not w.special()->get_job_target(cart->get_id()).has_value(), "walking away ends the route");
+	check(w.special()->order_trade(w.state, cart->get_id(), far->get_id(), w.now).empty(), "ordered again");
+	w.advance(0.3);
+	w.combat()->kill(w.state, home->get_id(), w.now);
+	w.advance(1.0);
+	check(not w.special()->get_job_target(cart->get_id()).has_value(), "no route without the home market");
+	check(not w.special()->order_trade(w.state, cart->get_id(), far->get_id(), w.now).empty(), "one market is not enough");
+}
+
 /// S12: a save during a conversion goes on after loading
 void check_save_converting(const Options &opt) {
 	std::cout << "== S12 Spielstand während einer Konvertierung" << std::endl;
@@ -1364,7 +1476,7 @@ void check_save(const Options &opt) {
 
 	auto data = save::capture(w.state, w.settings, w.game->get_generated_entity_range(), w.now, "W6");
 	const auto text = save::serialize(data);
-	check(text.find("version = 7") != std::string::npos and text.find("relics = 1") != std::string::npos,
+	check(text.find("version = 8") != std::string::npos and text.find("relics = 1") != std::string::npos,
 	      "save version 6 with relics on the map");
 	for (const auto &key : {"faith = ", "relic_carry = ", "relic_store = ", "siege_mode = unpacked"}) {
 		check(text.find(key) != std::string::npos, std::string{"key '"} + key + "' stored");
@@ -1411,7 +1523,7 @@ void check_save(const Options &opt) {
 	check(count(again) == count(data), "W6 keys after save -> load -> save (" + std::to_string(count(again)) + ")");
 	// version 5 file: no relics on its map
 	std::string v5 = text;
-	v5.replace(v5.find("version = 7"), 11, "version = 5");
+	v5.replace(v5.find("version = 8"), 11, "version = 5");
 	v5.erase(v5.find("relics = 1\n"), 11);
 	save::SaveData old;
 	check(save::parse(v5, old, error) and not old.map.relics, "version 5 file parses, map without relics");
@@ -1518,6 +1630,9 @@ int main(int argc, char **argv) {
 		}
 		if (only.empty() or only == "market") {
 			check_market(opt);
+		}
+		if (only.empty() or only == "trade") {
+			check_trade(opt);
 		}
 		if (only.empty() or only == "monks") {
 			check_monks(opt);

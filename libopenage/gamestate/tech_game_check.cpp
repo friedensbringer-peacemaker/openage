@@ -403,7 +403,7 @@ void check_research(const Options &opt) {
 	w.advance(1.0);
 	auto data = save::capture(w.state, base, w.game->get_generated_entity_range(), w.now, "tech check");
 	const auto text = save::serialize(data);
-	check(text.find("version = 7") != std::string::npos and text.find("vision = ") != std::string::npos
+	check(text.find("version = 8") != std::string::npos and text.find("vision = ") != std::string::npos
 	          and text.find("civ = Britons") != std::string::npos
 	          and text.find("tech = hd_base.data.tech.generic.loom.loom.Loom") != std::string::npos
 	          and text.find(" research\n") != std::string::npos and text.find("civs = Britons Franks") != std::string::npos,
@@ -432,7 +432,7 @@ void check_research(const Options &opt) {
 	check(queued, "queued research survives loading");
 	// version 1: no civilisation and techs, still loads (version 2: the same without vision)
 	std::string v1 = text;
-	v1.replace(v1.find("version = 7"), 11, "version = 1");
+	v1.replace(v1.find("version = 8"), 11, "version = 1");
 	save::SaveData old;
 	check(save::parse(v1, old, error), "version 1 file parses");
 }
@@ -518,7 +518,7 @@ void check_civ_vision(const Options &opt) {
 	      "civilisation, techs, vision and explored tiles survive save -> load -> save");
 	// version 2 (W1, before the vision fields) still loads: vision normal, nothing explored
 	std::string v2 = text;
-	v2.replace(v2.find("version = 7"), 11, "version = 2");
+	v2.replace(v2.find("version = 8"), 11, "version = 2");
 	v2.replace(v2.find("vision = normal\n"), 16, "");
 	save::SaveData old;
 	check(save::parse(v2, old, error) and old.map.vision == vision_mode_t::NORMAL and old.players.at(0).civ == "Britons",

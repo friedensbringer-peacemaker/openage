@@ -1958,7 +1958,8 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		// A second monk picks up a relic and walks away with it (carry graphics).
 		// The trebuchet then unpacks (hotkey U) and shoots at an enemy house.
 		// Captures -s1-start, -s2-konvertieren, -s3-mange, -s4-tribock, -s5-reliquie, -s6-traegt,
-		// -s7-aufgebaut, -s8-schuss, -s9-schuss. Then a market: -s10-markt, one lot bought, -s11-gekauft.
+		// -s7-aufgebaut, -s8-schuss, -s9-schuss. Then a market: -s10-markt, one lot bought, -s11-gekauft,
+		// tribute -s12-tribut, and a trade cart between two markets: -s13-handel, -s14-gold.
 		const auto gaia_less = static_cast<openage::gamestate::player_id_t>(1);
 		auto monastery = near_square(tc[0] + 5.0, tc[1] + 5.0, 3, false, 5.0);
 		if (monastery) {
@@ -2004,8 +2005,17 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 			mark(*target, 1);
 			market = near_square(tc[0] + 1.0, tc[1] - 8.0, 2, false, 3.0);
 		}
+		std::optional<std::array<double, 2>> market2, trader;
 		if (market) {
 			mark(*market, 2);
+			market2 = near_square((*market)[0] + 9.0, (*market)[1], 2, false, 3.0);
+		}
+		if (market2) {
+			mark(*market2, 2);
+			trader = near_square((*market)[0] + 3.5, (*market)[1], 1, false, 1.0);
+		}
+		if (trader) {
+			mark(*trader, 1);
 		}
 		if (carrier) {
 			mark(*carrier, 1);
@@ -2015,7 +2025,7 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 			mark(*relic, 1);
 			away = near_square((*carrier)[0] - 1.0, (*carrier)[1] + 4.0, 1, false, 0.0);
 		}
-		if (not monastery or not monk or not foe1 or not foe3 or not own or not mangonel or not treb or not relic or not away or not target or not market) {
+		if (not monastery or not monk or not foe1 or not foe3 or not own or not mangonel or not treb or not relic or not away or not target or not market or not market2 or not trader) {
 			log::log(WARN << "special replay: map lacks free spots");
 			capture(2.0, nullptr);
 			return steps;
@@ -2034,6 +2044,8 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		plan.spawns.push_back({"-s4-tribock", gaia_less, "Relic", (*relic)[0], (*relic)[1]});
 		plan.spawns.push_back({"-s6-traegt", gaia_less, "House", (*target)[0], (*target)[1]});
 		plan.spawns.push_back({"-s6-traegt", 0, "Market", (*market)[0], (*market)[1]});
+		plan.spawns.push_back({"-s6-traegt", 0, "Market", (*market2)[0], (*market2)[1]});
+		plan.spawns.push_back({"-s6-traegt", 0, "TradeCart", (*trader)[0], (*trader)[1]});
 		capture(3.0, "-s1-start");
 		auto mp = pixel((*monk)[0], (*monk)[1], 0.6);
 		log_px("monk", mp);
@@ -2087,7 +2099,12 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		click(70.0, {tribute_cell.cx(), tribute_cell.cy()}, E::kLeftButton);
 		capture(71.0, "-s12-tribut");
 		click(71.2, {buy_cell.cx(), buy_cell.cy()}, E::kLeftButton);
-		capture(72.5, nullptr);
+		// a trade cart: right click on the second market, it shuttles and earns gold
+		box_select(72.5, pixel((*trader)[0], (*trader)[1], 0.5), 30);
+		click(73.3, pixel((*market2)[0], (*market2)[1], 0.5), E::kRightButton);
+		capture(75.0, "-s13-handel");
+		capture(92.0, "-s14-gold");
+		capture(92.5, nullptr);
 		return steps;
 	}
 	if (args.replay_fish) {
