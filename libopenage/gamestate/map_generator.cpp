@@ -468,8 +468,10 @@ BiomeParams biome_params(map_biome_t biome) {
 	return b;
 }
 
-double start_radius(size_t N) {
-	return std::max(7.0, 0.12 * static_cast<double>(N));
+double start_radius(size_t N, size_t players) {
+	// XR fork W7: with more than four players the flat start areas together keep the share of four
+	const double crowd = players > 4 ? std::sqrt(4.0 / static_cast<double>(players)) : 1.0;
+	return std::max(7.0, 0.12 * crowd * static_cast<double>(N));
 }
 
 double flat_radius(const BiomeParams &b, double start_r) {
@@ -505,7 +507,7 @@ MapBiomeLimits map_biome_limits(const MapSettings &settings) {
 	MapBiomeLimits limits;
 	limits.max_elevation = settings.max_elevation * b.elevation_scale;
 	limits.max_slope = static_cast<float>(b.max_step);
-	limits.flat_radius = flat_radius(b, start_radius(N));
+	limits.flat_radius = flat_radius(b, start_radius(N, map_players(settings.players, N)));
 	limits.max_trees = b.tree_percent == 100 ? settings.max_trees : settings.max_trees * b.tree_percent / 100;
 	limits.water_min = b.water_min;
 	limits.water_max = b.water_max;
@@ -539,14 +541,35 @@ GeneratedMap generate_map(const MapSettings &settings) {
 
 	// --- start positions: left and right on screen (opposite ends of the ne = -se diagonal)
 	const double jitter = 0.04 * n;
-	for (auto base : {std::array<double, 2>{0.27 * n, 0.73 * n}, std::array<double, 2>{0.73 * n, 0.27 * n}}) {
-		double ne = std::floor(base[0] + jitter * rng.signed_uniform() + 0.5);
-		double se = std::floor(base[1] + jitter * rng.signed_uniform() + 0.5);
-		map.starts.push_back({ne, se});
+	const size_t players = map_players(settings.players, N);
+	if (players == 2) {
+		for (auto base : {std::array<double, 2>{0.27 * n, 0.73 * n}, std::array<double, 2>{0.73 * n, 0.27 * n}}) {
+			double ne = std::floor(base[0] + jitter * rng.signed_uniform() + 0.5);
+			double se = std::floor(base[1] + jitter * rng.signed_uniform() + 0.5);
+			map.starts.push_back({ne, se});
+		}
+	}
+	else {
+		// XR fork W7: more players take turns on both sides of the map, in arcs that stay away from
+		// the main diagonal (rivers and seas of the presets run along it)
+		for (size_t p = 0; p < players; ++p) {
+			const size_t on_side = p % 2 == 0 ? (players + 1) / 2 : players / 2;
+			const double step = on_side <= 2 ? 60.0 : 45.0;
+			const double degrees = (static_cast<double>(p / 2) - 0.5 * static_cast<double>(on_side - 1)) * step;
+			const double phi = degrees * 3.14159265358979323846 / 180.0;
+			const double side = p % 2 == 0 ? 1.0 : -1.0;
+			const double r = 0.33 * n;
+			// axis between the two sides (-1, 1), across it (1, 1)
+			const double along = side * r * std::cos(phi) / std::sqrt(2.0);
+			const double across = r * std::sin(phi) / std::sqrt(2.0);
+			double ne = std::floor(0.5 * n - along + across + 0.5 * jitter * rng.signed_uniform() + 0.5);
+			double se = std::floor(0.5 * n + along + across + 0.5 * jitter * rng.signed_uniform() + 0.5);
+			map.starts.push_back({ne, se});
+		}
 	}
 	// neutral owner of trees and resources (gaia): the player after the last start
 	const size_t gaia = map.starts.size();
-	const double start_r = start_radius(N);
+	const double start_r = start_radius(N, map.starts.size());
 	auto start_dist = [&](double ne, double se) {
 		double best = 1e9;
 		for (const auto &s : map.starts) {
@@ -1036,11 +1059,18 @@ GeneratedMap generate_map(const MapSettings &settings) {
 	if (b.forest_paths) {
 		carve_path(map.starts[0], map.starts[1], 0.25 * n, 30);
 		carve_path(map.starts[0], map.starts[1], -0.25 * n, 31);
+		for (size_t p = 2; p < map.starts.size(); ++p) {
+			carve_path(map.starts[p], map.starts[p - 2], 0.15 * n, 40 + p);
+			carve_path(map.starts[p], {0.5 * n, 0.5 * n}, -0.15 * n, 50 + p);
+		}
 	}
 	if (b.gold_rush) {
 		const std::array<double, 2> c{0.5 * n, 0.5 * n};
 		carve_path(map.starts[0], c, 0.15 * n, 32);
 		carve_path(map.starts[1], c, 0.15 * n, 33);
+		for (size_t p = 2; p < map.starts.size(); ++p) {
+			carve_path(map.starts[p], c, 0.15 * n, 60 + p);
+		}
 	}
 
 	// --- forests
@@ -1408,6 +1438,9 @@ GeneratedMap generate_map(const MapSettings &settings) {
 			return tile_index(static_cast<long>(map.starts[player][0] + 3), static_cast<long>(map.starts[player][1]));
 		};
 		connect(beside_town(0), beside_town(1));
+		for (size_t p = 2; p < map.starts.size(); ++p) {
+			connect(beside_town(p), beside_town(p - 2));
+		}
 		if (b.gold_rush) {
 			// free tile next to the gold field
 			size_t goal = tile_index(centre_tile + 3, centre_tile);
@@ -1416,6 +1449,9 @@ GeneratedMap generate_map(const MapSettings &settings) {
 			}
 			connect(beside_town(0), goal);
 			connect(beside_town(1), goal);
+			for (size_t p = 2; p < map.starts.size(); ++p) {
+				connect(beside_town(p), goal);
+			}
 		}
 		// fish only on open water (a carved ford may have replaced their tile)
 		std::erase_if(map.objects, [&](const MapObject &o) {

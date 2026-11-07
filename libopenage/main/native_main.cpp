@@ -408,6 +408,17 @@ bool parse_args(int argc, char **argv, native_args &args) {
 				throw std::runtime_error("--ai-difficulty: easy or normal, not " + level);
 			}
 		}
+		else if (arg == "--players") {
+			args.map.players = std::stoull(value());
+		}
+		else if (arg == "--teams") {
+			std::stringstream list{value()};
+			std::string part;
+			args.map.teams.clear();
+			while (std::getline(list, part, ',')) {
+				args.map.teams.push_back(std::stoi(part));
+			}
+		}
 		else if (arg == "--ai-player") {
 			args.map.ai.player = std::stoull(value());
 		}

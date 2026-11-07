@@ -325,6 +325,14 @@ inline std::string serialize(const SaveData &d) {
 	out << "vision = " << vision_mode_name(m.vision) << "\n";
 	out << "herds = " << (m.herds ? 1 : 0) << "\n";
 	out << "relics = " << (m.relics ? 1 : 0) << "\n";
+	out << "players = " << m.players << "\n";
+	if (not m.teams.empty()) {
+		out << "teams =";
+		for (int team : m.teams) {
+			out << " " << team;
+		}
+		out << "\n";
+	}
 	if (not d.market.empty()) {
 		out << "market = " << d.market << "\n";
 	}
@@ -591,6 +599,18 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 			else if (key == "max_elevation") {
 				if (not(v >> m.max_elevation) or not std::isfinite(m.max_elevation)) {
 					return fail("max_elevation");
+				}
+			}
+			else if (key == "players") {
+				if (not(v >> m.players) or m.players < 2 or m.players > 8) {
+					return fail("players");
+				}
+			}
+			else if (key == "teams") {
+				m.teams.clear();
+				int team = 0;
+				while (v >> team) {
+					m.teams.push_back(team);
 				}
 			}
 			else if (key == "skirmish") {

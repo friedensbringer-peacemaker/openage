@@ -477,6 +477,14 @@ RestoreResult restore(const SaveData &data,
 	auto combat = state->get_combat();
 	const double now = time.to_double();
 
+	// XR fork W7: the stances of the file replace the teams the map started with
+	if (auto combat_state = state->get_combat()) {
+		const auto started = combat_state->get_stances();
+		for (const auto &[pair, stance] : started) {
+			combat_state->set_stance(pair.first, pair.second, diplomacy::stance_t::ENEMY);
+		}
+	}
+
 	// players
 	for (const auto &p : data.players) {
 		if (state->has_player(static_cast<player_id_t>(p.id))) {

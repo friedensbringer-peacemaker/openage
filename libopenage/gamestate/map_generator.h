@@ -163,7 +163,7 @@ MapBiomeLimits map_biome_limits(const MapSettings &settings);
  *
  * The landscape preset settings.biome changes water, hills, forests, terrain
  * and objects (see map_biome_t); GRASSLAND is the layout described above. All
- * presets keep the rules: two starts with town center, villagers and
+ * presets keep the rules: settings.players starts with town center, villagers and
  * resources, gaia owns trees/resources/animals, the starts are connected for
  * land units (fords or forest paths are carved if necessary).
  *

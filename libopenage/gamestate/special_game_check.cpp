@@ -1489,6 +1489,99 @@ void check_diplomacy(const Options &opt) {
 	check(t.advance_until(5.0, [&]() { return not t.special()->get_job_target(trader->get_id()).has_value(); }), "the end of the alliance ends the route");
 }
 
+void check_players(const Options &opt) {
+	std::cout << "== S17 Mehr als zwei Spieler" << std::endl;
+	using combat::match_state_t;
+	using diplomacy::stance_t;
+	MapSettings base = quiet_map();
+	base.players = 4;
+	base.teams = {1, 1, 2, 2};
+	World w{opt, base};
+	w.advance(0.5);
+	auto combat = w.state->get_combat();
+	for (player_id_t p = 0; p < 4; ++p) {
+		check(w.town_center(p) != nullptr, "town center of player " + std::to_string(p));
+		check(w.of(p, "Villager").size() == 3, "three villagers of player " + std::to_string(p));
+	}
+	check(combat->stance(0, 1) == stance_t::ALLY and combat->stance(1, 0) == stance_t::ALLY
+	          and combat->stance(2, 3) == stance_t::ALLY and combat->stance(0, 2) == stance_t::ENEMY
+	          and combat->stance(3, 1) == stance_t::ENEMY,
+	      "teams start as allies");
+
+	// save game with the map settings of the players; a changed stance replaces the team
+	combat->set_stance(2, 3, stance_t::ENEMY);
+	auto data = save::capture(w.state, w.settings, w.game->get_generated_entity_range(), w.now, "S17");
+	const auto text = save::serialize(data);
+	check(text.find("players = 4") != std::string::npos and text.find("teams = 1 1 2 2") != std::string::npos, "players and teams stored");
+	save::SaveData parsed;
+	std::string error;
+	check(save::parse(text, parsed, error), "parsed " + error);
+	check(parsed.map.players == 4 and parsed.map.teams == base.teams, "players and teams read");
+	World l{opt, parsed.map};
+	auto result = save::restore(parsed, l.state, l.loop, l.factory, l.production, l.game->get_generated_entity_range(), l.now);
+	check(result.ok, "restored " + result.error);
+	check(l.state->get_combat()->stance(2, 3) == stance_t::ENEMY and l.state->get_combat()->stance(3, 2) == stance_t::ALLY
+	          and l.state->get_combat()->stance(0, 1) == stance_t::ALLY,
+	      "stances of the file after loading");
+	combat->set_stance(2, 3, stance_t::ALLY);
+
+	// the last team wins together: everything of players 2 and 3 goes
+	w.advance(1.0);
+	check(combat->get_match_state(0) == match_state_t::RUNNING, "the game runs");
+	const auto kill = [&](player_id_t p) {
+		std::vector<entity_id_t> ids;
+		for (const auto &[id, entity] : w.state->get_game_entities()) {
+			if (w.owner(entity) == p and combat->get_stats(id) != nullptr and not combat->is_dead(id)) {
+				ids.push_back(id);
+			}
+		}
+		for (auto id : ids) {
+			combat->kill(w.state, id, w.now);
+		}
+	};
+	kill(2);
+	w.advance(4.0);
+	check(combat->get_match_state(2) == match_state_t::DEFEAT and combat->get_match_state(0) == match_state_t::RUNNING,
+	      "one player of the other team is out, the game goes on");
+	kill(3);
+	check(w.advance_until(10.0, [&]() { return combat->get_match_state(0) != match_state_t::RUNNING; }), "the match ends");
+	check(combat->get_match_state(0) == match_state_t::VICTORY and combat->get_match_state(1) == match_state_t::VICTORY
+	          and combat->get_match_state(3) == match_state_t::DEFEAT,
+	      "the remaining team wins together");
+
+	// three computer players on one side: allied computers leave each other alone
+	MapSettings all = base;
+	all.ai.mode = ai_mode_t::ON;
+	all.ai.first_attack = 30.0;
+	all.ai.attack_size = 1;
+	all.teams = {1, 1, 1, 1};
+	World a{opt, all};
+	check(a.game->get_ai_players().size() == 3, "one computer per player but the first");
+	a.advance(0.5);
+	const auto units_start = a.of(0, "Villager").size();
+	const auto tc0 = a.town_center(0);
+	const auto tc0_health = a.health(tc0);
+	a.advance(240.0);
+	check(a.health(tc0) == tc0_health, "allied computers do not attack the town center of player 0");
+	check(a.of(0, "Villager").size() == units_start, "allied computers do not kill the villagers of player 0");
+	check(a.state->get_combat()->get_match_state(0) == match_state_t::RUNNING, "allies without anyone out go on playing");
+	for (player_id_t p = 1; p < 4; ++p) {
+		check(a.of(p, "Villager").size() > units_start, "computer " + std::to_string(p) + " trains villagers");
+	}
+
+	// enemies of two computers are found by both
+	MapSettings war = base;
+	war.ai.mode = ai_mode_t::ON;
+	war.ai.first_attack = 30.0;
+	war.ai.attack_size = 1;
+	war.teams = {};
+	World e{opt, war};
+	e.advance(240.0);
+	check(e.state->get_combat()->stance(1, 2) == stance_t::ENEMY, "without teams everyone is an enemy");
+	std::cout << "  ok   computers after 240 s: " << e.of(1, "Villager").size() << ", " << e.of(2, "Villager").size() << ", "
+	          << e.of(3, "Villager").size() << " villagers" << std::endl;
+}
+
 void check_save_converting(const Options &opt) {
 	std::cout << "== S12 Spielstand während einer Konvertierung" << std::endl;
 	World w{opt, quiet_map()};
@@ -1743,6 +1836,9 @@ int main(int argc, char **argv) {
 		}
 		if (only.empty() or only == "diplomacy") {
 			check_diplomacy(opt);
+		}
+		if (only.empty() or only == "players") {
+			check_players(opt);
 		}
 		if (only.empty() or only == "monks") {
 			check_monks(opt);

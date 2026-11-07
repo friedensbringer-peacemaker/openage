@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -258,10 +259,24 @@ struct MapSettings {
 	/// the animals with an own random sequence, so false gives the map of before W6 (save games before
 	/// version 6 load without relics)
 	bool relics = true;
+	/// XR fork W7: players on the random map, gaia is the player after them. The generator
+	/// limits them by the size of the map (map_players()).
+	size_t players = 2;
+	/// XR fork W7: team per player, players with the same number above 0 start as allies;
+	/// missing entries and 0: no team
+	std::vector<int> teams{};
 	/// XR fork (save games): restore this save file after the map was generated
 	/// (gamestate/save_game.h); the other fields must be the map settings of the
 	/// file. Empty: a new game.
 	std::string load_file{};
 };
+
+/**
+ * Players on a random map: at least 2, at most 8 and one per 16 tiles of edge
+ * length (48: 3, 64: 4, 96: 6, 128: 8), so the starts keep their distance.
+ */
+inline size_t map_players(size_t requested, size_t map_size) {
+	return std::clamp<size_t>(requested, 2, std::clamp<size_t>(map_size / 16, 2, 8));
+}
 
 } // namespace openage::gamestate

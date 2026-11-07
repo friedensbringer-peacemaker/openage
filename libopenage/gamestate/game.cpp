@@ -145,6 +145,15 @@ void Game::start_ai(const std::shared_ptr<openage::event::EventLoop> &event_loop
 		return;
 	}
 	const auto gaia = static_cast<player_id_t>(this->start_count);
+	// XR fork W7: with more than two players the computer plays everyone but player 0
+	if (not s.player and this->start_count > 2) {
+		for (player_id_t p = 1; p < gaia; ++p) {
+			MapSettings one = settings;
+			one.ai.player = p;
+			this->start_ai(event_loop, one, start_time);
+		}
+		return;
+	}
 	const auto player = s.player.value_or(gaia - 1);
 	if (player >= gaia) {
 		log::log(WARN << "AI: no player " << player << " to control");
@@ -510,6 +519,14 @@ bool Game::generate_random_map(const std::shared_ptr<openage::event::EventLoop> 
 	this->state->get_combat()->set_neutral_players({static_cast<player_id_t>(generated.starts.size())});
 	// ai (XR fork): players and gaia for the computer opponent
 	this->start_count = generated.starts.size();
+	// XR fork W7: teams start as allies
+	for (size_t a = 0; a < this->start_count and a < settings.teams.size(); ++a) {
+		for (size_t b = 0; b < this->start_count and b < settings.teams.size(); ++b) {
+			if (a != b and settings.teams[a] > 0 and settings.teams[a] == settings.teams[b]) {
+				this->state->get_combat()->set_stance(static_cast<player_id_t>(a), static_cast<player_id_t>(b), diplomacy::stance_t::ALLY);
+			}
+		}
+	}
 
 	// XR fork W1: civilisations of the players, before their entities exist (bonuses, tech tree,
 	// architecture); random choices are resolved from the map seed

@@ -156,7 +156,8 @@ void check_map(const MapSettings &s, const GeneratedMap &m, const std::string &t
 	const size_t N = m.width;
 	check(N == map_generator_size(s.size) and m.height == N and N % 16 == 0, tag + " size");
 	check(m.tiles.size() == N * N and m.corners.size() == (N + 1) * (N + 1), tag + " array sizes");
-	check(m.starts.size() == 2, tag + " two starts");
+	const size_t P = map_players(s.players, N);
+	check(m.starts.size() == P, tag + " starts");
 
 	const auto limits = map_biome_limits(s);
 	Heightmap hm{N, N, m.corners};
@@ -229,8 +230,8 @@ void check_map(const MapSettings &s, const GeneratedMap &m, const std::string &t
 	size_t trees = tree_count(m);
 	check(trees <= limits.max_trees, tag + " tree limit");
 	check(trees > 0, tag + " has trees");
-	check(count[static_cast<size_t>(map_object_t::TOWN_CENTER)] == 2, tag + " 2 town centers");
-	check(count[static_cast<size_t>(map_object_t::VILLAGER)] == 6, tag + " 6 villagers");
+	check(count[static_cast<size_t>(map_object_t::TOWN_CENTER)] == P, tag + " town centers");
+	check(count[static_cast<size_t>(map_object_t::VILLAGER)] == 3 * P, tag + " villagers");
 	for (const auto &o : m.objects) {
 		bool inside = o.ne >= 0.0 and o.se >= 0.0 and o.ne < static_cast<double>(N) and o.se < static_cast<double>(N);
 		check(inside, tag + " object outside");
@@ -246,10 +247,14 @@ void check_map(const MapSettings &s, const GeneratedMap &m, const std::string &t
 			      tag + " object in water: " + to_string(o.kind));
 		}
 		bool resource = o.kind != map_object_t::TOWN_CENTER and o.kind != map_object_t::VILLAGER;
-		check(resource ? o.owner == 2 : o.owner < 2, tag + " owner (gaia = 2 for resources)");
+		check(resource ? o.owner == P : o.owner < P, tag + " owner (gaia after the players for resources)");
 	}
-	for (size_t p = 0; p < 2; ++p) {
+	for (size_t p = 0; p < P; ++p) {
 		const auto &st = m.starts[p];
+		for (size_t q = p + 1; q < P; ++q) {
+			check(std::hypot(st[0] - m.starts[q][0], st[1] - m.starts[q][1]) >= 0.2 * static_cast<double>(N),
+			      tag + " starts keep their distance");
+		}
 		size_t near[static_cast<size_t>(map_object_t::COUNT)]{};
 		for (const auto &o : m.objects) {
 			double dx = o.ne - st[0];
@@ -267,6 +272,10 @@ void check_map(const MapSettings &s, const GeneratedMap &m, const std::string &t
 	auto first = static_cast<size_t>(m.starts[0][0] + 3) + static_cast<size_t>(m.starts[0][1]) * N;
 	auto target = static_cast<size_t>(m.starts[1][0] + 3) + static_cast<size_t>(m.starts[1][1]) * N;
 	check(reachable(m, first, target), tag + " starts connected for land units");
+	for (size_t p = 2; p < P; ++p) {
+		auto other = static_cast<size_t>(m.starts[p][0] + 3) + static_cast<size_t>(m.starts[p][1]) * N;
+		check(reachable(m, first, other), tag + " start " + std::to_string(p) + " connected for land units");
+	}
 
 	if (m.biome == map_biome_t::GOLD_RUSH) {
 		// large gold field in the centre, reachable from both starts
@@ -617,6 +626,26 @@ int main(int argc, char **argv) {
 		}
 		std::cout << "biomes check: " << maps << " maps, " << failures << " failures\n";
 		return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+	}
+
+	// XR fork W7: more than two players on every preset
+	check(map_players(4, 64) == 4 and map_players(8, 64) == 4 and map_players(8, 128) == 8 and map_players(1, 64) == 2
+	          and map_players(3, 48) == 3 and map_players(99, 256) == 8,
+	      "players per map size");
+	for (size_t k = 0; k < static_cast<size_t>(map_biome_t::COUNT); ++k) {
+		for (const auto &[players, size] : std::vector<std::pair<size_t, size_t>>{{3, 64}, {4, 64}, {6, 96}, {8, 128}}) {
+			for (uint32_t seed = 1; seed <= 6; ++seed) {
+				MapSettings s;
+				s.type = map_type_t::RANDOM;
+				s.biome = static_cast<map_biome_t>(k);
+				s.seed = seed;
+				s.size = size;
+				s.players = players;
+				s.max_trees = size >= 128 ? 2000 : 800;
+				check_map(s, generate_map(s), std::string{"players "} + std::to_string(players) + " size " + std::to_string(size)
+				                                  + " biome " + std::to_string(k) + " seed " + std::to_string(seed));
+			}
+		}
 	}
 
 	check(map_generator_size(64) == 64 and map_generator_size(70) == 64 and map_generator_size(10) == 48
