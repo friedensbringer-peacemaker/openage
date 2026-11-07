@@ -294,6 +294,7 @@ public:
         if (e.neutral_object) icon = HudIcon::None;
         else if (e.villager) icon = HudIcon::Villager;
         else if (e.building) icon = has("Tower") || has("Castle") || has("Outpost") ? HudIcon::Tower : HudIcon::House;
+        else if (has("Trebuchet")) icon = HudIcon::Trebuchet;
         else if (e.ranged) icon = HudIcon::Bow;
         else if (has("Monk")) icon = HudIcon::Monk;
         else if (has("Knight") || has("Cavalry") || has("Scout") || has("Camel") || has("Cataphract") ||
@@ -307,6 +308,7 @@ public:
     static HudIcon iconFor(const std::string& hint) {
         if (hint == "villager") return HudIcon::Villager;
         if (hint == "monk") return HudIcon::Monk;
+        if (hint == "trebuchet") return HudIcon::Trebuchet;
         if (hint == "house") return HudIcon::House;
         if (hint == "sword") return HudIcon::Sword;
         if (hint == "bow") return HudIcon::Bow;

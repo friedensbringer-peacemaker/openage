@@ -830,6 +830,20 @@ void check_siege(const Options &opt) {
 		check(not w.special()->is_unpacked(treb->get_id()), "trebuchet packed");
 		check(not stands_unpacked(), "packed graphic again after packing: " + treb->get_shown_animation_path());
 	}
+	// it dies with the graphic of its form
+	const auto dies_unpacked = [&]() {
+		return treb->get_shown_animation_path().find("death_form_override_trebuchet") != std::string::npos;
+	};
+	check(tt and tt->unpacked_death_animation.find("death_form_override_trebuchet") != std::string::npos,
+	      "the unpacked form has its own death graphic in the data: " + (tt ? tt->unpacked_death_animation : std::string{}));
+	r = w.special()->set_packed(w.state, treb->get_id(), false, w.now);
+	check(r.empty(), "trebuchet unpacks again" + (r.empty() ? std::string{} : ": " + r));
+	check(w.advance_until(special::SpecialState::PACK_TIME + 1.0, [&]() { return w.special()->is_unpacked(treb->get_id()); }),
+	      "unpacked again");
+	w.advance(0.2);
+	w.combat()->kill(w.state, treb->get_id(), w.now);
+	w.advance(0.01);
+	check(dies_unpacked(), "dies with the unpacked graphic: " + treb->get_shown_animation_path());
 }
 
 // ------------------------------------------------------------------ S8
@@ -1144,6 +1158,11 @@ void check_trebuchet_fire(const Options &opt) {
 	w.combat()->order_attack(w.state, treb->get_id(), far->get_id(), w.now);
 	check(w.advance_until(10.0, [&]() { return not w.special()->is_unpacked(treb->get_id()); }),
 	      "a target out of range: it packs first");
+	w.combat()->kill(w.state, treb->get_id(), w.now);
+	w.advance(0.01);
+	const auto packed_death = treb->get_shown_animation_path();
+	check(packed_death.find("death_trebuchet") != std::string::npos and packed_death.find("form_override") == std::string::npos,
+	      "packed it dies with the packed graphic: " + packed_death);
 }
 
 /// S12: a save during a conversion goes on after loading

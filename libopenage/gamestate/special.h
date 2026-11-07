@@ -124,6 +124,8 @@ struct SpecialType {
 	bool packable = false;
 	/// standing graphic of the unpacked form (GenieUnit.form_overrides, empty in modpacks before tcfix6)
 	std::string unpacked_idle_animation;
+	/// death graphic of the unpacked form (empty in modpacks before tcfix7)
+	std::string unpacked_death_animation;
 	/// melee attack (ApplyDiscreteEffect "Attack"); rams = melee siege: they attack buildings only
 	bool melee = false;
 	bool ram = false;

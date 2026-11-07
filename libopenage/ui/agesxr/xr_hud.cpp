@@ -170,6 +170,14 @@ float hudIconShape(HudIcon icon, float px, float py) {
         const float cross = std::min(segment(px, py, 0, 0, 0, 11, 1.4f), segment(px, py, -4, 4, 4, 4, 1.4f));
         return std::min(lengthOf(px, py + 11.0f) - 4.5f, std::max(triangle(px, py, robe) - 1.0f, -cross));
     }
+    case HudIcon::Trebuchet: {  // Gestell auf einem Balken, langer Arm nach oben, Gegengewicht am kurzen Ende
+        const float frame = std::min({box(px, py - 13.0f, 15.0f, 2.0f, 0.5f), segment(px, py, -8, 12, 0, -3, 1.7f),
+                                      segment(px, py, 8, 12, 0, -3, 1.7f)});
+        const float arm = segment(px, py, -6, 3, 12, -14, 1.5f);
+        const float weight = box(px + 7.0f, py - 6.0f, 3.5f, 3.5f, 0.5f);
+        const float sling = std::min(segment(px, py, 12, -14, 14, -6, 0.8f), lengthOf(px - 14.0f, py + 4.0f) - 2.2f);
+        return std::min({frame, arm, weight, sling});
+    }
     case HudIcon::None:
     case HudIcon::Count: break;
     }

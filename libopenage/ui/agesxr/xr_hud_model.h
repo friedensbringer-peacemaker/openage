@@ -35,6 +35,7 @@ enum class HudIcon : uint8_t {
     // nächste Befehlsseite (Pfeil nach rechts)
     Tech, AgeUp, Next,
     Monk,  // Mönch: Kopf, Kutte mit ausgespartem Kreuz
+    Trebuchet,  // Tribock: Gestell, Wurfarm, Gegengewicht, Stein in der Schlinge
     Count,
 };
 

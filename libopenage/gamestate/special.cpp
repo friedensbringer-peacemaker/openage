@@ -157,18 +157,21 @@ void carry_animations_of(const std::shared_ptr<nyan::View> &view, const nyan::Ob
 	}
 }
 
-/// Standing graphic of the unpacked form: GenieUnit.form_overrides[*] (AnimationOverride.ability, .animations).
+/// Standing and death graphic of the unpacked form: GenieUnit.form_overrides[*] (AnimationOverride.ability, .animations).
 /// Modpacks before tcfix6 do not have the member: the trebuchet then keeps its packed graphic.
 void form_animations_of(const std::shared_ptr<nyan::View> &view, const nyan::Object &genie_unit, SpecialType &t) {
 	try {
 		for (const auto &override_value : genie_unit.get_orderedset("GenieUnit.form_overrides")) {
 			auto override_obj = view->get_object(object_name(override_value));
 			auto ability = view->get_object(override_obj.get_object("AnimationOverride.ability").get_name());
-			if (not has_parent(ability, "engine.ability.type.Idle")) {
-				continue;
-			}
 			for (const auto &animation_value : override_obj.get_set("AnimationOverride.animations")) {
-				t.unpacked_idle_animation = api::APIAnimation::get_animation_path(view->get_object(object_name(animation_value)));
+				const auto path = api::APIAnimation::get_animation_path(view->get_object(object_name(animation_value)));
+				if (has_parent(ability, "engine.ability.type.Idle")) {
+					t.unpacked_idle_animation = path;
+				}
+				else if (has_parent(ability, "engine.ability.type.PassiveTransformTo")) {
+					t.unpacked_death_animation = path;
+				}
 			}
 		}
 	}
@@ -1489,6 +1492,12 @@ void SpecialState::show_form(const std::shared_ptr<GameState> &state, entity_id_
 		const auto idle = ability_animation(entity, component::component_t::IDLE);
 		if (not idle.empty()) {
 			overrides[idle] = t->unpacked_idle_animation;
+		}
+	}
+	if (t != nullptr and not t->unpacked_death_animation.empty()) {
+		auto stats = state->get_combat()->get_stats(trebuchet);
+		if (stats != nullptr and not stats->death_animation.empty()) {
+			overrides[stats->death_animation] = t->unpacked_death_animation;
 		}
 	}
 	entity->set_animation_overrides(time, overrides);

@@ -297,6 +297,7 @@ inline HudIcon aoeIconFor(int code, const std::string& hint) {
     if (code >= 301 && code <= 303) return HudIcon::AgeUp;  // Feudal-/Ritter-/Imperialzeit
     if (hint == "villager") return HudIcon::Villager;
     if (hint == "monk") return HudIcon::Monk;
+    if (hint == "trebuchet") return HudIcon::Trebuchet;
     if (hint == "house") return HudIcon::House;
     if (hint == "sword") return HudIcon::Sword;
     if (hint == "bow") return HudIcon::Bow;
@@ -322,6 +323,7 @@ inline HudIcon aoeIconFor(int code, const std::string& hint) {
 inline HudIcon aoeIconForName(const std::string& name, bool building, bool villager, bool ranged, bool mounted) {
     if (villager || name.rfind("Dorfbewohner", 0) == 0) return HudIcon::Villager;
     if (name.rfind("Mönch", 0) == 0) return HudIcon::Monk;
+    if (name.rfind("Tribock", 0) == 0) return HudIcon::Trebuchet;
     if (name == "Mühle") return HudIcon::Mill;
     if (name == "Holzfällerlager") return HudIcon::LumberCamp;
     if (name == "Bergbaulager") return HudIcon::MiningCamp;

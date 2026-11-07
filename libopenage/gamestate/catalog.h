@@ -99,7 +99,7 @@ constexpr CatalogEntry CATALOG[] = {
 	{"Mangonel", "Mangonel", 143, false, "hammer", detail::U, nullptr, ""},
 	{"Scorpion", "Skorpion", 144, false, "hammer", detail::U, nullptr, ""},
 	{"BombardCannon", "Bombardenkanone", 145, false, "hammer", detail::U, nullptr, ""},
-	{"Trebuchet", "Tribock", 146, false, "hammer", detail::U, nullptr, ""},
+	{"Trebuchet", "Tribock", 146, false, "trebuchet", detail::U, nullptr, ""},
 	{"Petard", "Petarde", 147, false, "hammer", detail::U, nullptr, ""},
 	{"FishingShip", "Fischerboot", 150, false, "ship", detail::U, nullptr, ""},
 	{"TransportShip", "Transportschiff", 151, false, "hammer", detail::U, nullptr, ""},
