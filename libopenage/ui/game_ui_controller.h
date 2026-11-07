@@ -70,6 +70,8 @@ enum class ui_command_t {
 	UNPACK,
 	DROP_RELIC,
 	UNLOAD_HERE,
+	// XR fork W7: buy or sell at the selected market (argument: good * 2 + 1 when selling)
+	MARKET,
 };
 
 /**

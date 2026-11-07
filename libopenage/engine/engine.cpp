@@ -274,6 +274,11 @@ HudInfo Engine::query_hud(uint64_t player) const {
 						first.packable = si->packable;
 						first.unpacked = si->unpacked;
 						first.packing = si->packing;
+						first.market = si->market;
+						first.market_buy = si->market_buy;
+						first.market_sell = si->market_sell;
+						first.market_can_buy = si->market_can_buy;
+						first.market_can_sell = si->market_can_sell;
 					}
 				}
 				for (auto id : info.selected) {

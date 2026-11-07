@@ -1165,6 +1165,79 @@ void check_trebuchet_fire(const Options &opt) {
 	      "packed it dies with the packed graphic: " + packed_death);
 }
 
+/// S14: the market of W7 (spec 02 §2.7): prices shared by all players, the sale pays the new price, saved
+void check_market(const Options &opt) {
+	std::cout << "== S14 Markt" << std::endl;
+	using component::command::command_t;
+	World w{opt, quiet_map()};
+	w.advance(0.5);
+	auto spot = scene_spot(w, 8.0, -8.0);
+	auto market = w.spawn_at(0, ge("market", "Market"), spot.first, spot.second);
+	auto house = w.spawn_at(0, ge("house", "House"), spot.first + 6.0, spot.second);
+	if (market == nullptr or house == nullptr) {
+		check(false, "market for the check");
+		return;
+	}
+	w.advance(0.5);
+	const auto info = w.special()->get_info(market->get_id());
+	check(info and info->market, "the HUD knows the finished market");
+	check(info and info->market_buy[0] == 130 and info->market_sell[0] == 68, "food at the base price: buy 130, sell 68");
+	check(info and info->market_buy[2] == 169, "stone at its base price 1.3: buy 169");
+
+	auto stock = [&](player_id_t p, resource_t r) { return w.resource(p, r); };
+	auto trade = [&](int arg) {
+		w.command(command_t::MARKET, {market}, std::nullopt, w.position(market), arg);
+	};
+	w.state->get_player(0)->get_resources().set({500.0, 500.0, 500.0, 500.0});
+	const double gold0 = stock(0, resource_t::GOLD);
+	const double food0 = stock(0, resource_t::FOOD);
+	trade(0);
+	check(stock(0, resource_t::GOLD) == gold0 - 130 and stock(0, resource_t::FOOD) == food0 + 100, "buy 100 food for 130 gold");
+	w.advance(0.3);
+	const auto after = w.special()->get_info(market->get_id());
+	check(after and after->market_buy[0] == 134, "the next lot costs more: 134");
+	check(after and after->market_buy[1] == 130, "wood keeps its price");
+	check(w.special()->market_buy_cost(0, 0.3) == 134, "the price is the same for every player");
+
+	// the sale brings the net counter back to 0: base price, and it pays the new price
+	const double gold1 = stock(0, resource_t::GOLD);
+	trade(1);
+	check(stock(0, resource_t::GOLD) == gold1 + 70 and stock(0, resource_t::FOOD) == food0, "sell 100 food for 70 gold at the base price");
+	w.advance(0.3);
+	check(w.special()->market_buy_cost(0, 0.3) == 130, "net 0: food back at its base price");
+
+	// a sale below the base price, then not enough stone or gold
+	const double gold2 = stock(0, resource_t::GOLD);
+	trade(3);
+	check(stock(0, resource_t::GOLD) == gold2 + 68, "sell wood for 68 gold (new price 0.97)");
+	w.state->get_player(0)->get_resources().set({0.0, 0.0, 10.0, 50.0});
+	trade(4);
+	check(stock(0, resource_t::STONE) == 50.0 and stock(0, resource_t::GOLD) == 10.0, "too little gold: nothing happens");
+	trade(5);
+	check(stock(0, resource_t::STONE) == 50.0 and stock(0, resource_t::GOLD) == 10.0, "too little stone: nothing happens");
+	w.advance(0.3);
+	const auto poor = w.special()->get_info(market->get_id());
+	check(poor and not poor->market_can_buy[2] and not poor->market_can_sell[2], "the HUD disables both");
+
+	// only a market trades: a house, a foundation or a foreign building do nothing
+	w.state->get_player(0)->get_resources().set({500.0, 500.0, 500.0, 500.0});
+	w.command(command_t::MARKET, {house}, std::nullopt, w.position(house), 0);
+	check(stock(0, resource_t::GOLD) == 500.0, "a house does not trade");
+	check(not w.special()->get_info(house->get_id()) or not w.special()->get_info(house->get_id())->market, "the house is no market");
+
+	// the prices come back with the save game
+	const auto text = save::serialize(save::capture(w.state, w.settings, w.game->get_generated_entity_range(), w.now, "W7"));
+	check(text.find("market = ") != std::string::npos, "the save game has the prices");
+	save::SaveData parsed;
+	std::string error;
+	check(save::parse(text, parsed, error), "parsed " + error);
+	World l{opt, quiet_map()};
+	auto result = save::restore(parsed, l.state, l.loop, l.factory, l.production, l.game->get_generated_entity_range(), l.now);
+	check(result.ok, "restored " + result.error);
+	l.advance(0.5);
+	check(l.special()->market_sell_revenue(1, 0.3) == w.special()->market_sell_revenue(1, 0.3), "wood price after loading");
+}
+
 /// S12: a save during a conversion goes on after loading
 void check_save_converting(const Options &opt) {
 	std::cout << "== S12 Spielstand während einer Konvertierung" << std::endl;
@@ -1260,7 +1333,7 @@ void check_save(const Options &opt) {
 
 	auto data = save::capture(w.state, w.settings, w.game->get_generated_entity_range(), w.now, "W6");
 	const auto text = save::serialize(data);
-	check(text.find("version = 6") != std::string::npos and text.find("relics = 1") != std::string::npos,
+	check(text.find("version = 7") != std::string::npos and text.find("relics = 1") != std::string::npos,
 	      "save version 6 with relics on the map");
 	for (const auto &key : {"faith = ", "relic_carry = ", "relic_store = ", "siege_mode = unpacked"}) {
 		check(text.find(key) != std::string::npos, std::string{"key '"} + key + "' stored");
@@ -1307,7 +1380,7 @@ void check_save(const Options &opt) {
 	check(count(again) == count(data), "W6 keys after save -> load -> save (" + std::to_string(count(again)) + ")");
 	// version 5 file: no relics on its map
 	std::string v5 = text;
-	v5.replace(v5.find("version = 6"), 11, "version = 5");
+	v5.replace(v5.find("version = 7"), 11, "version = 5");
 	v5.erase(v5.find("relics = 1\n"), 11);
 	save::SaveData old;
 	check(save::parse(v5, old, error) and not old.map.relics, "version 5 file parses, map without relics");
@@ -1411,6 +1484,9 @@ int main(int argc, char **argv) {
 	try {
 		if (only.empty() or only == "map") {
 			check_map(opt);
+		}
+		if (only.empty() or only == "market") {
+			check_market(opt);
 		}
 		if (only.empty() or only == "monks") {
 			check_monks(opt);

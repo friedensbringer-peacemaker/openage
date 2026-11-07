@@ -95,6 +95,12 @@ struct HudEntity {
 	bool packable = false;
 	bool unpacked = false;
 	bool packing = false;
+	/// XR fork W7: a finished market: gold per lot (food, wood, stone), can the owner pay / has the goods
+	bool market = false;
+	std::array<int64_t, 3> market_buy{};
+	std::array<int64_t, 3> market_sell{};
+	std::array<bool, 3> market_can_buy{};
+	std::array<bool, 3> market_can_sell{};
 };
 
 /**

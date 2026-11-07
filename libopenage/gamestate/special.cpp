@@ -2,6 +2,8 @@
 
 #include "special.h"
 
+#include <sstream>
+
 #include <algorithm>
 #include <cmath>
 #include <exception>
@@ -1480,6 +1482,103 @@ void SpecialState::show_carrying(const std::shared_ptr<GameState> &state, entity
 	entity->set_animation_overrides(time, overrides);
 }
 
+double SpecialState::market_fee(const std::shared_ptr<GameState> &state, player_id_t player) {
+	// the Gaia entry of the data has no fee: a player without a civilisation pays the value of all others
+	const double fee = this->player_resource(state, player, 78, 0.3);
+	return fee > 0.0 ? fee : 0.3;
+}
+
+std::string SpecialState::market_trade(const std::shared_ptr<GameState> &state, entity_id_t building, int command,
+                                       const time::time_t &time) {
+	auto entity = find_entity(state, building);
+	if (entity == nullptr or state->get_combat()->is_dead(building) or prod::entity_name(entity) != "Market"
+	    or not finished(entity)) {
+		return "kein fertiger Markt";
+	}
+	const auto owner = owner_of(entity, time);
+	const int good = command / 2;
+	if (not owner or command < 0 or good >= static_cast<int>(MARKET_GOODS.size())) {
+		return "kein Handel möglich";
+	}
+	const bool sell = command % 2 != 0;
+	auto &stock = state->get_player(*owner)->get_resources();
+	const auto resource = MARKET_GOODS[static_cast<size_t>(good)];
+	const double fee = this->market_fee(state, *owner);
+	auto &market_good = this->market_goods[static_cast<size_t>(good)];
+	resource_amounts_t costs{};
+	double paid = 0.0;
+	double received = 0.0;
+	if (sell) {
+		costs[static_cast<size_t>(resource)] = MARKET_LOT;
+		if (not stock.spend(costs)) {
+			return "zu wenig Vorrat";
+		}
+		paid = MARKET_LOT;
+		{
+			std::lock_guard<std::mutex> lock{this->snapshot_mutex};
+			received = static_cast<double>(trade::sell_and_apply(market_good, MARKET_LOT, fee));
+		}
+		stock.add(resource_t::GOLD, received);
+	}
+	else {
+		const auto cost = trade::buy_cost(market_good, MARKET_LOT, fee);
+		costs[static_cast<size_t>(resource_t::GOLD)] = static_cast<double>(cost);
+		if (not stock.spend(costs)) {
+			return "zu wenig Gold";
+		}
+		paid = static_cast<double>(cost);
+		received = MARKET_LOT;
+		{
+			std::lock_guard<std::mutex> lock{this->snapshot_mutex};
+			trade::apply_buy(market_good);
+		}
+		stock.add(resource, received);
+	}
+	log::log(INFO << "Market: player " << *owner << (sell ? " sells " : " buys ") << MARKET_LOT << " "
+	              << to_string(resource) << (sell ? " for " : " for ") << (sell ? received : paid)
+	              << " gold, price now " << market_good.price << " at t=" << fmt1(time.to_double()));
+	this->publish(state, time);
+	return {};
+}
+
+int64_t SpecialState::market_buy_cost(int good, double fee) const {
+	std::lock_guard<std::mutex> lock{this->snapshot_mutex};
+	return trade::buy_cost(this->market_goods.at(static_cast<size_t>(good)), MARKET_LOT, fee);
+}
+
+int64_t SpecialState::market_sell_revenue(int good, double fee) const {
+	std::lock_guard<std::mutex> lock{this->snapshot_mutex};
+	auto copy = this->market_goods.at(static_cast<size_t>(good));
+	return trade::sell_and_apply(copy, MARKET_LOT, fee);
+}
+
+std::string SpecialState::market_text() const {
+	std::lock_guard<std::mutex> lock{this->snapshot_mutex};
+	std::ostringstream out;
+	out.precision(17);
+	for (size_t i = 0; i < this->market_goods.size(); ++i) {
+		out << (i == 0 ? "" : " ") << this->market_goods[i].price << " " << this->market_goods[i].net;
+	}
+	return out.str();
+}
+
+bool SpecialState::set_market_text(const std::string &text) {
+	std::istringstream in{text};
+	std::array<double, 3> prices{};
+	std::array<int, 3> nets{};
+	for (size_t i = 0; i < prices.size(); ++i) {
+		if (not(in >> prices[i] >> nets[i]) or prices[i] < trade::PRICE_MIN or prices[i] > trade::PRICE_MAX) {
+			return false;
+		}
+	}
+	std::lock_guard<std::mutex> lock{this->snapshot_mutex};
+	for (size_t i = 0; i < prices.size(); ++i) {
+		this->market_goods[i].price = prices[i];
+		this->market_goods[i].net = nets[i];
+	}
+	return true;
+}
+
 void SpecialState::show_form(const std::shared_ptr<GameState> &state, entity_id_t trebuchet, bool unpacked,
                              const time::time_t &time) {
 	auto entity = find_entity(state, trebuchet);
@@ -1996,7 +2095,21 @@ void SpecialState::publish(const std::shared_ptr<GameState> &state, const time::
 		next[id] = info;
 	}
 	for (const auto &[id, entity] : state->get_game_entities()) {
-		(void)entity;
+		// W7: a finished market shows what one lot costs and pays its owner right now
+		if (prod::entity_name(entity) == "Market" and finished(entity)) {
+			if (auto owner = owner_of(entity, time)) {
+				auto &info = next[id];
+				info.market = true;
+				const double fee = this->market_fee(state, *owner);
+				const auto stock = state->get_player(*owner)->get_resources().get();
+				for (size_t i = 0; i < MARKET_GOODS.size(); ++i) {
+					info.market_buy[i] = this->market_buy_cost(static_cast<int>(i), fee);
+					info.market_sell[i] = this->market_sell_revenue(static_cast<int>(i), fee);
+					info.market_can_buy[i] = stock[static_cast<size_t>(resource_t::GOLD)] >= static_cast<double>(info.market_buy[i]);
+					info.market_can_sell[i] = stock[static_cast<size_t>(MARKET_GOODS[i])] >= MARKET_LOT;
+				}
+			}
+		}
 		auto it = this->carried.find(id);
 		const auto *t = this->type_of(state, find_entity(state, id), time);
 		if (t == nullptr or (it == this->carried.end() and t->cargo == cargo_t::NONE and not t->monastery)) {
@@ -2281,6 +2394,14 @@ bool handle_command(const std::shared_ptr<GameState> &state,
 			note(special->set_packed(state, id, type == command_t::PACK, time));
 		}
 		report(type == command_t::PACK ? "pack" : "unpack");
+		ids.clear();
+		return true;
+	case command_t::MARKET:
+		// one lot, also with several markets selected
+		if (not ids.empty()) {
+			note(special->market_trade(state, ids.front(), arg, time));
+		}
+		report("market");
 		ids.clear();
 		return true;
 	case command_t::DROP_RELIC:

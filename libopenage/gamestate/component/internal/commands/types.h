@@ -65,6 +65,8 @@ enum class command_t {
 	DROP_RELIC,
 	/// carriers: unload at the target point ("combat_arg" = 1: here at once)
 	UNLOAD,
+	/// market: "combat_arg" = good * 2 + (1 when selling), goods as in special::MARKET_GOODS
+	MARKET,
 };
 
 } // namespace openage::gamestate::component::command

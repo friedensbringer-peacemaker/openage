@@ -1958,7 +1958,7 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		// A second monk picks up a relic and walks away with it (carry graphics).
 		// The trebuchet then unpacks (hotkey U) and shoots at an enemy house.
 		// Captures -s1-start, -s2-konvertieren, -s3-mange, -s4-tribock, -s5-reliquie, -s6-traegt,
-		// -s7-aufgebaut, -s8-schuss, -s9-schuss.
+		// -s7-aufgebaut, -s8-schuss, -s9-schuss. Then a market: -s10-markt, one lot bought, -s11-gekauft.
 		const auto gaia_less = static_cast<openage::gamestate::player_id_t>(1);
 		auto monastery = near_square(tc[0] + 5.0, tc[1] + 5.0, 3, false, 5.0);
 		if (monastery) {
@@ -1999,8 +1999,13 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 			// up and to the left on the screen, in range (4 to 16)
 			target = near_square((*treb)[0] + 2.0, (*treb)[1] - 11.0, 1, false, 3.0);
 		}
+		std::optional<std::array<double, 2>> market;
 		if (target) {
 			mark(*target, 1);
+			market = near_square(tc[0] + 1.0, tc[1] - 8.0, 2, false, 3.0);
+		}
+		if (market) {
+			mark(*market, 2);
 		}
 		if (carrier) {
 			mark(*carrier, 1);
@@ -2010,7 +2015,7 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 			mark(*relic, 1);
 			away = near_square((*carrier)[0] - 1.0, (*carrier)[1] + 4.0, 1, false, 0.0);
 		}
-		if (not monastery or not monk or not foe1 or not foe3 or not own or not mangonel or not treb or not relic or not away or not target) {
+		if (not monastery or not monk or not foe1 or not foe3 or not own or not mangonel or not treb or not relic or not away or not target or not market) {
 			log::log(WARN << "special replay: map lacks free spots");
 			capture(2.0, nullptr);
 			return steps;
@@ -2028,6 +2033,7 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		plan.spawns.push_back({"-s4-tribock", 0, "Monk", (*carrier)[0], (*carrier)[1]});
 		plan.spawns.push_back({"-s4-tribock", gaia_less, "Relic", (*relic)[0], (*relic)[1]});
 		plan.spawns.push_back({"-s6-traegt", gaia_less, "House", (*target)[0], (*target)[1]});
+		plan.spawns.push_back({"-s6-traegt", 0, "Market", (*market)[0], (*market)[1]});
 		capture(3.0, "-s1-start");
 		auto mp = pixel((*monk)[0], (*monk)[1], 0.6);
 		log_px("monk", mp);
@@ -2070,7 +2076,14 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		click(64.2, pixel((*target)[0], (*target)[1], 0.5), E::kRightButton);
 		capture(65.0, "-s8-schuss");
 		capture(66.0, "-s9-schuss");
-		capture(67.0, nullptr);
+		box_select(66.5, pixel((*market)[0], (*market)[1], 0.5), 45);
+		capture(68.0, "-s10-markt");
+		agesxr::AoeUi market_layout;
+		market_layout.resize(width, height);
+		const auto buy_cell = market_layout.gridRect(0);
+		click(68.3, {buy_cell.cx(), buy_cell.cy()}, E::kLeftButton);
+		capture(69.5, "-s11-gekauft");
+		capture(70.0, nullptr);
 		return steps;
 	}
 	if (args.replay_fish) {

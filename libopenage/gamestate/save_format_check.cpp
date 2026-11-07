@@ -278,7 +278,7 @@ void check_roundtrip() {
 	CHECK(w6 >= 6, "W6 fields present (%zu)", w6);
 	CHECK(back.map.relics, "relics on the map (version 6)");
 	// XR fork W3 (version 4 of W3, version 5): animals on the map, carcasses, reseeds
-	CHECK(back.version == 6 and back.map.herds, "version 6 with herds");
+	CHECK(back.version == 7 and back.map.herds, "version 7 with herds");
 	CHECK(back.entities[1].dead and not back.entities[5].dead, "carcass flag");
 	CHECK(back.players[2].reseeds.size() == 2 and back.players[2].reseeds[1][1] == 61.0 and back.players[0].reseeds.empty(),
 	      "reseeds per player");
@@ -325,7 +325,7 @@ void check_roundtrip() {
 		w5.entities[2].gate_dir = 0;
 		SaveData r5;
 		const std::string t5 = serialize(w5);
-		CHECK(t5.find("version = 6") != std::string::npos and t5.find("wall_queue = ") != std::string::npos
+		CHECK(t5.find("version = 7") != std::string::npos and t5.find("wall_queue = ") != std::string::npos
 		          and t5.find("gate_dir = 2") != std::string::npos and t5.find("gate_locked = 1") != std::string::npos,
 		      "W5 keys written");
 		CHECK(parse(t5, r5, error) and r5.entities[0].wall_queue == w5.entities[0].wall_queue

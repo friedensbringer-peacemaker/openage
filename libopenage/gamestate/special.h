@@ -22,6 +22,7 @@
 #include "event/eventhandler.h"
 #include "gamestate/component/internal/commands/types.h"
 #include "gamestate/special_math.h"
+#include "gamestate/trade_math.h"
 #include "gamestate/combat/combat_state.h"
 #include "gamestate/resources.h"
 #include "gamestate/types.h"
@@ -131,6 +132,11 @@ struct SpecialType {
 	bool ram = false;
 };
 
+/// the goods of the market in the order of the command argument (W7, spec 02 §2.7)
+constexpr std::array<resource_t, 3> MARKET_GOODS{resource_t::FOOD, resource_t::WOOD, resource_t::STONE};
+/// lot of one purchase or sale (spec 02 §2.7: a player value, 100)
+constexpr int MARKET_LOT = 100;
+
 /// what the HUD shows of an entity (W6)
 struct SpecialInfo {
 	bool monk = false;
@@ -152,6 +158,12 @@ struct SpecialInfo {
 	bool packable = false;
 	bool unpacked = false;
 	bool packing = false;
+	/// a finished market (W7): gold per lot now, whether the owner can pay or has the goods
+	bool market = false;
+	std::array<int64_t, 3> market_buy{};
+	std::array<int64_t, 3> market_sell{};
+	std::array<bool, 3> market_can_buy{};
+	std::array<bool, 3> market_can_sell{};
 };
 
 /// saved values of one entity (save game version 6, all optional)
@@ -247,6 +259,19 @@ public:
 	void show_form(const std::shared_ptr<GameState> &state, entity_id_t trebuchet, bool unpacked,
 	               const time::time_t &time);
 
+	/// buy (or sell) one lot at the finished market \p building of its owner (W7, spec 02 §2.7);
+	/// \p command = good * 2 + (1 when selling). Empty on success, otherwise why not
+	std::string market_trade(const std::shared_ptr<GameState> &state, entity_id_t building, int command,
+	                         const time::time_t &time);
+	/// trade fee g of a player (spec 02 §2.7, player resource 78)
+	double market_fee(const std::shared_ptr<GameState> &state, player_id_t player);
+	/// gold for one lot right now (the market is shared by all players; what a sale pays is its new price)
+	int64_t market_buy_cost(int good, double fee) const;
+	int64_t market_sell_revenue(int good, double fee) const;
+	/// the prices for save games ("price net" per good), and back; false if the text does not fit
+	std::string market_text() const;
+	bool set_market_text(const std::string &text);
+
 	/// the attack rule of a trebuchet: unpacks to shoot, packs to walk; packed no automatic targets
 	combat::CombatState::siege_gate_t siege_gate(const std::shared_ptr<GameState> &state, entity_id_t id, bool in_range,
 	                                             bool explicit_order, const time::time_t &time);
@@ -320,6 +345,11 @@ public:
 	Counters counters() const;
 
 private:
+	/// the shared market (W7): one price per good in the world
+	std::array<trade::MarketGood, 3> market_goods{trade::MarketGood{trade::BASE_PRICE_FOOD},
+	                                              trade::MarketGood{trade::BASE_PRICE_WOOD},
+	                                              trade::MarketGood{trade::BASE_PRICE_STONE}};
+
 	enum class job_t : uint8_t {
 		NONE,
 		CONVERT,

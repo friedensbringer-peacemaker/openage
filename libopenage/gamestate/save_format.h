@@ -54,10 +54,11 @@ namespace openage::gamestate::save {
 /// 6: optional keys of round W5 (wall drag of a builder "wall_queue", gates "gate_dir"/"gate_locked") and of
 ///    round W6 ("relics" of the map, "faith", "convert_target", "relic_carry", "relic_store", "cargo",
 ///    "siege_mode" per entity); a missing key means its default.
+/// 7: XR fork W7, optional key "market" (price and net counter per good); missing: base prices.
 /// Older versions still load (missing fields: no civilisation, nothing researched, vision NORMAL with nothing
 /// explored, aggressive stance, no garrison; maps without a "herds" key before 5 had no animals: herds off;
 /// maps without a "relics" key before 6 had no relics: relics off).
-constexpr int FORMAT_VERSION = 6;
+constexpr int FORMAT_VERSION = 7;
 
 /// slots 1..SLOT_COUNT are chosen by the player, slot 0 is the autosave,
 /// QUICK_SLOT the quick save (F5/F9)
@@ -185,6 +186,8 @@ struct SaveData {
 	std::vector<SavedEntity> entities{};
 	/// generated map objects that are gone
 	std::vector<uint64_t> removed{};
+	/// XR fork W7 (version 7): prices of the shared market, empty = base prices
+	std::string market{};
 };
 
 // ---- helpers
@@ -314,6 +317,9 @@ inline std::string serialize(const SaveData &d) {
 	out << "vision = " << vision_mode_name(m.vision) << "\n";
 	out << "herds = " << (m.herds ? 1 : 0) << "\n";
 	out << "relics = " << (m.relics ? 1 : 0) << "\n";
+	if (not d.market.empty()) {
+		out << "market = " << d.market << "\n";
+	}
 	for (const auto &p : d.players) {
 		out << "[player]\n";
 		out << "id = " << p.id << "\n";
@@ -618,6 +624,9 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 				}
 				m.herds = h != 0;
 				has_herds = true;
+			}
+			else if (key == "market") {
+				d.market = value;
 			}
 			else if (key == "relics") {
 				int r = 0;

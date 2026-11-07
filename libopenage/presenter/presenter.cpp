@@ -363,6 +363,9 @@ void Presenter::send_ui_command(ui::ui_command_t type, int x, int y, int arg) {
 	case ui::ui_command_t::DROP_RELIC:
 		command = command_t::DROP_RELIC;
 		break;
+	case ui::ui_command_t::MARKET:
+		command = command_t::MARKET;
+		break;
 	default:
 		break;
 	}

@@ -865,7 +865,7 @@ void check_save(const Options &opt) {
 	check(sh->dead, "carcass for the save");
 	auto data = save::capture(w.state, w.settings, w.game->get_generated_entity_range(), w.now, "W3");
 	const auto text = save::serialize(data);
-	check(text.find("version = 6") != std::string::npos and text.find("herds = 1") != std::string::npos,
+	check(text.find("version = 7") != std::string::npos and text.find("herds = 1") != std::string::npos,
 	      "save version 6 with herds");
 	check(text.find("dead = 1") != std::string::npos, "carcass stored (dead)");
 	check(text.find("reseed = ") != std::string::npos, "reseeds stored");
@@ -906,7 +906,7 @@ void check_save(const Options &opt) {
 	check(count_food(again_data) == count_food(a), "carcasses after save -> load -> save");
 	// version 3 file: no animals on its map
 	std::string v3 = text;
-	auto pos = v3.find("version = 6");
+	auto pos = v3.find("version = 7");
 	v3.replace(pos, 11, "version = 3");
 	// files before W3 have no herds key
 	v3.erase(v3.find("herds = 1"), 10);

@@ -129,7 +129,7 @@ constexpr CatalogEntry CATALOG[] = {
 	{"SiegeWorkshop", "Belagerungswerkstatt", 214, true, "hammer", detail::B, nullptr, ""},
 	{"Castle", "Burg", 215, true, "tower", detail::B, nullptr, ""},
 	{"BombardTower", "Bombardenturm", 216, true, "tower", detail::B, nullptr, ""},
-	{"Market", "Markt", 220, true, "house", detail::B, detail::TRADE, ""},
+	{"Market", "Markt", 220, true, "house", detail::B, nullptr, ""},
 	{"Dock", "Hafen", 221, true, "dock", detail::B, nullptr, ""},
 	{"Farm", "Farm", 222, true, "farm", detail::B, nullptr, ""},
 	{"FishingTrap", "Fischreuse", 223, true, "trap", detail::B, nullptr, ""},

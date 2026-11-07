@@ -99,7 +99,7 @@ void check_catalog() {
 		check(prod::has_mechanic(w3), std::string{"offered (W3) "} + w3);
 	}
 	check(prod::has_mechanic("HorseCollar", true) and prod::has_mechanic("HeavyPlow", true), "farm technologies offered (W3)");
-	for (const char *hidden_name : {"TradeCart", "Market", "Wonder"}) {
+	for (const char *hidden_name : {"TradeCart", "Wonder"}) {
 		check(not prod::has_mechanic(hidden_name), std::string{"hidden "} + hidden_name);
 	}
 	// XR fork W5: walls, gates and the fortified wall have their mechanic

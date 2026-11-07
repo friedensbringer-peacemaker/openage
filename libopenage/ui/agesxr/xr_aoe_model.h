@@ -49,6 +49,7 @@ constexpr int kAoeCmdUnloadAt = 968;        // Transportschiff: Entladen (L), Zi
 constexpr int kAoeCmdPack = 969;            // Tribock: Packen (P)
 constexpr int kAoeCmdUnpack = 970;          // Tribock: Entpacken (U)
 constexpr int kAoeCmdDropRelic = 971;       // Mönch mit Reliquie: Reliquie ablegen
+constexpr int kAoeCmdMarket0 = 980;         // W7: Markt, 980 + Ware·2 + 1 beim Verkaufen (Nahrung, Holz, Stein)
 constexpr int kAoeCmdUnloadHere = 972;      // Rammbock/Schiff: Entladen hier (L)
 // Sondertasten der Hotkeys (AoeCommand::hotkey): Entf und Tab
 constexpr char kAoeKeyDelete = 0x7f;
@@ -380,6 +381,10 @@ struct AoeCombat {
     int cargo = 0, cargoMax = 0;
     bool transport = false;
     bool packable = false, unpacked = false, packing = false;
+    // W7: fertiger Markt, Gold je Los (Nahrung, Holz, Stein)
+    bool market = false;
+    long long marketBuy[3] = {0, 0, 0}, marketSell[3] = {0, 0, 0};
+    bool marketCanBuy[3] = {false, false, false}, marketCanSell[3] = {false, false, false};
 };
 
 // W6: Befehle der Spezialeinheiten (Spec 08 §8.1: Mönch Konvertieren · Heilen auf 0/1, mit Reliquie
@@ -483,6 +488,16 @@ inline bool aoeCombatGrid(AoeModel& m, const AoeCombat& c, bool cancelTraining, 
             // W5 (Spec 08 §8.1 Platz 0): Tor verriegeln/entriegeln
             m.grid[0] = c.gateLocked ? AoeCommand{kAoeCmdGateLock, HudIcon::Wall, "Entriegeln", true, "", 'L', true}
                                      : AoeCommand{kAoeCmdGateLock, HudIcon::Wall, "Verriegeln", true, "", 'L'};
+        }
+        if (c.market) {
+            // W7 (Spec 02 §2.7): obere Zeile Kaufen, zweite Zeile Verkaufen, je Nahrung, Holz, Stein
+            static const HudIcon kGoodIcons[3] = {HudIcon::Sheep, HudIcon::Tree, HudIcon::MiningCamp};
+            for (int i = 0; i < 3; ++i) {
+                m.grid[static_cast<size_t>(i)] = {kAoeCmdMarket0 + i * 2, kGoodIcons[i], "Kauf " + std::to_string(c.marketBuy[i]),
+                                                  c.marketCanBuy[i], c.marketCanBuy[i] ? "" : "zu wenig Gold"};
+                m.grid[static_cast<size_t>(5 + i)] = {kAoeCmdMarket0 + i * 2 + 1, kGoodIcons[i], "Verk. " + std::to_string(c.marketSell[i]),
+                                                      c.marketCanSell[i], c.marketCanSell[i] ? "" : "zu wenig Vorrat"};
+            }
         }
         if (c.townCenter) {
             m.grid[10] = c.bell ? AoeCommand{kAoeCmdBell, HudIcon::Villager, "Zur Arbeit", true, "", 'B', true}

@@ -128,11 +128,19 @@ public:
             c.packable = e.packable;
             c.unpacked = e.unpacked;
             c.packing = e.packing;
+            c.market = e.market;
+            for (size_t i = 0; i < 3; ++i) {
+                c.marketBuy[i] = e.market_buy[i];
+                c.marketSell[i] = e.market_sell[i];
+                c.marketCanBuy[i] = e.market_can_buy[i];
+                c.marketCanSell[i] = e.market_can_sell[i];
+            }
             const bool special = !c.building && !c.villager && (c.monk || c.transport || c.packable);
             if (aoeCombatGrid(m, c, cancelTraining, cancelPlacement) && (special || (c.military && !c.villager && !c.building))) {
                 m.tips.assign(static_cast<size_t>(kAoeGridCells), std::string{});
                 if (special) specialTips(m, c);
             }
+            if (c.market) specialTips(m, c);
         }
 
         m.selection = game ? selectionOf(s) : AoeSelection{};
@@ -224,6 +232,13 @@ public:
         if (c.transport) {
             m.tips[0] = "Entladen (L): Uferstelle wählen – das Schiff fährt hin und lässt alle an Land";
             m.tips[4] = "Hier raus: alle an Land, wenn das Schiff am Ufer liegt";
+        }
+        if (c.market) {
+            static const char* const kGoods[3] = {"Nahrung", "Holz", "Stein"};
+            for (int i = 0; i < 3; ++i) {
+                m.tips[static_cast<size_t>(i)] = std::string{"100 "} + kGoods[i] + " kaufen für " + std::to_string(c.marketBuy[i]) + " Gold (der Preis steigt für alle)";
+                m.tips[static_cast<size_t>(5 + i)] = std::string{"100 "} + kGoods[i] + " verkaufen für " + std::to_string(c.marketSell[i]) + " Gold (der Preis fällt für alle)";
+            }
         }
         if (c.packable) m.tips[4] = c.unpacked ? "Packen (P): abbauen, um zu fahren" : "Entpacken (U): aufbauen, um zu schießen";
     }

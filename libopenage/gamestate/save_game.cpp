@@ -156,6 +156,9 @@ SaveData capture(const std::shared_ptr<GameState> &state,
                  const time::time_t &time,
                  const std::string &title) {
 	SaveData d;
+	if (auto special_state = state->get_special()) {
+		d.market = special_state->market_text();
+	}
 	d.title = title;
 	d.created = now_text();
 	d.engine = std::string{"openage "} + version::version + " xr";
@@ -733,6 +736,10 @@ RestoreResult restore(const SaveData &data,
 
 	// XR fork W6 (version 6): faith, conversions, relics, cargo, trebuchets (all entities exist)
 	if (auto special_state = state->get_special()) {
+		// XR fork W7 (version 7): prices of the shared market
+		if (not data.market.empty() and not special_state->set_market_text(data.market)) {
+			log::log(WARN << "Load: market prices not readable, base prices used");
+		}
 		auto mapped = [&](uint64_t id) -> entity_id_t {
 			auto it = id_map.find(id);
 			return it != id_map.end() ? it->second : id;

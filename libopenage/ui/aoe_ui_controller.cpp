@@ -791,6 +791,10 @@ bool AoeUiController::combat_command(int code, const std::string &label) {
 		log::log(INFO << "UI: trebuchet " << (code == agesxr::kAoeCmdPack ? "pack" : "unpack"));
 		order(code == agesxr::kAoeCmdPack ? ui_command_t::PACK : ui_command_t::UNPACK, 0);
 	}
+	else if (code >= agesxr::kAoeCmdMarket0 and code < agesxr::kAoeCmdMarket0 + 6) {
+		log::log(INFO << "UI: market " << (code - agesxr::kAoeCmdMarket0));
+		order(ui_command_t::MARKET, code - agesxr::kAoeCmdMarket0);
+	}
 	else if (code == agesxr::kAoeCmdDropRelic) {
 		log::log(INFO << "UI: drop relic");
 		order(ui_command_t::DROP_RELIC, 0);
