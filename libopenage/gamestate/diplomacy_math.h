@@ -10,10 +10,10 @@ namespace openage::gamestate::diplomacy {
 /**
  * Rules of the diplomacy (XR fork W7, specs 05, 06 and 08): the stance
  * between two players, which targets a unit picks on its own, where a
- * stray projectile may land, whose resources an allied player sees and
- * how much one click on the tribute button sends. Written from the
- * specification; the fee of the tribute itself is computed by
- * trade::tribute, not here.
+ * stray projectile may land, that allied players share their vision of
+ * the map (player resource 50) and how much one click on the tribute
+ * button sends. Written from the specification; the fee of the tribute
+ * itself is computed by trade::tribute, not here.
  *
  * This header has no engine dependencies (host test gamestate/diplomacy_check.cpp).
  */
@@ -48,10 +48,11 @@ inline bool ordered_attack_allowed(stance_t stance) {
 // --------------------------------------------------------- stray projectiles
 
 /**
- * Stray shot of an area attack (spec 05): never the own objects and never
- * the objects of an ally; gaia objects that ignore stray shots (trees,
- * resources) are safe; an area is only hit while its defense level is at
- * least the attack level of the projectile.
+ * Missed shot of a projectile (spec 05): the projectile missed its
+ * target, this is no area attack. It never hits the own objects and
+ * never the objects of an ally; gaia objects that ignore stray shots
+ * (trees, resources) are safe; an area is only hit while its defense
+ * level is at least the attack level of the projectile.
  */
 inline bool stray_projectile_may_hit(bool same_owner, stance_t stance_to_owner, bool gaia_ignored,
                                      int area_defense_level, int projectile_attack_level) {
@@ -63,7 +64,7 @@ inline bool stray_projectile_may_hit(bool same_owner, stance_t stance_to_owner, 
 
 // -------------------------------------------------------------------- vision
 
-/// allied players share their view of the resources (spec 05, reveal 50)
+/// allied players share their vision of the map (spec 05, player resource 50 cartography)
 inline bool shares_vision(stance_t stance_of_viewer_to_owner, double reveal_allies_resource_50) {
 	return stance_of_viewer_to_owner == stance_t::ALLY and reveal_allies_resource_50 > 0.0;
 }
