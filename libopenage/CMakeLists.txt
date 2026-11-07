@@ -571,6 +571,44 @@ if(OPENAGE_NATIVE_ENTRY)
 		target_link_libraries(openage-special-game-check PRIVATE Qt6::Core Qt6::Gui)
 	endif()
 	# ---- end XR fork W6 ----
+	# ---- XR fork W7: market, tribute, trade ----
+	# host test: market prices, tribute fee and trade gold (dependency-free, parameter sweep)
+	add_executable(openage-trade-check gamestate/trade_check.cpp)
+	target_include_directories(openage-trade-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-trade-check COMMAND openage-trade-check)
+	# host test: stances, target choice, stray shots, vision, tribute button (dependency-free, truth tables)
+	add_executable(openage-diplomacy-check gamestate/diplomacy_check.cpp)
+	target_include_directories(openage-diplomacy-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-diplomacy-check COMMAND openage-diplomacy-check)
+	# ---- end XR fork W7 ----
+	# ---- XR fork W8: victory and defeat ----
+	# host test: conquest defeat, wonder countdown, relics (dependency-free, parameter sweep)
+	add_executable(openage-victory-check gamestate/victory_check.cpp)
+	target_include_directories(openage-victory-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-victory-check COMMAND openage-victory-check)
+	# host test: score parts, rounding, total, leader star (dependency-free, hand computed examples)
+	add_executable(openage-score-check gamestate/score_check.cpp)
+	target_include_directories(openage-score-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-score-check COMMAND openage-score-check)
+	# host test: control groups, double press, toggle, idle cycle (dependency-free)
+	add_executable(openage-group-check gamestate/group_check.cpp)
+	target_include_directories(openage-group-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-group-check COMMAND openage-group-check)
+	# host test: selection field clicks, double click, selection limit (dependency-free)
+	add_executable(openage-panel-check gamestate/panel_check.cpp)
+	target_include_directories(openage-panel-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-panel-check COMMAND openage-panel-check)
+	# host test: end screen stars, population shares, game clock (dependency-free)
+	add_executable(openage-stats-check gamestate/stats_check.cpp)
+	target_include_directories(openage-stats-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-stats-check COMMAND openage-stats-check)
+	# ---- end XR fork W8 ----
+	# ---- XR fork W9: AI difficulty and game speed ----
+	# host test: handicap levels, optional factors, game speeds, years (dependency-free)
+	add_executable(openage-handicap-check gamestate/handicap_check.cpp)
+	target_include_directories(openage-handicap-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-handicap-check COMMAND openage-handicap-check)
+	# ---- end XR fork W9 ----
 endif()
 
 # XR fork: the in-engine UI (libopenage/ui/agesxr) logs via __android_log_print
