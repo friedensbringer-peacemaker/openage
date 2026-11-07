@@ -268,7 +268,7 @@ public:
             {"Villager", "Dorfbewohner"}, {"VillagerMale", "Dorfbewohner"}, {"VillagerFemale", "Dorfbewohnerin"},
             {"Militia", "Milizsoldat"}, {"ManAtArms", "Schwertkämpfer"}, {"Spearman", "Speerträger"},
             {"Archer", "Bogenschütze"}, {"Skirmisher", "Plänkler"}, {"Knight", "Ritter"},
-            {"ScoutCavalry", "Späher"}, {"Monk", "Mönch"}, {"TradeCart", "Handelskarren"},
+            {"ScoutCavalry", "Späher"}, {"Monk", "Mönch"}, {"Trebuchet", "Tribock"}, {"TradeCart", "Handelskarren"},
             {"TownCenter", "Dorfzentrum"}, {"House", "Haus"}, {"Barracks", "Kaserne"},
             {"ArcheryRange", "Schießanlage"}, {"Stable", "Stall"}, {"Mill", "Mühle"},
             {"LumberCamp", "Holzfällerlager"}, {"MiningCamp", "Bergbaulager"}, {"Farm", "Farm"},
