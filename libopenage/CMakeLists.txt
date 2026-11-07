@@ -595,6 +595,12 @@ if(OPENAGE_NATIVE_ENTRY)
 	target_include_directories(openage-group-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 	add_test(NAME openage-group-check COMMAND openage-group-check)
 	# ---- end XR fork W8 ----
+	# ---- XR fork W9: AI difficulty and game speed ----
+	# host test: handicap levels, optional factors, game speeds, years (dependency-free)
+	add_executable(openage-handicap-check gamestate/handicap_check.cpp)
+	target_include_directories(openage-handicap-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-handicap-check COMMAND openage-handicap-check)
+	# ---- end XR fork W9 ----
 endif()
 
 # XR fork: the in-engine UI (libopenage/ui/agesxr) logs via __android_log_print
