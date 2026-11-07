@@ -123,7 +123,7 @@ void check_catalog() {
 	for (const char *t : {"GuardTower", "Keep", "HerbalMedicine"}) {
 		check(prod::has_mechanic(t, true), std::string{"W4: offered tech "} + t);
 	}
-	for (const char *t : {"Coinage"}) {
+	for (const char *t : {"Cartography"}) {
 		check(not prod::has_mechanic(t, true), std::string{"hidden tech "} + t);
 	}
 	// civilisations

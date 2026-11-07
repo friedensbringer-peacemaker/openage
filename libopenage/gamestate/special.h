@@ -21,6 +21,7 @@
 #include "event/evententity.h"
 #include "event/eventhandler.h"
 #include "gamestate/component/internal/commands/types.h"
+#include "gamestate/diplomacy_math.h"
 #include "gamestate/special_math.h"
 #include "gamestate/trade_math.h"
 #include "gamestate/combat/combat_state.h"
@@ -164,6 +165,8 @@ struct SpecialInfo {
 	std::array<int64_t, 3> market_sell{};
 	std::array<bool, 3> market_can_buy{};
 	std::array<bool, 3> market_can_sell{};
+	/// the players a tribute can go to
+	std::vector<int> tribute_to{};
 };
 
 /// saved values of one entity (save game version 6, all optional)
@@ -265,6 +268,13 @@ public:
 	                         const time::time_t &time);
 	/// trade fee g of a player (spec 02 §2.7, player resource 78)
 	double market_fee(const std::shared_ptr<GameState> &state, player_id_t player);
+	/// tribute from player \p from to player \p to (W7, spec 02 §2.8): resource (resource_t), amount
+	/// index 0 = 100, 1 = 500, 2 = the whole stock. The command itself checks no market (spec), the
+	/// interface offers it at the market. Empty on success, otherwise why not
+	std::string send_tribute(const std::shared_ptr<GameState> &state, player_id_t from, player_id_t to, int resource,
+	                         int amount_index, const time::time_t &time);
+	/// tribute fee f of a player (spec 02 §2.8: player resource 46, coinage 0.2, banking 0)
+	double tribute_fee(const std::shared_ptr<GameState> &state, player_id_t player);
 	/// gold for one lot right now (the market is shared by all players; what a sale pays is its new price)
 	int64_t market_buy_cost(int good, double fee) const;
 	int64_t market_sell_revenue(int good, double fee) const;

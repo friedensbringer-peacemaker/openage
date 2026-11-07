@@ -50,6 +50,10 @@ constexpr int kAoeCmdPack = 969;            // Tribock: Packen (P)
 constexpr int kAoeCmdUnpack = 970;          // Tribock: Entpacken (U)
 constexpr int kAoeCmdDropRelic = 971;       // Mönch mit Reliquie: Reliquie ablegen
 constexpr int kAoeCmdMarket0 = 980;         // W7: Markt, 980 + Ware·2 + 1 beim Verkaufen (Nahrung, Holz, Stein)
+constexpr int kAoeCmdTribute0 = 986;        // W7: Tribut senden, 986 + Rohstoff (Nahrung, Holz, Gold, Stein)
+constexpr int kAoeCmdTributePage = 990;     // W7: Markt: Tribut-Seite des Rasters auf/zu
+constexpr int kAoeCmdTributeAmount = 991;   // W7: Menge 100, 500, alles
+constexpr int kAoeCmdTributeTo = 992;       // W7: nächster Empfänger
 constexpr int kAoeCmdUnloadHere = 972;      // Rammbock/Schiff: Entladen hier (L)
 // Sondertasten der Hotkeys (AoeCommand::hotkey): Entf und Tab
 constexpr char kAoeKeyDelete = 0x7f;
@@ -385,6 +389,10 @@ struct AoeCombat {
     bool market = false;
     long long marketBuy[3] = {0, 0, 0}, marketSell[3] = {0, 0, 0};
     bool marketCanBuy[3] = {false, false, false}, marketCanSell[3] = {false, false, false};
+    // W7: Tribut-Seite des Markts (Menge 0 = 100, 1 = 500, 2 = alles; Empfänger -1 = keiner)
+    bool tributePage = false;
+    int tributeAmount = 0, tributeReceiver = -1;
+    int tributeStock[4] = {0, 0, 0, 0};
 };
 
 // W6: Befehle der Spezialeinheiten (Spec 08 §8.1: Mönch Konvertieren · Heilen auf 0/1, mit Reliquie
@@ -492,11 +500,44 @@ inline bool aoeCombatGrid(AoeModel& m, const AoeCombat& c, bool cancelTraining, 
         if (c.market) {
             // W7 (Spec 02 §2.7): obere Zeile Kaufen, zweite Zeile Verkaufen, je Nahrung, Holz, Stein
             static const HudIcon kGoodIcons[3] = {HudIcon::Sheep, HudIcon::Tree, HudIcon::MiningCamp};
+            // das Angebot der Engine (Münzprägung, Bankwesen, Gilden) rückt auf die freien Plätze
+            std::vector<AoeCommand> offered;
+            std::vector<std::string> offeredTips;
+            for (int i = 0; i < kAoeOptionCells; ++i) {
+                if (m.grid[static_cast<size_t>(i)].id != 0) {
+                    offered.push_back(m.grid[static_cast<size_t>(i)]);
+                    offeredTips.push_back(static_cast<size_t>(i) < m.tips.size() ? m.tips[static_cast<size_t>(i)] : std::string{});
+                }
+                m.grid[static_cast<size_t>(i)] = AoeCommand{};
+                if (static_cast<size_t>(i) < m.tips.size()) m.tips[static_cast<size_t>(i)].clear();
+            }
+            if (c.tributePage) {
+                static const HudIcon kStockIcons[4] = {HudIcon::Sheep, HudIcon::Tree, HudIcon::Emblem, HudIcon::MiningCamp};
+                static const char* const kStockNames[4] = {"Nahrung", "Holz", "Gold", "Stein"};
+                static const char* const kAmounts[3] = {"100", "500", "alles"};
+                const bool someone = c.tributeReceiver >= 0;
+                for (int i = 0; i < 4; ++i) {
+                    const bool can = someone && c.tributeStock[i] > 0;
+                    m.grid[static_cast<size_t>(i)] = {kAoeCmdTribute0 + i, kStockIcons[i], kStockNames[i], can,
+                                                      !someone ? "kein anderer Spieler" : (can ? "" : "kein Vorrat")};
+                }
+                m.grid[4] = {kAoeCmdTributePage, HudIcon::Back, "Zurück", true, ""};
+                m.grid[5] = {kAoeCmdTributeAmount, HudIcon::Next, std::string{"Menge "} + kAmounts[c.tributeAmount], true, ""};
+                m.grid[6] = {kAoeCmdTributeTo, HudIcon::Villager,
+                             someone ? "An Sp. " + std::to_string(c.tributeReceiver + 1) : std::string{"An –"}, someone, someone ? "" : "kein anderer Spieler"};
+            } else {
+            static const int kOfferCells[3] = {4, 8, 9};
+            for (size_t i = 0; i < offered.size() && i < 3; ++i) {
+                m.grid[static_cast<size_t>(kOfferCells[i])] = offered[i];
+                if (static_cast<size_t>(kOfferCells[i]) < m.tips.size()) m.tips[static_cast<size_t>(kOfferCells[i])] = offeredTips[i];
+            }
+            m.grid[3] = {kAoeCmdTributePage, HudIcon::Emblem, "Tribut", true, ""};
             for (int i = 0; i < 3; ++i) {
                 m.grid[static_cast<size_t>(i)] = {kAoeCmdMarket0 + i * 2, kGoodIcons[i], "Kauf " + std::to_string(c.marketBuy[i]),
                                                   c.marketCanBuy[i], c.marketCanBuy[i] ? "" : "zu wenig Gold"};
                 m.grid[static_cast<size_t>(5 + i)] = {kAoeCmdMarket0 + i * 2 + 1, kGoodIcons[i], "Verk. " + std::to_string(c.marketSell[i]),
                                                       c.marketCanSell[i], c.marketCanSell[i] ? "" : "zu wenig Vorrat"};
+            }
             }
         }
         if (c.townCenter) {

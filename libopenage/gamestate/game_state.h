@@ -161,6 +161,11 @@ public:
 	 */
 	const std::shared_ptr<Player> &get_player(player_id_t id) const;
 
+	/// XR fork W7: all players of the current game
+	const std::unordered_map<player_id_t, std::shared_ptr<Player>> &get_players() const {
+		return this->players;
+	}
+
 	/**
 	 * Check if a player exists (XR fork).
 	 *

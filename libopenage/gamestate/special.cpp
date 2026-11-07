@@ -1484,8 +1484,50 @@ void SpecialState::show_carrying(const std::shared_ptr<GameState> &state, entity
 
 double SpecialState::market_fee(const std::shared_ptr<GameState> &state, player_id_t player) {
 	// the Gaia entry of the data has no fee: a player without a civilisation pays the value of all others
+	if (this->researched(state, player, "Guilds")) {
+		return 0.15;
+	}
 	const double fee = this->player_resource(state, player, 78, 0.3);
 	return fee > 0.0 ? fee : 0.3;
+}
+
+double SpecialState::tribute_fee(const std::shared_ptr<GameState> &state, player_id_t player) {
+	if (this->researched(state, player, "Banking")) {
+		return 0.0;
+	}
+	if (this->researched(state, player, "Coinage")) {
+		return 0.2;
+	}
+	return this->player_resource(state, player, 46, 0.3);
+}
+
+std::string SpecialState::send_tribute(const std::shared_ptr<GameState> &state, player_id_t from, player_id_t to,
+                                       int resource, int amount_index, const time::time_t &time) {
+	if (from == to or this->neutral_player(to) or resource < 0 or resource >= static_cast<int>(RESOURCE_COUNT)
+	    or amount_index < 0 or amount_index > 2 or not state->get_players().contains(from)
+	    or not state->get_players().contains(to)) {
+		return "kein Tribut möglich";
+	}
+	const auto &sender = state->get_player(from);
+	const auto &receiver = state->get_player(to);
+	const auto type = static_cast<resource_t>(resource);
+	const double available = sender->get_resources().get(type);
+	const double amount = diplomacy::tribute_click_amount(available, amount_index == 1, amount_index == 2);
+	const double rate = this->tribute_fee(state, from);
+	const auto result = trade::tribute(amount, rate, available);
+	if (result.sent <= 0.0) {
+		return "nichts zu senden";
+	}
+	resource_amounts_t costs{};
+	costs[static_cast<size_t>(resource)] = result.sent + result.fee;
+	if (not sender->get_resources().spend(costs)) {
+		return "zu wenig Vorrat";
+	}
+	receiver->get_resources().add(type, result.sent);
+	log::log(INFO << "Tribute: player " << from << " sends " << result.sent << " " << to_string(type) << " to player "
+	              << to << ", fee " << result.fee << " at t=" << fmt1(time.to_double()));
+	this->publish(state, time);
+	return {};
 }
 
 std::string SpecialState::market_trade(const std::shared_ptr<GameState> &state, entity_id_t building, int command,
@@ -2100,6 +2142,13 @@ void SpecialState::publish(const std::shared_ptr<GameState> &state, const time::
 			if (auto owner = owner_of(entity, time)) {
 				auto &info = next[id];
 				info.market = true;
+				for (const auto &[pid, player] : state->get_players()) {
+					(void)player;
+					if (pid != *owner and not this->neutral_player(pid)) {
+						info.tribute_to.push_back(static_cast<int>(pid));
+					}
+				}
+				std::sort(info.tribute_to.begin(), info.tribute_to.end());
 				const double fee = this->market_fee(state, *owner);
 				const auto stock = state->get_player(*owner)->get_resources().get();
 				for (size_t i = 0; i < MARKET_GOODS.size(); ++i) {
@@ -2397,8 +2446,13 @@ bool handle_command(const std::shared_ptr<GameState> &state,
 		ids.clear();
 		return true;
 	case command_t::MARKET:
-		// one lot, also with several markets selected
-		if (not ids.empty()) {
+		// one lot, also with several markets selected; 100 and up: a tribute
+		// (100 + resource + 10 * amount index + 100 * receiver)
+		if (not ids.empty() and arg >= 100 and owner) {
+			const int code = arg - 100;
+			note(special->send_tribute(state, *owner, static_cast<player_id_t>(code / 100), code % 10, (code % 100) / 10, time));
+		}
+		else if (not ids.empty()) {
 			note(special->market_trade(state, ids.front(), arg, time));
 		}
 		report("market");

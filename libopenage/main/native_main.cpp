@@ -2083,7 +2083,11 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		const auto buy_cell = market_layout.gridRect(0);
 		click(68.3, {buy_cell.cx(), buy_cell.cy()}, E::kLeftButton);
 		capture(69.5, "-s11-gekauft");
-		capture(70.0, nullptr);
+		const auto tribute_cell = market_layout.gridRect(3);
+		click(70.0, {tribute_cell.cx(), tribute_cell.cy()}, E::kLeftButton);
+		capture(71.0, "-s12-tribut");
+		click(71.2, {buy_cell.cx(), buy_cell.cy()}, E::kLeftButton);
+		capture(72.5, nullptr);
 		return steps;
 	}
 	if (args.replay_fish) {

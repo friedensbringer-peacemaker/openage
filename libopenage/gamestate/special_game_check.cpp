@@ -1225,6 +1225,37 @@ void check_market(const Options &opt) {
 	check(stock(0, resource_t::GOLD) == 500.0, "a house does not trade");
 	check(not w.special()->get_info(house->get_id()) or not w.special()->get_info(house->get_id())->market, "the house is no market");
 
+	// tribute (spec 02 §2.8): the fee comes on top, a small stock shrinks both, the techs lower the fee
+	auto tribute = [&](int resource, int amount, int to) {
+		w.command(command_t::MARKET, {market}, std::nullopt, w.position(market), 100 + resource + 10 * amount + 100 * to);
+	};
+	w.state->get_player(0)->get_resources().set({500.0, 500.0, 300.0, 500.0});
+	w.state->get_player(1)->get_resources().set({0.0, 0.0, 0.0, 0.0});
+	tribute(0, 0, 1);
+	check(stock(0, resource_t::FOOD) == 370.0 and stock(1, resource_t::FOOD) == 100.0, "tribute 100 food: 130 from the sender, 100 arrive");
+	tribute(2, 1, 1);
+	check(stock(0, resource_t::GOLD) == 0.0 and stock(1, resource_t::GOLD) == 210.0, "tribute 500 gold from 300: 210 arrive, the stock is empty");
+	tribute(2, 0, 1);
+	check(stock(1, resource_t::GOLD) == 210.0, "an empty stock sends nothing");
+	tribute(1, 2, 1);
+	check(stock(0, resource_t::WOOD) == 0.0 and stock(1, resource_t::WOOD) == 350.0, "tribute of the whole stock: 70 percent arrive");
+	tribute(3, 0, 0);
+	check(stock(0, resource_t::STONE) == 500.0, "no tribute to yourself");
+	w.production->grant_research(0, "Coinage");
+	w.advance(0.3);
+	w.state->get_player(0)->get_resources().set({500.0, 500.0, 300.0, 500.0});
+	tribute(0, 0, 1);
+	check(stock(0, resource_t::FOOD) == 380.0, "coinage: fee 20 percent");
+	w.production->grant_research(0, "Banking");
+	w.advance(0.3);
+	tribute(0, 0, 1);
+	check(stock(0, resource_t::FOOD) == 280.0, "banking: no fee");
+	w.production->grant_research(0, "Guilds");
+	w.advance(0.3);
+	check(w.special()->market_fee(w.state, 0) == 0.15, "guilds: market fee 15 percent");
+	const auto after_guilds = w.special()->get_info(market->get_id());
+	check(after_guilds and not after_guilds->tribute_to.empty() and after_guilds->tribute_to.front() == 1, "the HUD offers player 2");
+
 	// the prices come back with the save game
 	const auto text = save::serialize(save::capture(w.state, w.settings, w.game->get_generated_entity_range(), w.now, "W7"));
 	check(text.find("market = ") != std::string::npos, "the save game has the prices");

@@ -791,6 +791,24 @@ bool AoeUiController::combat_command(int code, const std::string &label) {
 		log::log(INFO << "UI: trebuchet " << (code == agesxr::kAoeCmdPack ? "pack" : "unpack"));
 		order(code == agesxr::kAoeCmdPack ? ui_command_t::PACK : ui_command_t::UNPACK, 0);
 	}
+	else if (code == agesxr::kAoeCmdTributePage) {
+		this->feed.toggleTribute();
+		this->last_poll = -1.0;
+	}
+	else if (code == agesxr::kAoeCmdTributeAmount) {
+		this->feed.nextTributeAmount();
+		this->last_poll = -1.0;
+	}
+	else if (code == agesxr::kAoeCmdTributeTo) {
+		this->feed.nextTributeReceiver();
+		this->last_poll = -1.0;
+	}
+	else if (code >= agesxr::kAoeCmdTribute0 and code < agesxr::kAoeCmdTribute0 + 4) {
+		const int resource = code - agesxr::kAoeCmdTribute0;
+		log::log(INFO << "UI: tribute " << resource << " amount " << this->feed.tributeAmount() << " to player "
+		              << this->feed.tributeReceiver());
+		order(ui_command_t::MARKET, 100 + resource + 10 * this->feed.tributeAmount() + 100 * this->feed.tributeReceiver());
+	}
 	else if (code >= agesxr::kAoeCmdMarket0 and code < agesxr::kAoeCmdMarket0 + 6) {
 		log::log(INFO << "UI: market " << (code - agesxr::kAoeCmdMarket0));
 		order(ui_command_t::MARKET, code - agesxr::kAoeCmdMarket0);

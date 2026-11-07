@@ -101,6 +101,7 @@ struct HudEntity {
 	std::array<int64_t, 3> market_sell{};
 	std::array<bool, 3> market_can_buy{};
 	std::array<bool, 3> market_can_sell{};
+	std::vector<int> tribute_to{};
 };
 
 /**

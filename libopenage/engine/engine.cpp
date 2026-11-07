@@ -279,6 +279,7 @@ HudInfo Engine::query_hud(uint64_t player) const {
 						first.market_sell = si->market_sell;
 						first.market_can_buy = si->market_can_buy;
 						first.market_can_sell = si->market_can_sell;
+						first.tribute_to = si->tribute_to;
 					}
 				}
 				for (auto id : info.selected) {

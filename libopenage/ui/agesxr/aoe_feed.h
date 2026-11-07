@@ -71,6 +71,7 @@ public:
             if (key != mPageKey) {
                 mPageKey = key;
                 mPage = 0;
+                mTributePage = false;
             }
             if (mPage >= mPages) mPage = 0;
             int cell = 0;
@@ -129,6 +130,19 @@ public:
             c.unpacked = e.unpacked;
             c.packing = e.packing;
             c.market = e.market;
+            if (e.market) {
+                if (e.tribute_to.empty()) mTributeIndex = 0;
+                else mTributeIndex %= static_cast<int>(e.tribute_to.size());
+                mTributeReceiver = e.tribute_to.empty() ? -1 : e.tribute_to[static_cast<size_t>(mTributeIndex)];
+                mTributeReceivers = static_cast<int>(e.tribute_to.size());
+                c.tributePage = mTributePage;
+                c.tributeAmount = mTributeAmount;
+                c.tributeReceiver = mTributeReceiver;
+                c.tributeStock[0] = m.food;
+                c.tributeStock[1] = m.wood;
+                c.tributeStock[2] = m.gold;
+                c.tributeStock[3] = m.stone;
+            }
             for (size_t i = 0; i < 3; ++i) {
                 c.marketBuy[i] = e.market_buy[i];
                 c.marketSell[i] = e.market_sell[i];
@@ -233,7 +247,18 @@ public:
             m.tips[0] = "Entladen (L): Uferstelle wählen – das Schiff fährt hin und lässt alle an Land";
             m.tips[4] = "Hier raus: alle an Land, wenn das Schiff am Ufer liegt";
         }
-        if (c.market) {
+        if (c.market && c.tributePage) {
+            static const char* const kAmounts[3] = {"100", "500", "den ganzen Vorrat"};
+            static const char* const kStock[4] = {"Nahrung", "Holz", "Gold", "Stein"};
+            for (int i = 0; i < 4; ++i) {
+                m.tips[static_cast<size_t>(i)] = std::string{kAmounts[c.tributeAmount]} + " " + kStock[i] + " an Spieler " + std::to_string(c.tributeReceiver + 1) + " senden (Gebühr vom Vorrat)";
+            }
+            m.tips[4] = "Zurück zum Markt";
+            m.tips[5] = "Menge wechseln: 100, 500, alles";
+            m.tips[6] = "Empfänger wechseln";
+        }
+        else if (c.market) {
+            m.tips[3] = "Tribut: Rohstoffe an einen anderen Spieler senden";
             static const char* const kGoods[3] = {"Nahrung", "Holz", "Stein"};
             for (int i = 0; i < 3; ++i) {
                 m.tips[static_cast<size_t>(i)] = std::string{"100 "} + kGoods[i] + " kaufen für " + std::to_string(c.marketBuy[i]) + " Gold (der Preis steigt für alle)";
@@ -256,6 +281,12 @@ public:
     bool deleteArmed() const { return mDeleteArmed; }
 
     // W1: nächste Seite des Befehlsrasters (Knopf kAoeCmdPageNext); wirkt beim nächsten fill().
+    // W7: Tribut-Seite des Markts
+    void toggleTribute() { mTributePage = !mTributePage; }
+    void nextTributeAmount() { mTributeAmount = (mTributeAmount + 1) % 3; }
+    void nextTributeReceiver() { if (mTributeReceivers > 0) mTributeIndex = (mTributeIndex + 1) % mTributeReceivers; }
+    int tributeAmount() const { return mTributeAmount; }
+    int tributeReceiver() const { return mTributeReceiver; }
     void nextPage() { mPage = mPages > 1 ? (mPage + 1) % mPages : 0; }
     int page() const { return mPage; }
     int pages() const { return mPages; }
@@ -374,6 +405,8 @@ private:
     int mPage = 0, mPages = 1;   // W1: Seite des Befehlsrasters
     std::string mPageKey;        // Auswahl, für die die Seite gilt (neue Auswahl = Seite 1)
     bool mDeleteArmed = false;   // W4: Löschen-Rückfrage (Quest)
+    bool mTributePage = false;   // W7: Markt zeigt die Tribut-Seite
+    int mTributeAmount = 0, mTributeIndex = 0, mTributeReceiver = -1, mTributeReceivers = 0;
     HudMatch mMatch = HudMatch::RUNNING;
 };
 
