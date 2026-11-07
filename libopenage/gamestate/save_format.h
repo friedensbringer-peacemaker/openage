@@ -59,7 +59,7 @@ namespace openage::gamestate::save {
 /// Older versions still load (missing fields: no civilisation, nothing researched, vision NORMAL with nothing
 /// explored, aggressive stance, no garrison; maps without a "herds" key before 5 had no animals: herds off;
 /// maps without a "relics" key before 6 had no relics: relics off).
-constexpr int FORMAT_VERSION = 8;
+constexpr int FORMAT_VERSION = 9;
 
 /// slots 1..SLOT_COUNT are chosen by the player, slot 0 is the autosave,
 /// QUICK_SLOT the quick save (F5/F9)
@@ -83,6 +83,8 @@ struct SavedPlayer {
 	std::string explored{};
 	/// XR fork W3 (version 4): queued farm reseeds of the mill, each with the costs paid
 	std::vector<resource_amounts_t> reseeds{};
+	/// XR fork W7 (version 9): stances towards other players that are not "enemy" (player id, ally or neutral)
+	std::vector<std::pair<uint64_t, std::string>> stances{};
 };
 
 /// one entry of a training queue
@@ -344,6 +346,9 @@ inline std::string serialize(const SaveData &d) {
 		}
 		for (const auto &r : p.reseeds) {
 			out << "reseed = " << resources_text(r) << "\n";
+		}
+		for (const auto &[other, word] : p.stances) {
+			out << "stance = " << other << " " << word << "\n";
 		}
 	}
 	for (const auto &e : d.entities) {
@@ -668,6 +673,14 @@ inline bool parse(const std::string &text, SaveData &d, std::string &error) {
 			}
 			else if (key == "explored") {
 				p.explored = value;
+			}
+			else if (key == "stance") {
+				uint64_t other = 0;
+				std::string word;
+				if (not(v >> other >> word) or (word != "ally" and word != "neutral")) {
+					return fail("Haltung");
+				}
+				p.stances.emplace_back(other, word);
 			}
 			else if (key == "resources") {
 				if (not parse_resources(value, p.resources)) {

@@ -199,6 +199,22 @@ void victory_sweep() {
 		}
 	}
 	check(evaluate_match({{0, 5}}).over == false, "single player never wins");
+
+	// teams (XR fork W7): players 0 and 1 are allied, 2 and 3 are not
+	const auto team = [](uint64_t a, uint64_t b) { return a <= 1 and b <= 1; };
+	auto t1 = evaluate_match({{0, 3}, {1, 2}, {2, 0}, {3, 0}}, team);
+	check(t1.over and t1.winners.size() == 2 and t1.state_for(0) == match_state_t::VICTORY
+	          and t1.state_for(1) == match_state_t::VICTORY and t1.state_for(2) == match_state_t::DEFEAT,
+	      "the remaining team wins together");
+	check(not evaluate_match({{0, 3}, {1, 2}, {2, 1}, {3, 0}}, team).over, "an opponent left: the game goes on");
+	check(not evaluate_match({{0, 3}, {1, 2}}, team).over, "allied without anyone out: the game goes on");
+	auto t2 = evaluate_match({{0, 0}, {1, 2}, {2, 0}, {3, 0}}, team);
+	check(t2.over and t2.state_for(1) == match_state_t::VICTORY and t2.state_for(0) == match_state_t::DEFEAT,
+	      "a player who is out does not share the victory (spec 01)");
+	const auto one_way = [](uint64_t a, uint64_t b) { return a == 0 and b == 1; };
+	check(not evaluate_match({{0, 3}, {1, 2}, {2, 0}}, one_way).over, "an alliance needs both sides");
+	auto t3 = evaluate_match({{0, 0}, {1, 0}}, team);
+	check(t3.over and not t3.winner and t3.winners.empty() and t3.state_for(0) == match_state_t::DRAW, "nobody left: a draw");
 	check(std::string{to_string(match_state_t::VICTORY)} == "victory", "names");
 }
 

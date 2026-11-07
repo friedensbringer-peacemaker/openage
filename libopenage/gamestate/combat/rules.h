@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -271,8 +272,10 @@ inline const char *to_string(match_state_t state) {
 struct MatchResult {
 	/// at least two participants and at most one of them has units or buildings left
 	bool over = false;
-	/// the remaining player (none on a draw or while running)
+	/// the remaining player (none on a draw or while running), the first one of a winning team
 	std::optional<uint64_t> winner{};
+	/// everyone who won: the remaining player or the remaining allied players
+	std::vector<uint64_t> winners{};
 	/// participants without units and buildings
 	std::vector<uint64_t> defeated{};
 
@@ -283,7 +286,7 @@ struct MatchResult {
 		if (std::find(this->defeated.begin(), this->defeated.end(), player) != this->defeated.end()) {
 			return this->over and not this->winner ? match_state_t::DRAW : match_state_t::DEFEAT;
 		}
-		if (this->over and this->winner and *this->winner == player) {
+		if (this->over and std::find(this->winners.begin(), this->winners.end(), player) != this->winners.end()) {
 			return match_state_t::VICTORY;
 		}
 		return match_state_t::RUNNING;
@@ -296,22 +299,31 @@ struct MatchResult {
  * @param alive Remaining units + buildings per participant (players that ever
  *              had units or buildings; neutral players excluded).
  */
-inline MatchResult evaluate_match(const std::map<uint64_t, size_t> &alive) {
+inline MatchResult evaluate_match(const std::map<uint64_t, size_t> &alive,
+                                  const std::function<bool(uint64_t, uint64_t)> &allied = {}) {
 	MatchResult result;
-	size_t left = 0;
-	std::optional<uint64_t> last{};
+	std::vector<uint64_t> left;
 	for (const auto &[player, count] : alive) {
 		if (count == 0) {
 			result.defeated.push_back(player);
 		}
 		else {
-			left += 1;
-			last = player;
+			left.push_back(player);
 		}
 	}
-	if (alive.size() >= 2 and left <= 1) {
+	// spec 01 §1.5: all opponents (not allied) are out. Players who ally without anyone being out go on playing.
+	bool team_left = allied and not left.empty() and not result.defeated.empty();
+	for (size_t i = 0; team_left and i < left.size(); ++i) {
+		for (size_t k = i + 1; k < left.size(); ++k) {
+			team_left = team_left and allied(left[i], left[k]) and allied(left[k], left[i]);
+		}
+	}
+	if (alive.size() >= 2 and (left.size() <= 1 or team_left)) {
 		result.over = true;
-		result.winner = last;
+		result.winners = left;
+		if (not left.empty()) {
+			result.winner = left.front();
+		}
 	}
 	return result;
 }

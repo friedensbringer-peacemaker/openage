@@ -615,6 +615,10 @@ bool AoeUiController::on_event(const renderer::WindowEvent &ev, double now) {
 				this->handle(result, now);
 				consumed = true;
 			}
+			else {
+				log::log(INFO << "UI: key " << static_cast<char>(k) << " has no command, cell "
+				              << agesxr::aoeCellOfKey(ui.model(), static_cast<char>(k)));
+			}
 		}
 		if (consumed) {
 			this->swallowed_keys.push_back(k);

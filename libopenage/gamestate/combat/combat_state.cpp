@@ -169,6 +169,31 @@ void CombatState::set_neutral_players(const std::unordered_set<player_id_t> &pla
 	this->neutral = players;
 }
 
+diplomacy::stance_t CombatState::stance(player_id_t a, player_id_t b) const {
+	if (a == b) {
+		return diplomacy::stance_t::ALLY;
+	}
+	auto it = this->stances.find({a, b});
+	return it == this->stances.end() ? diplomacy::stance_t::ENEMY : it->second;
+}
+
+void CombatState::set_stance(player_id_t a, player_id_t b, diplomacy::stance_t stance) {
+	if (a == b or this->neutral.contains(a) or this->neutral.contains(b) or this->stance(a, b) == stance) {
+		return;
+	}
+	if (stance == diplomacy::stance_t::ENEMY) {
+		this->stances.erase({a, b});
+	}
+	else {
+		this->stances[{a, b}] = stance;
+	}
+	log::log(INFO << "Diplomacy: player " << a << " is now " << diplomacy::stance_name(stance) << " towards player " << b);
+}
+
+const std::map<std::pair<player_id_t, player_id_t>, diplomacy::stance_t> &CombatState::get_stances() const {
+	return this->stances;
+}
+
 void CombatState::set_vision(const std::shared_ptr<vision::VisionState> &vision) {
 	this->vision = vision;
 }
@@ -197,7 +222,20 @@ bool CombatState::is_enemy(const Combatant &a, const Combatant &b, const time::t
 	}
 	auto owner_a = this->owner_of(a.entity, time);
 	auto owner_b = this->owner_of(b.entity, time);
-	return owner_a != owner_b and not this->neutral.contains(owner_a) and not this->neutral.contains(owner_b);
+	return owner_a != owner_b and not this->neutral.contains(owner_a) and not this->neutral.contains(owner_b)
+	       and this->stance(owner_a, owner_b) != diplomacy::stance_t::ALLY;
+}
+
+bool CombatState::auto_target_ok(const Combatant &self, const Combatant &other, const time::time_t &time) const {
+	if (this->stances.empty()) {
+		return true;
+	}
+	// the scout rule of the enemy stance stays in choose_target
+	return diplomacy::auto_target_allowed(this->stance(this->owner_of(self.entity, time), this->owner_of(other.entity, time)),
+	                                      other.stats->building,
+	                                      other.stats->military(),
+	                                      other.stats->villager,
+	                                      false);
 }
 
 bool CombatState::is_hunt(const Combatant &a, const Combatant &b, const time::time_t &time) const {
@@ -242,7 +280,7 @@ std::optional<entity_id_t> CombatState::nearest_enemy(const Combatant &self, dou
 	const auto self_owner = this->vision ? this->owner_of(self.entity, time) : player_id_t{0};
 	for (const auto &[id, other] : this->combatants) {
 		// XR fork W3: herdables of other players are no target of auto attacks
-		if (other.stats->animal or not this->is_enemy(self, other, time)) {
+		if (other.stats->animal or not this->is_enemy(self, other, time) or not this->auto_target_ok(self, other, time)) {
 			continue;
 		}
 		if (this->vision) {
@@ -298,7 +336,7 @@ std::optional<entity_id_t> CombatState::choose_target(const Combatant &self, con
 	const auto self_pos = this->position_of(self.entity, time);
 	std::vector<Candidate> cands;
 	for (const auto &[id, other] : this->combatants) {
-		if (not this->is_enemy(self, other, time)) {
+		if (not this->is_enemy(self, other, time) or not this->auto_target_ok(self, other, time)) {
 			continue;
 		}
 		// buildings (and walls, gates, towers) are no automatic targets (06 §6.2)
@@ -1225,7 +1263,7 @@ std::shared_ptr<GameEntity> CombatState::pick_enemy(const std::shared_ptr<GameSt
 			return std::nullopt;
 		}
 		auto owner = this->owner_of(entity, time);
-		if (owner == player or this->neutral.contains(owner)) {
+		if (owner == player or this->neutral.contains(owner) or this->stance(player, owner) == diplomacy::stance_t::ALLY) {
 			return std::nullopt;
 		}
 		// XR fork (vision): enemies in the fog cannot be picked, remembered buildings can
@@ -1745,7 +1783,8 @@ void CombatState::impact(const std::shared_ptr<GameState> &state, uint64_t proje
 			continue;
 		}
 		const auto owner = this->owner_of(c.entity, time);
-		if (owner == p.owner or this->neutral.contains(owner)) {
+		// a miss never hits the shooter or an ally (05)
+		if (owner == p.owner or this->neutral.contains(owner) or this->stance(p.owner, owner) == diplomacy::stance_t::ALLY) {
 			continue;
 		}
 		auto touch = segment_touches(a, b, footprint(*c.stats, this->position_of(c.entity, time)));
@@ -2212,7 +2251,9 @@ void CombatState::update_match(const time::time_t &time) {
 		}
 		this->participants.insert(owner);
 	}
-	auto result = evaluate_match(alive);
+	auto result = evaluate_match(alive, [this](uint64_t a, uint64_t b) {
+		return this->stance(static_cast<player_id_t>(a), static_cast<player_id_t>(b)) == diplomacy::stance_t::ALLY;
+	});
 
 	std::vector<player_id_t> newly_defeated;
 	MatchStatus status_copy;
@@ -2243,8 +2284,10 @@ void CombatState::update_match(const time::time_t &time) {
 	}
 	if (decided_now) {
 		if (result.winner) {
-			log::log(INFO << "Combat: match over, player " << *result.winner << " wins (victory) at t="
-			              << time.to_double());
+			for (auto player : result.winners) {
+				log::log(INFO << "Combat: match over, player " << player << " wins (victory) at t="
+				              << time.to_double());
+			}
 		}
 		else {
 			log::log(INFO << "Combat: match over, draw at t=" << time.to_double());

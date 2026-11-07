@@ -1025,7 +1025,11 @@ void SpecialState::run_job(const std::shared_ptr<GameState> &state, entity_id_t 
 		const auto own = owner_of(entity, time);
 		auto usable = [&](entity_id_t building) {
 			auto b = find_entity(state, building);
-			return b != nullptr and not combat->is_dead(building) and finished(b) and owner_of(b, time) == own;
+			if (b == nullptr or combat->is_dead(building) or not finished(b)) {
+				return false;
+			}
+			const auto owner = owner_of(b, time);
+			return owner and own and (*owner == *own or combat->stance(*own, *owner) == diplomacy::stance_t::ALLY);
 		};
 		if (t == nullptr or not usable(u.job.trade_home) or not usable(u.job.trade_partner)) {
 			end("trade building gone");
@@ -1182,7 +1186,8 @@ std::string SpecialState::convert_check(const std::shared_ptr<GameState> &state,
 	}
 	auto mo = owner_of(m, time);
 	auto to = owner_of(e, time);
-	if (not mo or not to or *mo == *to or this->neutral.contains(*to) or this->neutral.contains(*mo)) {
+	if (not mo or not to or *mo == *to or this->neutral.contains(*to) or this->neutral.contains(*mo)
+	    or state->get_combat()->stance(*mo, *to) == diplomacy::stance_t::ALLY) {
 		return "kein gegnerisches Ziel";
 	}
 	if (tt->relic or ts->animal or ts->ambient) {
@@ -1921,8 +1926,11 @@ std::string SpecialState::order_trade(const std::shared_ptr<GameState> &state, e
 		return cog ? "nur mit einem fertigen Hafen" : "nur mit einem fertigen Markt";
 	}
 	const auto own = owner_of(entity, time);
-	if (owner_of(building, time) != own) {
-		return "nur mit eigenen Gebäuden, solange es keine Verbündeten gibt";
+	const auto partner_owner = owner_of(building, time);
+	const bool allied_partner = own and partner_owner and *own != *partner_owner
+	                            and combat->stance(*own, *partner_owner) == diplomacy::stance_t::ALLY;
+	if (partner_owner != own and not allied_partner) {
+		return "nur mit eigenen oder verbündeten Gebäuden";
 	}
 	const auto here = ground_of(entity, time);
 	std::optional<entity_id_t> home;
@@ -1939,6 +1947,9 @@ std::string SpecialState::order_trade(const std::shared_ptr<GameState> &state, e
 		}
 	}
 	if (not home) {
+		if (allied_partner) {
+			return cog ? "braucht einen eigenen Hafen" : "braucht einen eigenen Markt";
+		}
 		return cog ? "braucht einen zweiten eigenen Hafen" : "braucht einen zweiten eigenen Markt";
 	}
 	auto &u = this->unit(unit);
@@ -2173,7 +2184,8 @@ void SpecialState::on_impact(const std::shared_ptr<GameState> &state, entity_id_
 		if (not to or this->neutral.contains(*to)) {
 			continue;
 		}
-		if (spare and *to == owner) {
+		// spec 05: melee area attacks spare own and allied units
+		if (spare and (*to == owner or combat->stance(owner, *to) == diplomacy::stance_t::ALLY)) {
 			continue;
 		}
 		const auto p = ground_of(entity, time);
@@ -2700,7 +2712,8 @@ bool handle_command(const std::shared_ptr<GameState> &state,
 						}
 					}
 				}
-				else if (eo and owner and *eo != *owner and not special->neutral_player(*eo)) {
+				else if (eo and owner and *eo != *owner and not special->neutral_player(*eo)
+				         and combat->stance(*owner, *eo) != diplomacy::stance_t::ALLY) {
 					action = "convert";
 					for (auto id : monks) {
 						note(special->order_convert(state, id, entity->get_id(), time));
@@ -2792,7 +2805,8 @@ bool handle_command(const std::shared_ptr<GameState> &state,
 		// rule decides whether it has to pack for it)
 		const bool on_enemy = pick(state, time, target, params, [&](const std::shared_ptr<GameEntity> &e) {
 			const auto eo = owner_of(e, time);
-			return eo and owner and *eo != *owner and not special->neutral_player(*eo);
+			return eo and owner and *eo != *owner and not special->neutral_player(*eo)
+			       and combat->stance(*owner, *eo) != diplomacy::stance_t::ALLY;
 		}) != nullptr;
 		std::erase_if(ids, [&](entity_id_t id) {
 			return type == command_t::MOVE and not on_enemy and special->pack_and_move(state, id, target, time);

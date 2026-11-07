@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <utility>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -22,6 +23,7 @@
 #include "event/evententity.h"
 #include "gamestate/combat/behavior.h"
 #include "gamestate/combat/rules.h"
+#include "gamestate/diplomacy_math.h"
 #include "gamestate/combat/stats.h"
 #include "gamestate/pick.h"
 #include "gamestate/types.h"
@@ -177,6 +179,22 @@ public:
 	 * Players that never count for the victory condition (Gaia).
 	 */
 	void set_neutral_players(const std::unordered_set<player_id_t> &players);
+
+	/**
+	 * Stance of player \p a towards player \p b (XR fork W7, spec 06). Everyone
+	 * starts as an enemy; each side has its own stance. Simulation thread only.
+	 */
+	diplomacy::stance_t stance(player_id_t a, player_id_t b) const;
+
+	/**
+	 * Set the stance of player \p a towards player \p b. Simulation thread only.
+	 */
+	void set_stance(player_id_t a, player_id_t b, diplomacy::stance_t stance);
+
+	/**
+	 * Stances that are not "enemy" (save games).
+	 */
+	const std::map<std::pair<player_id_t, player_id_t>, diplomacy::stance_t> &get_stances() const;
 
 	/**
 	 * Fog of war (XR fork, gamestate/vision): auto attacks only pick enemies in
@@ -605,6 +623,8 @@ private:
 	const Combatant *find(entity_id_t id) const;
 	player_id_t owner_of(const std::shared_ptr<GameEntity> &entity, const time::time_t &time) const;
 	bool is_enemy(const Combatant &a, const Combatant &b, const time::time_t &time) const;
+	/// the stance of the owner of \p self allows an automatic attack on \p other (06: neutral spares villagers)
+	bool auto_target_ok(const Combatant &self, const Combatant &other, const time::time_t &time) const;
 	/// XR fork W3: a player's entity and a gaia animal (explicit hunt, a boar fighting back)
 	bool is_hunt(const Combatant &a, const Combatant &b, const time::time_t &time) const;
 	coord::phys3 position_of(const std::shared_ptr<GameEntity> &entity, const time::time_t &time) const;
@@ -687,6 +707,8 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<const CombatStats>> stats_cache;
 
 	std::unordered_set<player_id_t> neutral;
+	/// XR fork W7: stances that are not "enemy"
+	std::map<std::pair<player_id_t, player_id_t>, diplomacy::stance_t> stances;
 	/// XR fork W3: death and hit handlers (food state)
 	std::vector<std::function<bool(const std::shared_ptr<GameEntity> &, const time::time_t &)>> death_handlers;
 	std::vector<std::function<void(const std::shared_ptr<GameEntity> &, const std::shared_ptr<GameEntity> &,

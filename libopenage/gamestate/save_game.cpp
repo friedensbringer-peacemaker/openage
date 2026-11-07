@@ -195,6 +195,14 @@ SaveData capture(const std::shared_ptr<GameState> &state,
 		if (auto food_state = state->get_food()) {
 			p.reseeds = food_state->reseed_costs(id);
 		}
+		// XR fork W7: stances of the player
+		if (auto combat_state = state->get_combat()) {
+			for (const auto &[pair, stance] : combat_state->get_stances()) {
+				if (pair.first == id) {
+					p.stances.emplace_back(pair.second, diplomacy::stance_name(stance));
+				}
+			}
+		}
 		d.players.push_back(p);
 	}
 	// the map is generated again with the civilisations that were played (random ones resolved)
@@ -472,6 +480,12 @@ RestoreResult restore(const SaveData &data,
 	// players
 	for (const auto &p : data.players) {
 		if (state->has_player(static_cast<player_id_t>(p.id))) {
+			for (const auto &[other, word] : p.stances) {
+				diplomacy::stance_t stance;
+				if (state->get_combat() and diplomacy::parse_stance(word, stance)) {
+					state->get_combat()->set_stance(static_cast<player_id_t>(p.id), static_cast<player_id_t>(other), stance);
+				}
+			}
 			state->get_player(static_cast<player_id_t>(p.id))->get_resources().set(p.resources);
 			auto vision = state->get_vision();
 			if (not p.explored.empty() and vision and not vision->set_explored_text(static_cast<player_id_t>(p.id), p.explored)) {

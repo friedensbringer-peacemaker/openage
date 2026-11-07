@@ -1382,6 +1382,113 @@ void check_trade(const Options &opt) {
 }
 
 /// S12: a save during a conversion goes on after loading
+void check_diplomacy(const Options &opt) {
+	std::cout << "== S16 Haltungen" << std::endl;
+	using diplomacy::stance_t;
+	using component::command::command_t;
+	World w{opt, quiet_map()};
+	w.advance(0.5);
+	auto combat = w.state->get_combat();
+	auto c = scene_spot(w, 8.0, -8.0);
+	auto own = w.unit_near(0, "militia", "Militia", c.first, c.second);
+	auto other = w.unit_near(1, "militia", "Militia", c.first + 1.5, c.second);
+	auto villager = w.unit_near(1, "villager", "Villager", c.first, c.second + 1.5);
+	auto monk = w.unit_near(0, "monk", "Monk", c.first - 3.0, c.second);
+	auto cart = w.unit_near(0, "trade_cart", "TradeCart", c.first - 6.0, c.second - 6.0);
+	if (own == nullptr or other == nullptr or villager == nullptr or monk == nullptr or cart == nullptr) {
+		check(false, "scene for the stances");
+		return;
+	}
+	check(combat->stance(0, 1) == stance_t::ENEMY and combat->stance(1, 0) == stance_t::ENEMY, "players start as enemies");
+	check(combat->stance(0, 0) == stance_t::ALLY, "a player is on his own side");
+	const player_id_t gaia = 2;
+	combat->set_stance(0, gaia, stance_t::ALLY);
+	check(combat->stance(0, gaia) == stance_t::ENEMY and combat->get_stances().empty(), "gaia has no stance");
+
+	// allies on both sides: side by side without a fight
+	combat->set_stance(0, 1, stance_t::ALLY);
+	combat->set_stance(1, 0, stance_t::ALLY);
+	check(not combat->order_attack(w.state, own->get_id(), other->get_id(), w.now), "no ordered attack on an ally");
+	const auto before = w.health(other);
+	const auto before_own = w.health(own);
+	w.advance(8.0);
+	check(w.health(other) == before and w.health(own) == before_own, "allies do not fight");
+	w.command(command_t::MOVE, {own}, other->get_id(), w.position(other));
+	w.advance(0.5);
+	check(not combat->get_target(own->get_id()).has_value(), "the right click on an ally is no attack");
+	check(not w.special()->order_convert(w.state, monk->get_id(), other->get_id(), w.now).empty(), "a monk does not convert an ally");
+
+	// the ally betrays: one side enemy again, only that side attacks
+	combat->set_stance(1, 0, stance_t::ENEMY);
+	check(w.advance_until(10.0, [&]() { return w.health(own) < before_own; }), "the former ally attacks");
+	check(not combat->order_attack(w.state, own->get_id(), other->get_id(), w.now), "the other side stays allied");
+
+	// a running fight ends with the alliance
+	combat->set_stance(0, 1, stance_t::ENEMY);
+	check(combat->order_attack(w.state, own->get_id(), other->get_id(), w.now), "enemies fight");
+	w.advance(1.0);
+	combat->set_stance(0, 1, stance_t::ALLY);
+	combat->set_stance(1, 0, stance_t::ALLY);
+	w.advance(4.0);
+	const auto settled = w.health(other);
+	const auto settled_own = w.health(own);
+	w.advance(4.0);
+	check(w.health(other) == settled and w.health(own) == settled_own, "the alliance ends the fight");
+
+	// neutral: soldiers yes, villagers only by order
+	combat->set_stance(0, 1, stance_t::NEUTRAL);
+	check(combat->order_attack(w.state, own->get_id(), other->get_id(), w.now), "an ordered attack on a neutral player");
+	check(w.advance_until(10.0, [&]() { return w.health(other) < settled; }), "the neutral soldier is hit");
+	w.set_health(other, 0);
+	w.advance(1.0);
+	const auto vill = w.health(villager);
+	w.advance(8.0);
+	check(w.health(villager) == vill, "no automatic attack on a neutral villager");
+	check(combat->order_attack(w.state, own->get_id(), villager->get_id(), w.now), "by order the villager is a target");
+	check(w.advance_until(10.0, [&]() { return w.health(villager) < vill; }), "the ordered attack hits the villager");
+
+	// save game
+	auto data = save::capture(w.state, w.settings, w.game->get_generated_entity_range(), w.now, "S16");
+	const auto text = save::serialize(data);
+	check(text.find("stance = 1 neutral") != std::string::npos and text.find("stance = 0 ally") != std::string::npos, "stances stored");
+	save::SaveData parsed;
+	std::string error;
+	check(save::parse(text, parsed, error), "parsed " + error);
+	World l{opt, quiet_map()};
+	auto result = save::restore(parsed, l.state, l.loop, l.factory, l.production, l.game->get_generated_entity_range(), l.now);
+	check(result.ok, "restored " + result.error);
+	check(l.state->get_combat()->stance(0, 1) == stance_t::NEUTRAL and l.state->get_combat()->stance(1, 0) == stance_t::ALLY, "stances after loading");
+	save::SaveData bad;
+	std::string bad_text = text;
+	bad_text.replace(bad_text.find("stance = 1 neutral"), 18, "stance = 1 friend!");
+	check(not save::parse(bad_text, bad, error), "an unknown stance is rejected");
+
+	// trade with the market of an ally
+	World t{opt, quiet_map()};
+	t.advance(0.5);
+	auto tc = t.state->get_combat();
+	auto s = scene_spot(t, 8.0, -8.0);
+	auto home = t.spawn_at(0, ge("market", "Market"), s.first, s.second);
+	const auto far_spot = t.land_near(s.first + 8.0, s.second + 14.0, 8).value_or(std::pair{s.first + 8.0, s.second + 14.0});
+	auto partner = t.spawn_at(1, ge("market", "Market"), far_spot.first, far_spot.second);
+	auto trader = t.unit_near(0, "trade_cart", "TradeCart", s.first + 3.5, s.second);
+	if (home == nullptr or partner == nullptr or trader == nullptr) {
+		check(false, "scene for the allied trade");
+		return;
+	}
+	t.advance(0.3);
+	check(not t.special()->order_trade(t.state, trader->get_id(), partner->get_id(), t.now).empty(), "no trade with an enemy");
+	tc->set_stance(0, 1, stance_t::ALLY);
+	tc->set_stance(1, 0, stance_t::ALLY);
+	check(t.special()->order_trade(t.state, trader->get_id(), partner->get_id(), t.now).empty(), "trade with an ally");
+	const auto gold0 = t.resource(0, resource_t::GOLD);
+	const auto gold1 = t.resource(1, resource_t::GOLD);
+	check(t.advance_until(60.0, [&]() { return t.resource(0, resource_t::GOLD) > gold0; }), "the trade with the ally brings gold");
+	check(t.resource(1, resource_t::GOLD) == gold1, "the gold goes to the owner of the cart");
+	tc->set_stance(0, 1, stance_t::ENEMY);
+	check(t.advance_until(5.0, [&]() { return not t.special()->get_job_target(trader->get_id()).has_value(); }), "the end of the alliance ends the route");
+}
+
 void check_save_converting(const Options &opt) {
 	std::cout << "== S12 Spielstand während einer Konvertierung" << std::endl;
 	World w{opt, quiet_map()};
@@ -1476,7 +1583,7 @@ void check_save(const Options &opt) {
 
 	auto data = save::capture(w.state, w.settings, w.game->get_generated_entity_range(), w.now, "W6");
 	const auto text = save::serialize(data);
-	check(text.find("version = 8") != std::string::npos and text.find("relics = 1") != std::string::npos,
+	check(text.find("version = 9") != std::string::npos and text.find("relics = 1") != std::string::npos,
 	      "save version 6 with relics on the map");
 	for (const auto &key : {"faith = ", "relic_carry = ", "relic_store = ", "siege_mode = unpacked"}) {
 		check(text.find(key) != std::string::npos, std::string{"key '"} + key + "' stored");
@@ -1523,7 +1630,7 @@ void check_save(const Options &opt) {
 	check(count(again) == count(data), "W6 keys after save -> load -> save (" + std::to_string(count(again)) + ")");
 	// version 5 file: no relics on its map
 	std::string v5 = text;
-	v5.replace(v5.find("version = 8"), 11, "version = 5");
+	v5.replace(v5.find("version = 9"), 11, "version = 5");
 	v5.erase(v5.find("relics = 1\n"), 11);
 	save::SaveData old;
 	check(save::parse(v5, old, error) and not old.map.relics, "version 5 file parses, map without relics");
@@ -1633,6 +1740,9 @@ int main(int argc, char **argv) {
 		}
 		if (only.empty() or only == "trade") {
 			check_trade(opt);
+		}
+		if (only.empty() or only == "diplomacy") {
+			check_diplomacy(opt);
 		}
 		if (only.empty() or only == "monks") {
 			check_monks(opt);

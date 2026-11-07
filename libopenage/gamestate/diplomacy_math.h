@@ -3,6 +3,7 @@
 #pragma once
 
 #include <algorithm>
+#include <string>
 
 
 namespace openage::gamestate::diplomacy {
@@ -20,6 +21,28 @@ namespace openage::gamestate::diplomacy {
 
 /// stance of one player towards the owner of an object (spec 06)
 enum class stance_t { ALLY, NEUTRAL, ENEMY };
+
+/// word of a stance in save games
+inline const char *stance_name(stance_t stance) {
+	return stance == stance_t::ALLY ? "ally" : stance == stance_t::NEUTRAL ? "neutral" : "enemy";
+}
+
+/// stance of a word in a save game, false for an unknown word
+inline bool parse_stance(const std::string &word, stance_t &stance) {
+	if (word == "ally") {
+		stance = stance_t::ALLY;
+	}
+	else if (word == "neutral") {
+		stance = stance_t::NEUTRAL;
+	}
+	else if (word == "enemy") {
+		stance = stance_t::ENEMY;
+	}
+	else {
+		return false;
+	}
+	return true;
+}
 
 // ------------------------------------------------------------- target choice
 

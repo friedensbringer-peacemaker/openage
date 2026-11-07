@@ -991,7 +991,7 @@ void check_save(const Options &opt) {
 	check(queued >= 5, "wall drag in work (" + std::to_string(queued) + " queued)");
 	auto data = save::capture(w.state, w.settings, w.game->get_generated_entity_range(), w.now, "W5");
 	const auto text = save::serialize(data);
-	check(text.find("version = 8") != std::string::npos, "save version 8");
+	check(text.find("version = 9") != std::string::npos, "save version 9");
 	check(text.find("gate_dir = ") != std::string::npos and text.find("gate_locked = 1") != std::string::npos, "gate stored");
 	check(text.find("wall_queue = ") != std::string::npos, "wall drag stored");
 	save::SaveData parsed;
@@ -1038,7 +1038,7 @@ void check_save(const Options &opt) {
 	check(again.find("gate_locked = 1") != std::string::npos, "gate lock after save -> load -> save");
 	// version 5 file: loads without W5 keys
 	std::string v5 = text;
-	v5.replace(v5.find("version = 8"), 11, "version = 5");
+	v5.replace(v5.find("version = 9"), 11, "version = 5");
 	save::SaveData old;
 	check(save::parse(v5, old, error), "version 5 file parses: " + error);
 }

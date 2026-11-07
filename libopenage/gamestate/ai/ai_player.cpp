@@ -256,6 +256,10 @@ AiPlayer::World AiPlayer::observe(const std::shared_ptr<GameState> &state, const
 		seen.siege = st != nullptr and st->siege;
 
 		if (owner != this->player) {
+			// XR fork W7: allies are no targets of the army
+			if (state->get_combat()->stance(this->player, owner) == diplomacy::stance_t::ALLY) {
+				continue;
+			}
 			// vision (XR fork): enemies in sight and remembered buildings (start town centres) only
 			if (vision and not vision->knows(this->player, id, seen.ne, seen.se, seen.building ? seen.radius : 0.0, seen.building)) {
 				continue;
