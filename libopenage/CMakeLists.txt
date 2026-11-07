@@ -577,6 +577,12 @@ if(OPENAGE_NATIVE_ENTRY)
 	target_include_directories(openage-trade-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 	add_test(NAME openage-trade-check COMMAND openage-trade-check)
 	# ---- end XR fork W7 ----
+	# ---- XR fork W8: victory and defeat ----
+	# host test: conquest defeat, wonder countdown, relics (dependency-free, parameter sweep)
+	add_executable(openage-victory-check gamestate/victory_check.cpp)
+	target_include_directories(openage-victory-check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+	add_test(NAME openage-victory-check COMMAND openage-victory-check)
+	# ---- end XR fork W8 ----
 endif()
 
 # XR fork: the in-engine UI (libopenage/ui/agesxr) logs via __android_log_print
