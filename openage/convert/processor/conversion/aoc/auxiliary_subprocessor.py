@@ -944,25 +944,31 @@ class AoCXrSubprocessor:
         ability_raw_api_object.add_raw_member("variants", variants, "engine.xr.ability.GenieUnit")
         ability_raw_api_object.add_raw_member("line_unit_ids", line_unit_ids, "engine.xr.ability.GenieUnit")
 
-        # the other form of a transform group (trebuchet: unpacked) stands with its own graphic
+        # the other form of a transform group (trebuchet: unpacked) stands and dies with its own graphics
         form_overrides = []
+        form_graphics = []
         if transform_unit is not None:
-            form_idle_id = transform_unit["idle_graphic0"].value
-            if form_idle_id > -1 and form_idle_id != genie_unit["idle_graphic0"].value:
+            form_graphics = [
+                ("idle_graphic0", "Idle", "FormIdleOverride", "idle_form_override_"),
+                ("dying_graphic", "Death", "FormDeathOverride", "death_form_override_"),
+            ]
+        for member, form_ability, override_name, filename_prefix in form_graphics:
+            form_graphic_id = transform_unit[member].value
+            if form_graphic_id > -1 and form_graphic_id != genie_unit[member].value:
                 # pylint: disable=import-outside-toplevel,cyclic-import
                 from .ability_subprocessor import AoCAbilitySubprocessor
 
-                override_ref = f"{ability_ref}.FormIdleOverride"
-                override_raw_api_object = RawAPIObject(override_ref, "FormIdleOverride", dataset.nyan_api_objects)
+                override_ref = f"{ability_ref}.{override_name}"
+                override_raw_api_object = RawAPIObject(override_ref, override_name, dataset.nyan_api_objects)
                 override_raw_api_object.add_raw_parent("engine.util.animation_override.AnimationOverride")
                 override_raw_api_object.set_location(ForwardRef(line, ability_ref))
                 line.add_raw_api_object(override_raw_api_object)
                 origin = "engine.util.animation_override.AnimationOverride"
-                override_raw_api_object.add_raw_member("ability", ForwardRef(line, f"{entity_ref}.Idle"), origin)
+                override_raw_api_object.add_raw_member("ability", ForwardRef(line, f"{entity_ref}.{form_ability}"), origin)
                 override_raw_api_object.add_raw_member(
                     "animations",
                     [AoCAbilitySubprocessor.create_animation(
-                        line, form_idle_id, override_ref, "Idle", "idle_form_override_"
+                        line, form_graphic_id, override_ref, form_ability, filename_prefix
                     )],
                     origin,
                 )
