@@ -262,6 +262,8 @@ struct QueueState {
 /// state for the HUD, refreshed by the simulation thread
 struct Snapshot {
 	player_id_t player = 0;
+	/// XR fork W7: the other players and the stance towards them (diplomacy::stance_t as int), sorted
+	std::vector<std::pair<player_id_t, int>> stances{};
 	/// simulation time (seconds)
 	double time = 0.0;
 	resource_amounts_t resources{};
@@ -361,6 +363,13 @@ public:
 
 	/// latest state (copy)
 	Snapshot snapshot() const;
+
+	/**
+	 * XR fork W7: the player changes the stance towards \p other (diplomacy::stance_t as
+	 * int). Every other player is a computer without a diplomacy of its own yet, it answers
+	 * with the same stance (assumption until W9). Executed in the simulation thread.
+	 */
+	void request_stance(player_id_t other, int stance);
 
 	/// player controlled by the HUD (default 0)
 	void set_player(player_id_t player);
@@ -557,6 +566,7 @@ private:
 	player_id_t player = 0;
 	std::vector<entity_id_t> selection;
 	std::vector<Request> requests;
+	std::vector<std::pair<player_id_t, int>> stance_requests;
 	std::string placement;
 	Snapshot current;
 	bool dirty = true;

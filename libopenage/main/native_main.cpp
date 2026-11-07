@@ -2115,7 +2115,26 @@ std::vector<openage::renderer::opengl::TestFrameSink::Step> food_replay_steps(co
 		click(73.3, pixel((*market2)[0], (*market2)[1], 0.5), E::kRightButton);
 		capture(75.0, "-s13-handel");
 		capture(92.0, "-s14-gold");
-		capture(92.5, nullptr);
+		// W7: game menu, page Diplomatie, the first stance one step on, page Neue Karte
+		add(92.5, E::kKeyDown, 0, 0, 0, 0, 0x01000000);
+		add(92.55, E::kKeyUp, 0, 0, 0, 0, 0x01000000);
+		agesxr::AoeUi dialogs;
+		dialogs.resize(width, height);
+		dialogs.openMenu(true, 0.0);
+		const auto diplomacy_row = dialogs.dialogRowRect(agesxr::AoeUi::kMainDiplomacy);
+		const auto new_map_row = dialogs.dialogRowRect(agesxr::AoeUi::kMainNewMap);
+		dialogs.menu().stanceCount = 1;
+		dialogs.menu().page = agesxr::AoeMenuModel::kDiplomacy;
+		const auto stance_arrow = dialogs.dialogArrowRect(0, true);
+		const auto stance_back = dialogs.dialogRowRect(1);
+		click(93.0, {diplomacy_row.cx(), diplomacy_row.cy()}, E::kLeftButton);
+		capture(93.6, "-s15-diplomatie");
+		click(93.8, {stance_arrow.cx(), stance_arrow.cy()}, E::kLeftButton);
+		capture(94.4, "-s16-verbuendet");
+		click(94.6, {stance_back.cx(), stance_back.cy()}, E::kLeftButton);
+		click(95.0, {new_map_row.cx(), new_map_row.cy()}, E::kLeftButton);
+		capture(95.6, "-s17-neue-karte");
+		capture(96.0, nullptr);
 		return steps;
 	}
 	if (args.replay_fish) {

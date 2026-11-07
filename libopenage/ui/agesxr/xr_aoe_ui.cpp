@@ -234,7 +234,9 @@ AoeUi::Rect AoeUi::contextItemRect(int index) const {
 
 AoeUi::Rect AoeUi::dialogRect() const {
     if (!mMenu.open || !mCanvas) return {};
-    const int w = px(mMenu.page == AoeMenuModel::kNewMap || slotPage(mMenu.page) ? kDlgWWide : kDlgW), h = px(kDlgH);
+    // „Neue Karte“: 11 Zeilen (W7 Spieler, Teams) brauchen 2 × 58 mehr Höhe
+    const int w = px(mMenu.page == AoeMenuModel::kNewMap || slotPage(mMenu.page) ? kDlgWWide : kDlgW),
+              h = px(mMenu.page == AoeMenuModel::kNewMap ? kDlgH + 116 : kDlgH);
     const int x0 = (width() - w) / 2, y0 = std::max(px(kTopH + 8), (height() - h) / 2);
     return r4(x0, y0, x0 + w, y0 + h);
 }
@@ -250,6 +252,7 @@ int AoeUi::dialogRowCount() const {
     switch (mMenu.page) {
     case AoeMenuModel::kSettings: return kSetCount;
     case AoeMenuModel::kNewMap: return kNewCount;
+    case AoeMenuModel::kDiplomacy: return mMenu.stanceCount + 1;  // + „‹ Zurück“
     case AoeMenuModel::kSave:
     case AoeMenuModel::kLoad:
         return std::min(static_cast<int>(mMenu.slot_list.size()), kAoeSlotsMax) + 1;  // + „‹ Zurück“
@@ -266,9 +269,11 @@ AoeUi::Rect AoeUi::dialogRowRect(int row) const {
     // „Neue Karte“: 9 Zeilen (W1 Kulturen, W2 Sicht) – Abstand 58, Zeile 52 (≥ 48 px, Pfeile 48), endet 20 px
     // über dem Dialogrand (die Hinweiszeile steht nur im Hauptmenü)
     const bool new_map = mMenu.page == AoeMenuModel::kNewMap;
-    const int pitch = slot_list ? px(64) : new_map ? px(58) : px(kDlgPitch);
+    // W7 Diplomatie: bis zu 8 Zeilen wie die Slot-Seiten; Hauptmenü: 7 Zeilen, Abstand 68 (endet über der Hinweiszeile)
+    const bool compact = slot_list || mMenu.page == AoeMenuModel::kDiplomacy;
+    const int pitch = compact ? px(64) : new_map ? px(58) : mMenu.page == AoeMenuModel::kMain ? px(68) : px(kDlgPitch);
     const int y0 = d.y0 + px(kDlgRowsY + 8) + row * pitch;
-    Rect r = r4(d.cx() - w / 2, y0, d.cx() + w / 2, y0 + (slot_list ? px(56) : new_map ? px(52) : px(kDlgBtnH)));
+    Rect r = r4(d.cx() - w / 2, y0, d.cx() + w / 2, y0 + (compact ? px(56) : new_map ? px(52) : px(kDlgBtnH)));
     if (mMenu.page == AoeMenuModel::kMain && row == kMainSave && mMenu.loadAvailable) r.x1 = r.cx() - px(4);
     return r;
 }
@@ -276,13 +281,14 @@ AoeUi::Rect AoeUi::dialogRowRect(int row) const {
 AoeUi::Rect AoeUi::dialogLoadRect() const {
     if (!mMenu.open || mMenu.page != AoeMenuModel::kMain || !mMenu.loadAvailable) return {};
     const Rect d = dialogRect();
-    const int w = px(kDlgBtnW), y0 = d.y0 + px(kDlgRowsY + 8) + kMainSave * px(kDlgPitch);
+    const int w = px(kDlgBtnW), y0 = d.y0 + px(kDlgRowsY + 8) + kMainSave * px(68);
     return r4(d.cx() + px(4), y0, d.cx() + w / 2, y0 + px(kDlgBtnH));
 }
 
 bool AoeUi::dialogRowIsValue(int row) const {
     if (mMenu.page == AoeMenuModel::kSettings) return row != kSetBack;
     if (mMenu.page == AoeMenuModel::kNewMap) return row <= kNewVision;
+    if (mMenu.page == AoeMenuModel::kDiplomacy) return row < mMenu.stanceCount;
     return false;
 }
 
@@ -324,11 +330,16 @@ std::string AoeUi::dialogRowLabel(int row) const {
         case kSetBack: return "‹ Zurück";
         default: return "";
         }
+    case AoeMenuModel::kDiplomacy:
+        if (row >= mMenu.stanceCount) return "‹ Zurück";
+        return "Spieler " + std::to_string(mMenu.stancePlayer[static_cast<size_t>(row)] + 1);
     case AoeMenuModel::kNewMap:
         switch (row) {
         case kNewBiome: return "Landschaft";
         case kNewSize: return "Kartengröße";
         case kNewOpponent: return "Gegner";
+        case kNewPlayers: return "Spieler";
+        case kNewTeams: return "Teams";
         case kNewSeed: return "Kartennummer";
         case kNewCiv: return "Deine Kultur";
         case kNewAiCiv: return "Kultur Gegner";
@@ -342,6 +353,7 @@ std::string AoeUi::dialogRowLabel(int row) const {
         case kMainResume: return "Weiterspielen";
         case kMainSave: return mMenu.saveAvailable ? "Speichern …" : "Speichern (folgt)";
         case kMainSettings: return "Einstellungen ›";
+        case kMainDiplomacy: return "Diplomatie ›";
         case kMainNewMap: return "Neue Karte ›";
         case kMainSurrender: return mMenu.confirmSurrender ? "Sicher? Nochmal klicken" : "Partie aufgeben";
         case kMainClose: return "Schließen";
@@ -361,8 +373,14 @@ std::string AoeUi::dialogRowValue(int row) const {
         default: return "";
         }
     }
+    if (mMenu.page == AoeMenuModel::kDiplomacy) {
+        if (row >= mMenu.stanceCount) return "";
+        return kAoeDiploLabels[clampi(mMenu.stanceValue[static_cast<size_t>(row)], 0, kAoeDiploCount - 1)];
+    }
     if (mMenu.page == AoeMenuModel::kNewMap) {
         switch (row) {
+        case kNewPlayers: return std::to_string(mMenu.players);
+        case kNewTeams: return kAoeTeamsLabels[clampi(mMenu.teams, 0, kAoeTeamsCount - 1)];
         case kNewBiome: return kGameUiBiomeLabels[clampi(mMenu.biome, 0, kGameUiBiomeCount - 1)];
         case kNewSize: {
             const int t = kGameUiSizeTiles[clampi(mMenu.size, 0, kGameUiSizeCount - 1)];
@@ -511,7 +529,14 @@ AoeUi::Result AoeUi::stepValue(int row, int dir, double now) {
     } else if (mMenu.page == AoeMenuModel::kNewMap) {
         switch (row) {
         case kNewBiome: mMenu.biome = (mMenu.biome + dir + kGameUiBiomeCount) % kGameUiBiomeCount; break;
-        case kNewSize: mMenu.size = clampi(mMenu.size + dir, 0, kGameUiSizeCount - 1); break;
+        case kNewSize:
+            mMenu.size = clampi(mMenu.size + dir, 0, kGameUiSizeCount - 1);
+            mMenu.players = clampi(mMenu.players, 2, aoeMaxPlayers(kGameUiSizeTiles[mMenu.size]));
+            break;
+        case kNewPlayers:
+            mMenu.players = clampi(mMenu.players + dir, 2, aoeMaxPlayers(kGameUiSizeTiles[clampi(mMenu.size, 0, kGameUiSizeCount - 1)]));
+            break;
+        case kNewTeams: mMenu.teams = (mMenu.teams + dir + kAoeTeamsCount) % kAoeTeamsCount; break;
         case kNewOpponent: mMenu.opponent = clampi(mMenu.opponent + dir, 0, kGameUiOpponentCount - 1); break;
         case kNewSeed: mMenu.seed = clampi(mMenu.seed + dir, kGameUiSeedMin, kGameUiSeedMax); break;
         case kNewCiv: mMenu.civ = (civChoiceClamp(mMenu.civ) + dir + kCivChoiceCount) % kCivChoiceCount; break;
@@ -519,6 +544,12 @@ AoeUi::Result AoeUi::stepValue(int row, int dir, double now) {
         case kNewVision: mMenu.vision = (mMenu.vision + dir + kAoeVisionCount) % kAoeVisionCount; break;
         default: break;
         }
+    } else if (mMenu.page == AoeMenuModel::kDiplomacy && row < mMenu.stanceCount) {
+        auto& value = mMenu.stanceValue[static_cast<size_t>(row)];
+        value = (clampi(value, 0, kAoeDiploCount - 1) + dir + kAoeDiploCount) % kAoeDiploCount;
+        r.action = Action::kStanceChanged;
+        r.index = mMenu.stancePlayer[static_cast<size_t>(row)];
+        r.id = value;
     }
     return r;
 }
@@ -583,6 +614,9 @@ AoeUi::Result AoeUi::dialogClick(const HitState& h, double now) {
     case AoeMenuModel::kSettings:
         if (row == kSetBack) mMenu.page = AoeMenuModel::kMain;
         break;
+    case AoeMenuModel::kDiplomacy:
+        if (row >= mMenu.stanceCount) mMenu.page = AoeMenuModel::kMain;
+        break;
     case AoeMenuModel::kNewMap:
         if (row == kNewBack) mMenu.page = AoeMenuModel::kMain;
         else if (row == kNewStart) {
@@ -604,6 +638,7 @@ AoeUi::Result AoeUi::dialogClick(const HitState& h, double now) {
             r.action = Action::kSlotsShown;
             break;
         case kMainSettings: mMenu.page = AoeMenuModel::kSettings; mMenu.confirmSurrender = false; break;
+        case kMainDiplomacy: mMenu.page = AoeMenuModel::kDiplomacy; mMenu.confirmSurrender = false; break;
         case kMainNewMap: mMenu.page = AoeMenuModel::kNewMap; mMenu.confirmSurrender = false; break;
         case kMainSurrender:
             if (mMenu.confirmSurrender) {
@@ -1390,6 +1425,7 @@ void AoeUi::drawDialog() {
     mSkin->drawPanel(*mCanvas, SkinPanel::kTitlePlate, t, s);
     const char* title = mMenu.page == AoeMenuModel::kSettings ? "Einstellungen"
                         : mMenu.page == AoeMenuModel::kNewMap ? "Neue Karte"
+                        : mMenu.page == AoeMenuModel::kDiplomacy ? "Diplomatie"
                         : mMenu.page == AoeMenuModel::kSave   ? "Speichern"
                         : mMenu.page == AoeMenuModel::kLoad   ? "Laden"
                                                               : "Spielmenü";
@@ -1397,6 +1433,7 @@ void AoeUi::drawDialog() {
     // Hinweiszeile
     std::string info = mMenu.page == AoeMenuModel::kNewMap ? "Startet die Partie neu (laufende Partie geht verloren)"
                        : mMenu.page == AoeMenuModel::kSettings ? "Spieltempo, Beschriftung, Hotkeys, Meldungen"
+                       : mMenu.page == AoeMenuModel::kDiplomacy ? "Haltung zu jedem Mitspieler, der Computer antwortet gleich"
                        : mMenu.page == AoeMenuModel::kSave     ? "Platz wählen – belegte Plätze werden überschrieben"
                        : mMenu.page == AoeMenuModel::kLoad     ? "Spielstand wählen – die laufende Partie geht verloren"
                        : mMenu.mapInfo;

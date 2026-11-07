@@ -1487,6 +1487,16 @@ void check_diplomacy(const Options &opt) {
 	check(t.resource(1, resource_t::GOLD) == gold1, "the gold goes to the owner of the cart");
 	tc->set_stance(0, 1, stance_t::ENEMY);
 	check(t.advance_until(5.0, [&]() { return not t.special()->get_job_target(trader->get_id()).has_value(); }), "the end of the alliance ends the route");
+
+	// the stance from the game menu: visible at once, the computer answers with the same stance
+	t.advance(0.5);
+	const auto before_menu = t.production->snapshot();
+	check(before_menu.stances.size() == 1 and before_menu.stances[0].first == 1, "the menu lists the other player, not gaia");
+	t.production->request_stance(1, static_cast<int>(stance_t::NEUTRAL));
+	check(t.production->snapshot().stances[0].second == static_cast<int>(stance_t::NEUTRAL), "the menu shows the new stance at once");
+	t.advance(0.3);
+	check(tc->stance(0, 1) == stance_t::NEUTRAL and tc->stance(1, 0) == stance_t::NEUTRAL, "the stance holds for both sides");
+	check(t.production->snapshot().stances[0].second == static_cast<int>(stance_t::NEUTRAL), "the menu keeps the stance after the update");
 }
 
 void check_players(const Options &opt) {

@@ -150,6 +150,9 @@ AoeUiController::AoeUiController(const gamestate::MapSettings &map,
 	menu.vision = map.type == gamestate::map_type_t::RANDOM
 	                  ? std::clamp(static_cast<int>(map.vision), 0, agesxr::kAoeVisionCount - 1)
 	                  : 0;
+	// XR fork W7: players and teams of the last game
+	menu.players = static_cast<int>(gamestate::map_players(map.players, map.size));
+	menu.teams = map.teams.empty() ? 0 : 1;
 	menu.speed = 1;
 	if (this->hooks.clock) {
 		double speed = this->hooks.clock->get_speed().to_double();
@@ -215,7 +218,15 @@ void AoeUiController::poll(double now) {
 	}
 	this->info = sample.info;
 	if (this->hooks.production and sample.info.game) {
-		sample.prod = prod_to_hud(this->hooks.production->snapshot());
+		const auto snap = this->hooks.production->snapshot();
+		sample.prod = prod_to_hud(snap);
+		// XR fork W7: the page Diplomatie shows the stances of the simulation
+		auto &dialog = this->aoe_ui.menu();
+		dialog.stanceCount = std::min(static_cast<int>(snap.stances.size()), agesxr::kAoeStancesMax);
+		for (int i = 0; i < dialog.stanceCount; ++i) {
+			dialog.stancePlayer[static_cast<size_t>(i)] = static_cast<int>(snap.stances[static_cast<size_t>(i)].first);
+			dialog.stanceValue[static_cast<size_t>(i)] = snap.stances[static_cast<size_t>(i)].second;
+		}
 	}
 	// autosave (game time; not while paused, not twice per interval)
 	if (sample.info.game and this->hooks.save_slot and not this->match_over
@@ -947,6 +958,14 @@ void AoeUiController::handle(const agesxr::AoeUi::Result &result, double now) {
 		log::log(INFO << "UI: settings labels " << menu.labels << ", hotkeys " << menu.hotkeys << ", messages "
 		              << menu.messages);
 		break;
+	case Action::kStanceChanged:
+		log::log(INFO << "UI: stance towards player " << result.index << " set to "
+		              << agesxr::kAoeDiploLabels[std::clamp(result.id, 0, agesxr::kAoeDiploCount - 1)]);
+		if (this->hooks.production) {
+			this->hooks.production->request_stance(static_cast<gamestate::player_id_t>(result.index), result.id);
+		}
+		this->last_poll = -1.0;
+		break;
 	case Action::kNewMap: {
 		auto settings = this->menu_map_settings();
 		log::log(INFO << "UI: new map requested: " << gamestate::map_biome_name(settings.biome) << " " << settings.size
@@ -1080,7 +1099,17 @@ gamestate::MapSettings AoeUiController::menu_map_settings() const {
 	settings.ai.mode = menu.opponent == 0 ? gamestate::ai_mode_t::OFF : gamestate::ai_mode_t::ON;
 	settings.ai.difficulty = menu.opponent == 2 ? gamestate::ai_difficulty_t::NORMAL : gamestate::ai_difficulty_t::EASY;
 	// XR fork W1: civilisation of the player and of the opponent ("random": from the map seed)
-	settings.civs = {agesxr::civChoiceName(menu.civ), agesxr::civChoiceName(menu.aiCiv)};
+	// XR fork W7: all computers have the same choice, teams are the two sides of the map
+	settings.players = gamestate::map_players(static_cast<size_t>(std::max(menu.players, 2)), settings.size);
+	settings.civs = {agesxr::civChoiceName(menu.civ)};
+	settings.civs.resize(settings.players, agesxr::civChoiceName(menu.aiCiv));
+	settings.teams.clear();
+	if (menu.teams == 1) {
+		for (size_t p = 0; p < settings.players; ++p) {
+			settings.teams.push_back(static_cast<int>(p % 2) + 1);
+		}
+	}
+	settings.ai.player.reset();
 	settings.vision = static_cast<gamestate::vision_mode_t>(std::clamp(menu.vision, 0, agesxr::kAoeVisionCount - 1));
 	return settings;
 }

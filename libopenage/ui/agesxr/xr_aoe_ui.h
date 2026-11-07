@@ -54,6 +54,7 @@ public:
         kFocusOrder,       // index = Bestellung (Kamera zum Gebäude, auswählen)
         kBoardNewMap,      // Sieg-Tafel „Neue Karte ›“ → Spielmenü-Seite Neue Karte
         kBoardClosed,      // Sieg-Tafel „Schließen“
+        kStanceChanged,    // W7: index = Mitspieler, id = neue Haltung
         kMinimapJump,      // (S3) Klick auf die Raute: fx/fy = Kartenanteile
     };
     struct Result {
@@ -74,11 +75,14 @@ public:
     };
 
     // Zeilen des Spielmenüs je Seite (dialogRowRect(index))
-    enum MainRow { kMainResume = 0, kMainSave, kMainSettings, kMainNewMap, kMainSurrender, kMainClose, kMainCount };
+    enum MainRow {
+        kMainResume = 0, kMainSave, kMainSettings, kMainDiplomacy, kMainNewMap, kMainSurrender, kMainClose, kMainCount
+    };
     enum SettingsRow { kSetSpeed = 0, kSetLabels, kSetHotkeys, kSetMessages, kSetBack, kSetCount };
     // W1: Kultur des Spielers und des Gegners (xr_civs.h), W2: Sicht
     enum NewMapRow {
-        kNewBiome = 0, kNewSize, kNewOpponent, kNewSeed, kNewCiv, kNewAiCiv, kNewVision, kNewStart, kNewBack, kNewCount
+        kNewBiome = 0, kNewSize, kNewOpponent, kNewPlayers, kNewTeams, kNewSeed, kNewCiv, kNewAiCiv, kNewVision,
+        kNewStart, kNewBack, kNewCount
     };
     static constexpr int kBoardButtons = 2;  // Neue Karte ›, Schließen
 

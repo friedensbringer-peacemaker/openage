@@ -29,6 +29,7 @@
 #include "gamestate/building_place.h"
 #include "gamestate/buildings.h"
 #include "gamestate/combat/combat_state.h"
+#include "gamestate/special.h"
 #include "gamestate/api/animation.h"
 #include "gamestate/api/property.h"
 #include "gamestate/api/types.h"
@@ -1311,6 +1312,18 @@ std::string entity_name(const std::shared_ptr<GameEntity> &entity) {
 
 // --- Production: thread-safe interface ---
 
+void Production::request_stance(player_id_t other, int stance) {
+	std::lock_guard<std::mutex> lock{this->mutex};
+	this->stance_requests.emplace_back(other, stance);
+	// the menu reads the latest state before the simulation thread has run: no jump back to the old stance
+	for (auto &[id, value] : this->current.stances) {
+		if (id == other) {
+			value = stance;
+		}
+	}
+	this->dirty = true;
+}
+
 Snapshot Production::snapshot() const {
 	std::lock_guard<std::mutex> lock{this->mutex};
 	auto result = this->current;
@@ -1797,6 +1810,7 @@ void Production::update(const std::shared_ptr<GameState> &state,
                         const time::time_t &now) {
 	const double t = now.to_double();
 	std::vector<Request> todo;
+	std::vector<std::pair<player_id_t, int>> stance_todo;
 	std::vector<entity_id_t> selected;
 	player_id_t player_id;
 	bool was_dirty;
@@ -1806,8 +1820,15 @@ void Production::update(const std::shared_ptr<GameState> &state,
 		was_dirty = this->dirty;
 		this->dirty = false;
 		todo.swap(this->requests);
+		stance_todo.swap(this->stance_requests);
 		selected = this->selection;
 		player_id = this->player;
+	}
+	// XR fork W7: stances chosen in the game menu, the computer answers with the same stance
+	for (const auto &[other, stance] : stance_todo) {
+		const auto value = static_cast<diplomacy::stance_t>(std::clamp(stance, 0, 2));
+		state->get_combat()->set_stance(player_id, other, value);
+		state->get_combat()->set_stance(other, player_id, value);
 	}
 	// XR fork: ghost of the placement mode (own rate, independent of the tick)
 	this->update_placement_preview(state, now);
@@ -2489,6 +2510,16 @@ void Production::update(const std::shared_ptr<GameState> &state,
 	// --- snapshot ---
 	Snapshot snap;
 	snap.player = player_id;
+	// XR fork W7: everyone but gaia
+	if (auto special_state = state->get_special()) {
+		for (const auto &[pid, player_entity] : state->get_players()) {
+			(void)player_entity;
+			if (pid != player_id and not special_state->neutral_player(pid)) {
+				snap.stances.emplace_back(pid, static_cast<int>(state->get_combat()->stance(player_id, pid)));
+			}
+		}
+		std::sort(snap.stances.begin(), snap.stances.end());
+	}
 	snap.time = t;
 	if (state->has_player(player_id)) {
 		snap.resources = state->get_player(player_id)->get_resources().get();

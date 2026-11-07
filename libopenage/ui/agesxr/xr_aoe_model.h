@@ -6,6 +6,7 @@
 // Quest ebenso, weil die Oberfläche im Engine-Bild liegt (E3). Die XR-Schicht bekommt nur UiFeedback (Haptik).
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -186,9 +187,18 @@ struct AoeMessage {
     bool operator!=(const AoeMessage& o) const { return !(*this == o); }
 };
 
+// W7: Mitspieler auf der Seite Diplomatie (7 neben dem Spieler), Haltungen, Teams
+constexpr int kAoeStancesMax = 7;
+constexpr int kAoeDiploCount = 3;
+constexpr const char* kAoeDiploLabels[kAoeDiploCount] = {"Verbündet", "Neutral", "Feind"};
+constexpr int kAoeTeamsCount = 2;
+constexpr const char* kAoeTeamsLabels[kAoeTeamsCount] = {"Keine", "Zwei Teams"};
+// Spieler je Kartengröße wie gamestate::map_players: einer je 16 Kacheln Kantenlänge, 2 bis 8
+constexpr int aoeMaxPlayers(int tiles) { return tiles / 16 < 2 ? 2 : tiles / 16 > 8 ? 8 : tiles / 16; }
+
 // Spielmenü (Esc/F10/Y/Knopf „Menü“, Skizze 3) mit Unterseiten.
 struct AoeMenuModel {
-    enum Page { kMain = 0, kSettings, kNewMap, kSave, kLoad, kPageCount };
+    enum Page { kMain = 0, kSettings, kNewMap, kSave, kLoad, kDiplomacy, kPageCount };
     bool open = false;
     int page = kMain;
     bool confirmSurrender = false;  // „Partie aufgeben“ scharf (erster Klick)
@@ -204,6 +214,12 @@ struct AoeMenuModel {
     int biome = 0, size = 1, opponent = 1, seed = 1;
     int civ = kCivRandom, aiCiv = kCivRandom;  // W1: Kultur des Spielers und des Gegners (xr_civs.h, 0 = Zufall)
     int vision = 0;                 // Sicht (kAoeVisionLabels = gamestate::vision_mode_t)
+    int players = 2;                // W7: Spieler auf der Karte (2 … aoeMaxPlayers)
+    int teams = 0;                  // W7: 0 = keine, 1 = zwei Teams (je Kartenseite)
+    // W7 Diplomatie: Mitspieler und Haltung (0 Verbündet, 1 Neutral, 2 Feind = gamestate::diplomacy::stance_t)
+    int stanceCount = 0;
+    std::array<int, kAoeStancesMax> stancePlayer{};
+    std::array<int, kAoeStancesMax> stanceValue{};
     // Spielstand (0.6.0-xr.0.11, anderer Agent): verfügbar → Knöpfe aktiv, sonst „Speichern (folgt)“
     bool saveAvailable = false;
     bool loadAvailable = false;
@@ -214,7 +230,8 @@ struct AoeMenuModel {
                confirmSlot == o.confirmSlot && slot_list == o.slot_list && speed == o.speed &&
                labels == o.labels && hotkeys == o.hotkeys && messages == o.messages && biome == o.biome &&
                size == o.size && opponent == o.opponent && seed == o.seed && civ == o.civ && aiCiv == o.aiCiv &&
-               vision == o.vision && saveAvailable == o.saveAvailable &&
+               vision == o.vision && players == o.players && teams == o.teams && stanceCount == o.stanceCount &&
+               stancePlayer == o.stancePlayer && stanceValue == o.stanceValue && saveAvailable == o.saveAvailable &&
                loadAvailable == o.loadAvailable && quest == o.quest && mapInfo == o.mapInfo;
     }
     bool operator!=(const AoeMenuModel& o) const { return !(*this == o); }
